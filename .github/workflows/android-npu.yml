@@ -20,8 +20,8 @@ permissions:
 
 concurrency:
   group: android-npu-${{ github.ref }}
-  # Queue behind a running build instead of cancelling it.
-  cancel-in-progress: false
+  # A new push cancels the build that is still running for an older commit.
+  cancel-in-progress: true
 
 jobs:
   # A third-party image, so it runs in its own job without secrets; only the job below signs.

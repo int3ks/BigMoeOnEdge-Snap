@@ -11,8 +11,8 @@ permissions:
 
 concurrency:
   group: android-apk-${{ github.ref }}
-  # Queue behind a running build instead of cancelling it.
-  cancel-in-progress: false
+  # A new push cancels the build that is still running for an older commit.
+  cancel-in-progress: true
 
 jobs:
   apk:
