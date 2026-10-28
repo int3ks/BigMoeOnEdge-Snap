@@ -280,6 +280,8 @@ class ModelViewModel(
     fun updateDraftMax(v: Int) { viewModelScope.launch { settingsDataStore.updateDraftMax(v) } }
     fun updateMtpPMinPct(v: Int) { viewModelScope.launch { settingsDataStore.updateMtpPMinPct(v) } }
     fun updateSeparateMtpDraftEnabled(v: Boolean) { viewModelScope.launch { settingsDataStore.updateSeparateMtpDraftEnabled(v) } }
+    fun updateNgramMinMatch(v: Int) { viewModelScope.launch { settingsDataStore.updateNgramMinMatch(v) } }
+    fun updateNgramMaxMatch(v: Int) { viewModelScope.launch { settingsDataStore.updateNgramMaxMatch(v) } }
 
     fun setAutoLoad(enabled: Boolean) {
         viewModelScope.launch { settingsDataStore.updateAutoLoadLastModel(enabled) }

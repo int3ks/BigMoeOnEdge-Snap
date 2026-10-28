@@ -10,7 +10,6 @@ import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,8 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,7 +53,6 @@ import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.EngineState
 import com.bigmoe.onedge.core.ModelFile
 import com.bigmoe.onedge.core.ModelManager
-import com.bigmoe.onedge.core.SpecSource
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import com.bigmoe.onedge.data.local.datastore.loadConfigDiffers
 
@@ -329,6 +325,7 @@ fun ModelScreen(
             if (ui.models.isEmpty() && ui.incompleteImports.isEmpty()) {
                 item { Text("No models yet.", color = MaterialTheme.colorScheme.secondary) }
             }
+            item(key = "guess_ahead") { GuessAheadCard(settings, viewModel) }
             items(ui.models.filterNot { ModelManager.isProjectorName(it.name) }, key = { it.path }) { model ->
                 ModelRow(
                     model = model,
@@ -344,8 +341,7 @@ fun ModelScreen(
                         mtpPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     },
                     onRename = { viewModel.rename(model.path, it) },
-                    settings = settings,
-                    viewModel = viewModel
+                    settings = settings
                 )
             }
             // keeps the last row clear of the floating navigation bar
@@ -516,19 +512,11 @@ private fun ModelRow(
     onAttachDraft: (String?) -> Unit,
     onPickDraft: () -> Unit,
     onRename: (String) -> Unit,
-    settings: EngineSettings,
-    viewModel: ModelViewModel
+    settings: EngineSettings
 ) {
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember(model.path, model.displayName) { mutableStateOf(model.displayName) }
-    // MTP is optional and most people never use it, so its section stays folded until the arrow is pressed.
-    var mtpExpanded by remember(model.path) { mutableStateOf(false) }
     val attachedName = drafts.firstOrNull { it.path == attachedDraftPath }?.name
-    val mtpSummary = when (mtpMode(settings)) {
-        MtpMode.OWN_HEAD -> "On \u2022 model's own head \u2022 ${settings.draftMax} tokens/pass"
-        MtpMode.DRAFTER -> "On \u2022 drafter: ${attachedName ?: "none attached"} \u2022 ${settings.draftMax} tokens/pass"
-        MtpMode.OFF -> if (settings.spec == SpecSource.NGRAM) "Off (n-gram guess-ahead is on)" else "Off"
-    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -541,7 +529,7 @@ private fun ModelRow(
                 } else {
                     TextButton(onClick = onLoad, enabled = !busy) { Text("Load") }
                 }
-                // Rename renames the model itself, so it lives here and not inside the (optional) MTP section.
+                // Rename renames the model itself, so it lives here and not beside the drafter.
                 IconButton(onClick = { renameDialog = true }) {
                     Icon(Icons.Default.Edit, contentDescription = "Rename model")
                 }
@@ -549,25 +537,9 @@ private fun ModelRow(
                     Icon(Icons.Default.Delete, contentDescription = "Remove model")
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { mtpExpanded = !mtpExpanded }.padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("MTP draft", style = MaterialTheme.typography.labelMedium)
-                    Text(mtpSummary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Icon(
-                    imageVector = if (mtpExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (mtpExpanded) "Collapse MTP draft" else "Expand MTP draft",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            if (mtpExpanded) {
-                MtpSettingsPanel(
-                    settings = settings, viewModel = viewModel, drafts = drafts, attachedName = attachedName,
-                    onAttachDraft = onAttachDraft, onPickDraft = onPickDraft
-                )
+            // Guess-ahead settings apply to every model (card above the list); only the drafter file is per model.
+            if (guessMode(settings) == GuessMode.MTP_DRAFTER || attachedName != null) {
+                DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
             }
             if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
         }

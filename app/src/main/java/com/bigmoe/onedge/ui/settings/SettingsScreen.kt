@@ -90,9 +90,6 @@ private object Choices {
     val BATCH_WIDTH = listOf(32, 64, 128, 256, 384, 512, 768, 1024, 1536, 2048)
     val NPU_MIN_TOKENS = listOf(8, 16, 32, 64, 128, 256)
     val NPU_ROUTED_FULL_PCT = listOf(50, 70, 85, 95, 100)
-    val NGRAM_MIN = listOf(1, 2, 3, 4, 5, 6, 8, 12)
-    val NGRAM_MAX = listOf(3, 4, 6, 8, 12, 16, 24, 32, 48, 64)
-    val DRAFT_MAX = listOf(1, 2, 3, 4, 5, 6, 7, 8)
     val NPREDICT = listOf(16, 32, 48, 64, 128, 256, 512, 1024, 2048, 4096, -1)
     val IMAGE_DIM = listOf(256, 384, 512, 768, 1024, 1344)
     val VIDEO_FRAMES = listOf(1, 2, 4, 6, 8, 12, 16)
@@ -545,40 +542,8 @@ private fun SettingsContent(
                     enabled = stream && cacheOn && settings.overlap
                 ) { viewModel.updateIoTwoWave(it) }
                 Spacer(Modifier.height(8.dp))
-                Section("Speculation and routing")
-                // MTP (on/off, drafter, tokens per pass) lives on the Models page; only n-gram guessing is set here.
-                ChoiceSetting(
-                    "Guess ahead from repeated text (n-gram)",
-                    listOf(SpecSource.OFF to "Off", SpecSource.NGRAM to "On") +
-                        (if (settings.spec == SpecSource.MTP) listOf(SpecSource.MTP to "Off (MTP is on)") else emptyList()),
-                    settings.spec,
-                    enabled = settings.routeAhead == 0 && !settings.rowStream
-                ) { if (it != SpecSource.MTP) viewModel.updateSpec(it) }
-                Hint("Drafts the next tokens from text that already appeared and verifies them together; only helps when text repeats. Forces greedy decoding (temperature 0). MTP is set per model on the Models page under \"MTP draft\"; turning n-gram on replaces MTP.")
-                if (settings.spec == SpecSource.NGRAM) {
-                    ChoiceSetting("Tokens guessed per pass", Choices.DRAFT_MAX.map { it to it.toString() }, settings.draftMax) {
-                        viewModel.updateDraftMax(it)
-                    }
-                }
-                if (settings.spec == SpecSource.NGRAM) {
-                    ChoiceSetting(
-                        "N-gram minimum match",
-                        Choices.NGRAM_MIN.filter { it <= settings.ngramMaxMatch }.map { it to "$it tokens" },
-                        settings.ngramMinMatch.coerceAtMost(settings.ngramMaxMatch)
-                    ) {
-                        viewModel.updateNgramMinMatch(it)
-                        if (it > settings.ngramMaxMatch) viewModel.updateNgramMaxMatch(it)
-                    }
-                    ChoiceSetting(
-                        "N-gram maximum match",
-                        Choices.NGRAM_MAX.filter { it >= settings.ngramMinMatch }.map { it to "$it tokens" },
-                        settings.ngramMaxMatch.coerceAtLeast(settings.ngramMinMatch)
-                    ) {
-                        viewModel.updateNgramMaxMatch(it)
-                        if (it < settings.ngramMinMatch) viewModel.updateNgramMinMatch(it)
-                    }
-                    Hint("Minimum controls how exact a repeated suffix must be before drafting. Maximum bounds the lookup work; long matches are not always more useful.")
-                }
+                Section("Prefetch and routing")
+                Hint("Guess ahead (MTP and n-gram) is set per model on the Models page under \"Guess ahead\".")
                 ChoiceSetting(
                     "Temporal prefetch (layers)",
                     Choices.PREFETCH.map { it to if (it == 0) "off" else "$it" },
