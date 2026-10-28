@@ -66,7 +66,8 @@ sealed class Screen(val route: String) {
 
 /**
  * Three top-level pages (Models, Chats = Home, Settings) behind a floating bar, and the Chat page on top
- * of them. The app always starts on Home; it never jumps straight into the last chat.
+ * of them. The app always starts on Home; it never jumps straight into the last chat. Within a session the Chats tab
+ * returns to the chat that was open before Models or Settings, or to the chat list if that was where the person was.
  */
 @Composable
 fun AppNavigation(
@@ -98,6 +99,24 @@ fun AppNavigation(
         }
         if (dest == route) return
         navController.navigate(dest) {
+            popUpTo(Screen.Home.route) { inclusive = false }
+            launchSingleTop = true
+        }
+    }
+
+    // Where the Chats tab returns to: the chat that was open when Models or Settings was opened, or the chat list.
+    var resumeChat by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(route) {
+        when {
+            route == Screen.Home.route -> resumeChat = false
+            route?.startsWith("chat") == true -> resumeChat = true
+        }
+    }
+
+    /** The Chats tab of the floating bar: back into the chat that was open, else the chat list. */
+    fun goToChats() {
+        if (!resumeChat) return goTo(TopTab.CHATS)
+        navController.navigate(Screen.Chat.createRoute(chatViewModel.uiState.value.currentSession?.id)) {
             popUpTo(Screen.Home.route) { inclusive = false }
             launchSingleTop = true
         }
@@ -233,7 +252,7 @@ fun AppNavigation(
         if (tab != null) {
             FloatingNavBar(
                 selected = tab,
-                onSelect = { goTo(it) },
+                onSelect = { if (it == TopTab.CHATS) goToChats() else goTo(it) },
                 onNewChat = { openChat(null) },
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
