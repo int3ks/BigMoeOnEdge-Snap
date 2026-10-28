@@ -1,0 +1,56 @@
+name: Publish release
+
+# Run by hand once a build is approved. Takes the APK of the latest successful "Android NPU APK" run (or the run
+# given below) and publishes it as GitHub release v0.6.N. The app's "App update" card installs the newest release,
+# so only approved builds reach it. Release assets download without a GitHub login, unlike Actions artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'NPU build run id (empty = latest successful one)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - name: Find the build
+        run: |
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow android-npu.yml --status success \
+              --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] || { echo "::error::No successful NPU build found"; exit 1; }
+          SHA=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha --jq '.headSha')
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+          echo "Build run $RUN_ID, commit $SHA"
+
+      - name: Download its APK
+        run: |
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n BigMoeOnEdge-Snap-NPU-apk -D out
+          APK=$(ls out/*.apk | head -1)
+          VERSION=$(basename "$APK" | sed -n 's/^BigMoeOnEdge-Snap-NPU-\([0-9][0-9.]*\)-.*\.apk$/\1/p')
+          [ -n "$VERSION" ] || { echo "::error::Cannot read the version from $(basename "$APK")"; exit 1; }
+          echo "APK=$APK" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          ls -la out
+
+      - name: Publish
+        run: |
+          TAG="v$VERSION"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists"
+            exit 1
+          fi
+          gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$SHA" --latest \
+            --title "BigMoeOnEdge Snap $VERSION" \
+            --notes "NPU build of ${SHA::7} (Actions run $RUN_ID). Installs as an update over earlier Snap builds; in the app: Settings → App update."

@@ -4,4 +4,6 @@
     <external-files-path name="metrics" path="metrics/" />
     <!-- Workspace files shared from the viewer: <internal files dir>/workspace/ -->
     <files-path name="workspace" path="workspace/" />
+    <!-- Release APKs downloaded by the in-app updater: <cache dir>/updates/ -->
+    <cache-path name="updates" path="updates/" />
 </paths>

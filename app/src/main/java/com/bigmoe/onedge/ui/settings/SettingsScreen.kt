@@ -216,6 +216,8 @@ private fun SettingsContent(
     Column(modifier = modifier.padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         AutoSettingsEntry(onClick = onOpenAutoSettings)
         Spacer(Modifier.height(10.dp))
+        AppUpdateCard()
+        Spacer(Modifier.height(10.dp))
         // Settings are grouped in the requested order: appearance, model, engine, tools/media, diagnostics.
         SettingsFoldout(
             title = "Appearance", subtitle = "Theme palettes and custom colours", expanded = appearanceExpanded,
