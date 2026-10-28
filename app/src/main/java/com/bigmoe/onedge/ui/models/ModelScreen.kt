@@ -569,10 +569,9 @@ private fun ModelRow(
                     Icon(Icons.Default.Delete, contentDescription = "Remove model")
                 }
             }
-            // Guess-ahead settings apply to every model (card above the list); only the drafter file is per model.
-            if (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP || attachedName != null) {
-                DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
-            }
+            // Guess-ahead settings apply to every model (card above the list); only the drafter file is per model. It can
+            // always be attached: with Guess ahead off it simply waits until MTP is switched on.
+            DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
             MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
             LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
             if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)

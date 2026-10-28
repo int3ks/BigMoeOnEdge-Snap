@@ -147,7 +147,7 @@ internal fun DrafterRow(
                 when {
                     attachedName == null -> "None attached"
                     inUse -> "$attachedName • in use"
-                    else -> "$attachedName • used when Guess ahead is set to MTP"
+                    else -> "$attachedName • not used while Guess ahead is not MTP"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
