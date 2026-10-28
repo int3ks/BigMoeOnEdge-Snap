@@ -64,10 +64,10 @@ if(ANDROID AND CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
 endif()
 
 # ---- llama.cpp (vendored snapshot) -------------------------------------------------------------
-# third_party/llama.cpp is the vendored 965f897 (2026-09-26) tree with qwen4exp and the local expert-ready hook.
-# The upstream 0.33.2 tree refers to a newer Helldez/llama.cpp submodule that was not included in its source ZIP;
-# do not claim this vendored tree has been upgraded to that revision. core/CMakeLists.txt detects the local hook
-# in ggml-cpu.h and defines BMOE_HAVE_EXPERT_READY_HOOK.
+# third_party/llama.cpp is Helldez/llama.cpp bmoe/expert-ready-hook-2210-dl (ad98071, the pin BigMoeOnEdge 0.38
+# uses): it carries the expert-ready hook, qwen4exp and Flint (FlintForCausalLM). The few local changes on top are
+# recorded in patches/0007-llama-cpp-local-on-2210-dl.patch; docs, tests and examples are left out of the tree.
+# core/CMakeLists.txt detects the hook in ggml-cpu.h and defines BMOE_HAVE_EXPERT_READY_HOOK.
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
     message(FATAL_ERROR "third_party/llama.cpp is missing. See README.md (Native build).")
 endif()

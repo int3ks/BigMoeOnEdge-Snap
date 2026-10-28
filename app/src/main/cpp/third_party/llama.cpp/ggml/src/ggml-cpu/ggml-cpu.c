@@ -3,6 +3,7 @@
 
 #include "ggml-backend-impl.h"
 #include "ggml-backend.h"
+#include "ggml-cpu.h"
 #include "traits.h"
 #include "ggml-cpu-impl.h"
 #include "ggml-impl.h"
@@ -54,6 +55,16 @@
 #ifdef GGML_USE_CPU_RISCV64_SPACEMIT
 #    include "spacemit/ime.h"
 #endif
+
+// Process-global expert-ready hook, invoked from mul_mat_id before each expert is read.
+// Lets an external expert-streaming engine block until an expert's weights are resident.
+static ggml_cpu_expert_ready_hook_t g_expert_ready_hook      = NULL;
+static void *                       g_expert_ready_hook_data = NULL;
+
+void ggml_cpu_set_expert_ready_hook(ggml_cpu_expert_ready_hook_t hook, void * user_data) {
+    g_expert_ready_hook      = hook;
+    g_expert_ready_hook_data = user_data;
+}
 
 // Note: once we move threading into a separate C++ file
 // will use std::hardware_destructive_interference_size instead of hardcoding it here
@@ -459,7 +470,7 @@ typedef pthread_mutex_t    ggml_mutex_t;
 
 #define ggml_lock_init(x)    UNUSED(x)
 #define ggml_lock_destroy(x) UNUSED(x)
-#if defined(__x86_64__) || (defined(_MSC_VER) && defined(_M_AMD64))
+#if defined(__x86_64__) || (defined(_MSC_VER) && defined(_M_AMD64) && !defined(_M_ARM64EC))
 #define ggml_lock_lock(x)    _mm_pause()
 #else
 #define ggml_lock_lock(x)    UNUSED(x)
@@ -1305,7 +1316,7 @@ void ggml_compute_forward_mul_mat(
 
     const bool src1_cont = ggml_is_contiguous(src1);
 
-    if (src1_cont) {
+    if (!params->use_ref && src1_cont) {
         for (int64_t i13 = 0; i13 < ne13; i13++)
             for (int64_t i12 = 0; i12 < ne12; i12++)
                 if (!llamafile_sgemm(params,
@@ -1334,9 +1345,11 @@ UseGgmlGemm1:;
         const size_t nbw3 = nbw2*ne12;
 
         assert(params->wsize >= ne13*nbw3);
-        GGML_ASSERT(src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16);
-        // the F16 path below writes plain floats into wdata, so it needs an F32 vec_dot_type
-        GGML_ASSERT(src1->type == GGML_TYPE_F32 || vec_dot_type == GGML_TYPE_F32);
+        // src1 is either packed from F32 into vec_dot_type, or widened from F16 or BF16 into the F32 work buffer
+        const bool widen = src1->type != GGML_TYPE_F32;
+
+        GGML_ASSERT(!widen || vec_dot_type == GGML_TYPE_F32);
+        GGML_ASSERT(!widen || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16);
 
     #if 0
         for (int64_t i13 = 0; i13 < ne13; ++i13) {
@@ -1349,20 +1362,24 @@ UseGgmlGemm1:;
             }
         }
     #else
+        const int64_t bs = ggml_blck_size(vec_dot_type);
+
         for (int64_t i13 = 0; i13 < ne13; ++i13) {
             for (int64_t i12 = 0; i12 < ne12; ++i12) {
                 for (int64_t i11 = 0; i11 < ne11; ++i11) {
-                    size_t bs = ggml_blck_size(vec_dot_type);
                     int64_t ne10_block_start = (ith * ne10/bs) / nth;
                     int64_t ne10_block_end   = ((ith + 1) * ne10/bs) / nth;
-                    const char * src1_block = (const char *) src1->data + i13*nb13 + i12*nb12 + i11*nb11 + ne10_block_start*bs*nb10;
-                    char * dst_block = wdata + i13*nbw3 + i12*nbw2 + i11*nbw1 + ne10_block_start*nbw0;
-                    const int64_t n_block = (ne10_block_end - ne10_block_start) * bs;
+                    const void * src1_row  = (const char *) src1->data + i13*nb13 + i12*nb12 + i11*nb11 + ne10_block_start*bs*nb10;
+                    void       * wdata_row =                    wdata  + i13*nbw3 + i12*nbw2 + i11*nbw1 + ne10_block_start*nbw0;
 
-                    if (src1->type == GGML_TYPE_F32) {
-                        from_float((const float *) src1_block, dst_block, n_block);
+                    const int64_t ne10_block_size = (ne10_block_end - ne10_block_start) * bs;
+
+                    if (src1->type == GGML_TYPE_F16) {
+                        ggml_cpu_fp16_to_fp32((const ggml_fp16_t *) src1_row, (float *) wdata_row, ne10_block_size);
+                    } else if (src1->type == GGML_TYPE_BF16) {
+                        ggml_cpu_bf16_to_fp32((const ggml_bf16_t *) src1_row, (float *) wdata_row, ne10_block_size);
                     } else {
-                        ggml_cpu_fp16_to_fp32((const ggml_fp16_t *) src1_block, (float *) dst_block, n_block);
+                        from_float((const float *) src1_row, wdata_row, ne10_block_size);
                     }
                 }
             }
@@ -1378,7 +1395,7 @@ UseGgmlGemm1:;
     ggml_barrier(params->threadpool);
 
 #if GGML_USE_LLAMAFILE
-    if (src1->type != vec_dot_type) {
+    if (!params->use_ref && src1->type != vec_dot_type) {
         const void* wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
         const size_t row_size = ggml_row_size(vec_dot_type, ne10);
 
@@ -1466,15 +1483,6 @@ UseGgmlGemm2:;
 }
 
 // ggml_compute_forward_mul_mat_id
-
-// BigMoeOnEdge expert-ready hook (see ggml-cpu.h). Written only between graph computes.
-static ggml_expert_ready_hook_t g_expert_ready_hook      = NULL;
-static void *                   g_expert_ready_user_data = NULL;
-
-void ggml_cpu_set_expert_ready_hook(ggml_expert_ready_hook_t hook, void * user_data) {
-    g_expert_ready_user_data = user_data;
-    g_expert_ready_hook      = hook;
-}
 
 #define MMID_MATRIX_ROW(row_id, i1) matrix_rows[(row_id)*ids->ne[0]*ids->ne[1] + (i1)]
 
@@ -1678,13 +1686,11 @@ static void ggml_compute_forward_mul_mat_id(
             continue;
         }
 
-        // Wait point for streamed experts (BEFORE the tiled path, which `continue`s): block until expert `cur_a`'s slice is resident. There is no
-        // barrier inside this loop, so a thread waiting here cannot deadlock the threadpool.
-        {
-            ggml_expert_ready_hook_t hook = g_expert_ready_hook;
-            if (hook != NULL) {
-                hook(src0, cur_a, g_expert_ready_user_data);
-            }
+        // Signal an external expert-streaming engine that this expert is about to be
+        // consumed; the hook may block until src0's expert weights are resident.
+        // Before the tiled path too: it reads the same src0 expert slice.
+        if (g_expert_ready_hook) {
+            g_expert_ready_hook(src0, cur_a, g_expert_ready_hook_data);
         }
 
         // tiled takes over if profitable for this expert (see tiled.h)
@@ -2117,6 +2123,10 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
             {
                 ggml_compute_forward_dsv4_hc_post(params, tensor);
             } break;
+        case GGML_OP_TOP_K_MASK:
+            {
+                ggml_compute_forward_top_k_mask(params, tensor);
+            } break;
         case GGML_OP_MAP_CUSTOM1:
             {
                 ggml_compute_forward_map_custom1(params, tensor);
@@ -2300,6 +2310,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
         case GGML_OP_DSV4_HC_COMB:
         case GGML_OP_DSV4_HC_PRE:
         case GGML_OP_DSV4_HC_POST:
+        case GGML_OP_TOP_K_MASK:
             {
                 n_tasks = n_threads;
             } break;
@@ -2372,11 +2383,11 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
         case GGML_OP_MUL_MAT:
         case GGML_OP_MUL_MAT_ID:
         case GGML_OP_OUT_PROD:
+        case GGML_OP_SET_ROWS:
             {
                 n_tasks = n_threads;
             } break;
         case GGML_OP_GET_ROWS:
-        case GGML_OP_SET_ROWS:
             {
                 // FIXME: get_rows can use additional threads, but the cost of launching additional threads
                 // decreases performance with GPU offloading
@@ -3515,6 +3526,12 @@ void ggml_cpu_fp32_to_fp16(const float * x, ggml_fp16_t * y, int64_t n) {
         vfloat32m2_t vx = __riscv_vle32_v_f32m2(&x[i], vl);
         vfloat16m1_t vy = __riscv_vfncvt_f_f_w_f16m1(vx, vl);
         __riscv_vse16_v_f16m1((_Float16 *)&y[i], vy, vl);
+    }
+#elif defined(__VXE__) || defined(__VXE2__)
+    for (; i + 7 < n; i += 8) {
+        const uint32x4_t v_yl = __lzs_f32cx4_to_f16(vec_xl(0, x + i + 0));
+        const uint32x4_t v_yh = __lzs_f32cx4_to_f16(vec_xl(0, x + i + 4));
+        vec_xst(vec_pack(v_yl, v_yh), 0, (uint16_t *)(y + i));
     }
 #endif
     for (; i < n; ++i) {

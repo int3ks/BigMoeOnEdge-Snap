@@ -82,6 +82,12 @@ static const MoeRecipe k_recipes[] = {
     // expert tensors but is skipped at load (load_mtp is off). No two MoE blocks are adjacent,
     // which leaves the forward predictors nothing to target (see docs/limitations.md).
     {"nemotron_h_moe", {"ffn_up_exps", "ffn_down_exps", nullptr}},
+    // flint (FlintForCausalLM, e.g. flint-40B-A2.5B) is a plain DeepSeek-style MoE: 256 routed
+    // experts (top-6) with the standard split suffixes, so streaming is one row. Leading dense
+    // blocks name no expert tensors and stay mmap-resident, the router may carry a per-expert bias
+    // (exp_probs_b, the lfm2moe pattern) and an always-on shared expert (ffn_*_shexp) stays
+    // resident. Its sliding/full attention mix is dense-side machinery invisible to the seam.
+    {"flint", {"ffn_gate_exps", "ffn_up_exps", "ffn_down_exps"}},
 };
 
 static const int k_n_recipes = (int) (sizeof(k_recipes) / sizeof(k_recipes[0]));

@@ -122,6 +122,20 @@ namespace {
 using detail::batch_fill;
 using detail::PrefillTally;
 
+// The speculative driver reads llama.cpp's own mirror of a batch's entries (common_batch), not the
+// llama_batch the engine decodes. It only reads entries (token, position, sequence, output), so a
+// mirror without a context is enough: nothing here asks it to render a batch for a decode.
+common_batch to_common_batch(const llama_batch & b) {
+    common_batch out;
+    out.tokens.reserve((size_t) b.n_tokens);
+    for (int i = 0; i < b.n_tokens; ++i) {
+        const int idx = out.add(b.token[i], b.pos[i], b.seq_id[i][0], b.logits[i] != 0);
+        for (int s = 1; s < b.n_seq_id[i]; ++s)
+            out.add_seq(idx, b.seq_id[i][s]);
+    }
+    return out;
+}
+
 using clock_t_ = std::chrono::steady_clock;
 double secs(clock_t_::time_point a, clock_t_::time_point b) {
     return std::chrono::duration<double>(b - a).count();
@@ -1083,7 +1097,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
             // GGUF and deliberately has no target RouterHook callback; process it during capture
             // only for the embedded case. The target model's experts remain streamed either way.
             if (cfg.spec.draft_model_path.empty() &&
-                !common_speculative_process(im.mtp.get(), im.mtp_batch))
+                !common_speculative_process(im.mtp.get(), to_common_batch(im.mtp_batch)))
                 return fail("MTP capture warm-up failed: the draft context could not process the batch");
         } else {
             llama_batch warm = llama_batch_get_one(&warm_tok, 1);
@@ -1547,7 +1561,7 @@ RunResult Session::generate(const GenerateRequest & req,
                 inputs.tool_choice = common_chat_tool_choice_parse_oaicompat(req.chat_tool_choice);
             inputs.parallel_tool_calls = true;
             common_chat_params cp = common_chat_templates_apply(im.chat_tmpls.get(), inputs);
-            prompt = cp.prompt;
+            prompt = cp.prompt.str();
             parse_params = detail::build_parse_params(cp);
         } catch (const std::exception & e) {
             // No raw-prompt fallback here: there is no single "prompt" to fall back to.
@@ -1590,7 +1604,7 @@ RunResult Session::generate(const GenerateRequest & req,
             prefilled_answer = detail::build_turn_inputs(inputs, im.chat_history, req.think, im.think_ctl);
 
             common_chat_params cp = common_chat_templates_apply(im.chat_tmpls.get(), inputs);
-            prompt = cp.prompt;
+            prompt = cp.prompt.str();
             parse_params = detail::build_parse_params(cp);
         } catch (const std::exception & e) {
             std::fprintf(stderr, "bmoe: chat template apply failed (%s); using raw prompt\n", e.what());
@@ -1710,7 +1724,7 @@ RunResult Session::generate(const GenerateRequest & req,
         // disguise a model this mechanism does not work on; the honest report is ThinkControl::None.)
         if (prefilled_answer) return {raw, ""};
         try {
-            common_chat_msg msg = common_chat_parse(raw, partial, parse_params);
+            common_chat_msg msg = common_chat_parse(common_chat_input(raw), partial, parse_params);
             return {msg.content, msg.reasoning_content};
         } catch (const std::exception & e) {
             detail::warn_parse_failed_once(e.what());
@@ -1912,7 +1926,7 @@ RunResult Session::generate(const GenerateRequest & req,
             // streamer for the MTP head's experts. place() is idempotent and the next chunk (or the
             // line after the loop) places again, so this costs three stores per tensor.
             im.place_prefill(false);
-            if (!common_speculative_process(im.mtp.get(), pf))
+            if (!common_speculative_process(im.mtp.get(), to_common_batch(pf)))
                 return fail("MTP draft context failed to process the prefill batch");
         }
     }
@@ -2153,7 +2167,7 @@ RunResult Session::generate(const GenerateRequest & req,
                 const auto p0 = clock_t_::now();
                 const uint64_t pb0 = moe.enabled ? im.source.stats().read_bytes : 0;
                 batch_fill(im.mtp_batch, verify_toks.data(), 1 + n_acc, n_past, /*all_logits*/ false);
-                if (!common_speculative_process(im.mtp.get(), im.mtp_batch))
+                if (!common_speculative_process(im.mtp.get(), to_common_batch(im.mtp_batch)))
                     return fail("MTP draft context failed to process the verify batch");
                 draft_s += secs(p0, clock_t_::now());
                 if (moe.enabled) im.mtp_draft_read_bytes += im.source.stats().read_bytes - pb0;
@@ -2408,7 +2422,7 @@ RunResult Session::generate(const GenerateRequest & req,
     bool final_parsed = false;
     if (chat_on && !prefilled_answer) {
         try {
-            final_msg = common_chat_parse(gen, /*is_partial*/ false, parse_params);
+            final_msg = common_chat_parse(common_chat_input(gen), /*is_partial*/ false, parse_params);
             final_parsed = true;
         } catch (const std::exception & e) {
             detail::warn_parse_failed_once(e.what());

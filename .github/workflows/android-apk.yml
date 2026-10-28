@@ -1,0 +1,71 @@
+name: Android APK (CPU)
+
+# Builds the regular CPU-only APK (application id com.bigmoe.onedge.snap). Runs on every push that
+# touches the app or the build, and on demand from the Actions tab.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/android-apk.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.BMOE_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Optional: with the BMOE_KEYSTORE_* secrets set (see docs/SIGNING.md) every APK carries the same
+      # certificate and installs as an update. Without them the runner's throwaway debug key is used.
+      - name: Restore signing key
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          BMOE_KEYSTORE_BASE64: ${{ secrets.BMOE_KEYSTORE_BASE64 }}
+        run: |
+          echo "$BMOE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/bmoe-release.jks"
+          echo "BMOE_KEYSTORE_FILE=$RUNNER_TEMP/bmoe-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build debug APK
+        env:
+          BMOE_KEYSTORE_PASSWORD: ${{ secrets.BMOE_KEYSTORE_PASSWORD }}
+          BMOE_KEY_ALIAS: ${{ secrets.BMOE_KEY_ALIAS }}
+          BMOE_KEY_PASSWORD: ${{ secrets.BMOE_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Rename APK
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk "out/BigMoeOnEdge-Snap-${VERSION}-${GITHUB_SHA::7}.apk"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BigMoeOnEdge-Snap-apk
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 30

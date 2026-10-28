@@ -1,5 +1,13 @@
 # BigMoeOnEdge+ Changelog
 
+## Snap fork
+
+- Own application id `com.bigmoe.onedge.snap` and app name "BigMoeOnEdge Snap", so this build installs next to BigMoeOnEdge+ (`com.bigmoe.onedge`). The Kotlin package stays `com.bigmoe.onedge`.
+- Updated the vendored llama.cpp from 965f897 (2026-09-26) to Helldez/llama.cpp `bmoe/expert-ready-hook-2210-dl` (ad98071, the revision BigMoeOnEdge 0.38 pins). This adds the **Flint** architecture (`FlintForCausalLM`, e.g. flint-40B-A2.5B) and the Jinja `\x` hex escapes its chat template uses. Local llama.cpp changes kept on top: patches/0007.
+- Engine core adapted to the newer llama.cpp `common` API (`common_chat_prompt`, `common_chat_input`, `common_batch` for the MTP driver, reasoning format set on the template inputs), the same way upstream BigMoeOnEdge did.
+- `flint` added to the MoE streaming registry (standard `ffn_{gate,up,down}_exps`).
+- New workflow `.github/workflows/android-apk.yml` builds the CPU APK on push / on demand.
+
 ## Unreleased - NPU prefill + MTP fix
 
 - NPU prefill now works together with Guess ahead (MTP and n-gram). Before, three independent gates refused the combination: `config.cpp` ("prefill.device does not combine with speculative decoding"), `native-bridge.cpp` (rejected any `I_SPEC_SOURCE`) and the Settings switch (`npuCombinationAllowed`). Removing the gates alone would have been unsafe, so the engine was also fixed: the MTP draft pass during prefill ran while the target's weights were rebound to the device (and with the arena hooked in), and the MTP head's layer, experts and KV were pulled into the device rebind. See docs/NPU_MTP_FIX.md.

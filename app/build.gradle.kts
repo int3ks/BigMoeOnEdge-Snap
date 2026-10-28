@@ -73,7 +73,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.bigmoe.onedge"
+        // Own application id so this fork installs side by side with BigMoeOnEdge+ (com.bigmoe.onedge).
+        // The Kotlin package/namespace stays com.bigmoe.onedge; only the installed identity changes.
+        applicationId = "com.bigmoe.onedge.snap"
         // 28: the native engine uses O_DIRECT, AHardwareBuffer and other APIs that are only
         // dependable from Android 10 (upstream uses 29); the NDK toolchain also links against this platform level.
         minSdk = 29
