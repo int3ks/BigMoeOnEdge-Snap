@@ -50,7 +50,11 @@ jobs:
             echo "::error::Secret BMOE_KEYSTORE_BASE64 is not set. Without the release key the APK could not update an installed copy. See docs/SIGNING.md."
             exit 1
           fi
-          echo "$BMOE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/bmoe-release.jks"
+          # Line breaks and spaces picked up while pasting the secret are dropped.
+          printf '%s' "$BMOE_KEYSTORE_BASE64" | tr -d ' \t\r\n' | base64 -d > "$RUNNER_TEMP/bmoe-release.jks" || {
+            echo "::error::Secret BMOE_KEYSTORE_BASE64 is not valid base64 (A-Z, a-z, 0-9, +, /, =). Paste the content of snap-release.jks.b64, not snap-release.jks."
+            exit 1
+          }
           echo "BMOE_KEYSTORE_FILE=$RUNNER_TEMP/bmoe-release.jks" >> "$GITHUB_ENV"
 
       - name: Build debug APK
