@@ -55,7 +55,9 @@ import com.bigmoe.onedge.ui.history.HistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.bigmoe.onedge.ui.onSecondaryClick
+import com.bigmoe.onedge.ui.ContextMenuAt
+import com.bigmoe.onedge.ui.contextMenuTrigger
+import com.bigmoe.onedge.ui.rememberContextMenuState
 
 /** Persistent tablet-side history panel; it deliberately uses the same HistoryViewModel as HomeScreen. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -168,6 +170,8 @@ private fun PanelSessionRow(
     onDelete: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // Right-click / long-press open the menu at the pointer; the ⋮ button keeps its own menu beside it.
+    val ctx = rememberContextMenuState()
     val date = remember(session.updatedAt) {
         SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(session.updatedAt))
     }
@@ -175,11 +179,12 @@ private fun PanelSessionRow(
         shape = RoundedCornerShape(14.dp),
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         tonalElevation = if (selected) 2.dp else 0.dp,
-        modifier = Modifier.fillMaxWidth().onSecondaryClick { menuOpen = true }.combinedClickable(
+        modifier = Modifier.fillMaxWidth().contextMenuTrigger(ctx).combinedClickable(
             onClick = onOpen,
-            onLongClick = { menuOpen = true }
+            onLongClick = { ctx.open() }
         )
     ) {
+      Box {
         Row(
             Modifier.padding(start = 12.dp, top = 10.dp, end = 4.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -226,5 +231,18 @@ private fun PanelSessionRow(
                 }
             }
         }
+        ContextMenuAt(ctx) {
+            DropdownMenuItem(
+                text = { Text("Rename") },
+                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                onClick = { ctx.close(); onRename() }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete") },
+                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                onClick = { ctx.close(); onDelete() }
+            )
+        }
+      }
     }
 }

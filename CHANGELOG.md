@@ -12,7 +12,9 @@
 - Every CI build counts the version up: 0.6.1, 0.6.2, ... (commits since the 0.6.0 baseline), with versionCode raised to match.
 - Launcher icon: dark blue with light blue lettering and a red superscript 2.
 - In-app update (Settings → App update): checks the fork's newest GitHub release, downloads its APK and hands it to the system installer (Android asks once to allow installs from this app). Releases are published by hand once a build is approved: the "Publish release" workflow takes the APK of the latest successful NPU build and releases it as v0.6.N.
-- Guess ahead is set in one place: a "Guess ahead • all models" card above the model list (Off / MTP with the model's own head / MTP with a separate drafter / n-gram, tokens drafted per pass, the MTP confidence floor and the n-gram match lengths). The only per-model setting left is which MTP drafter GGUF is attached to a model. Settings → Engine performance no longer carries any guess-ahead controls.
+- Guess ahead is set in one place: a "Guess ahead • all models" card above the model list with Off / MTP / n-gram, tokens drafted per pass, the MTP confidence floor and the n-gram match lengths. With MTP, a model that has a drafter GGUF attached uses it, any other model its own MTP head. The only per-model setting is which drafter is attached. Settings → Engine performance no longer carries guess-ahead controls.
+- Context menus (chat messages, chat lists) open where they were right-clicked or long-pressed. Chat messages gain "Regenerate": the turn is answered again without editing it first.
+- A Settings button in the chat's top bar, next to Home, chat files and the model picker.
 - Settings open with "Engine performance" expanded and "Appearance" collapsed.
 - A separate MTP draft (MTP-only sidecar GGUF) is no longer limited to Qwen4Exp targets: Qwen3.5/3.6 (`qwen35`, `qwen35moe`) and other architectures with an MTP head can use one, as upstream BigMoeOnEdge's `--mtp-head` does. The sidecar is still checked against the target (architecture, MTP block, width, vocabulary). Qwen3.5/3.6 GGUFs usually carry the head already, so MTP works on them without a sidecar.
 

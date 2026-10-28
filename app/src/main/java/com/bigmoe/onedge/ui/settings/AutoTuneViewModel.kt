@@ -254,7 +254,7 @@ class AutoTuneViewModel(
         viewModelScope.launch {
             val ready = engineController.state.value as? EngineState.Ready ?: return@launch
             val s = dataStore.settingsFlow.first()
-            val draft = if (s.spec == SpecSource.MTP && s.separateMtpDraftEnabled)
+            val draft = if (s.spec == SpecSource.MTP)
                 modelManager.draftForModel(ready.info.path) else null
             _ui.update { it.copy(reloadNeeded = false, busy = "Reloading the model…") }
             val err = engineController.loadModel(ready.info.path, s.toLoadConfig(), ready.info.mmprojPath, draft)
@@ -393,7 +393,7 @@ class AutoTuneViewModel(
                 withContext(NonCancellable) {
                     _ui.update { it.copy(busy = "Restoring your previous model…") }
                     if (previous != null) {
-                        val draft = if (before.spec == SpecSource.MTP && before.separateMtpDraftEnabled)
+                        val draft = if (before.spec == SpecSource.MTP)
                             modelManager.draftForModel(previous.path) else null
                         engineController.loadModel(previous.path, before.toLoadConfig(), previous.mmprojPath, draft)
                     } else {

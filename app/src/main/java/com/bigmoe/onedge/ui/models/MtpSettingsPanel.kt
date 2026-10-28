@@ -31,13 +31,14 @@ import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import com.bigmoe.onedge.ui.settings.ChoiceSetting
 import com.bigmoe.onedge.ui.settings.Hint
 
-/** How the engine guesses ahead: not at all, MTP with the model's own head or a separate drafter, or n-gram. */
-internal enum class GuessMode { OFF, MTP_OWN_HEAD, MTP_DRAFTER, NGRAM }
-
-internal fun guessMode(settings: EngineSettings): GuessMode = when (settings.spec) {
-    SpecSource.OFF -> GuessMode.OFF
-    SpecSource.NGRAM -> GuessMode.NGRAM
-    SpecSource.MTP -> if (settings.separateMtpDraftEnabled) GuessMode.MTP_DRAFTER else GuessMode.MTP_OWN_HEAD
+/**
+ * How the engine guesses ahead. MTP drafts with the drafter GGUF attached to the loaded model when there is one,
+ * otherwise with the model's own MTP head.
+ */
+internal fun guessLabel(spec: SpecSource): String = when (spec) {
+    SpecSource.OFF -> "Off"
+    SpecSource.MTP -> "MTP"
+    SpecSource.NGRAM -> "N-gram"
 }
 
 private val DRAFT_MAX = (1..8).toList()
@@ -50,16 +51,11 @@ private val NGRAM_MAX = listOf(3, 4, 6, 8, 12, 16, 24, 32, 48, 64)
  */
 @Composable
 internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel) {
-    val mode = guessMode(settings)
+    val mode = settings.spec
     // Speculation cannot run together with these two streaming modes (the engine refuses the combination).
     val blocked = settings.routeAhead != 0 || settings.rowStream
-    var expanded by remember { mutableStateOf(mode != GuessMode.OFF) }
-    val summary = when (mode) {
-        GuessMode.OFF -> "Off"
-        GuessMode.MTP_OWN_HEAD -> "MTP • model's own head • ${settings.draftMax} tokens/pass"
-        GuessMode.MTP_DRAFTER -> "MTP • separate drafter • ${settings.draftMax} tokens/pass"
-        GuessMode.NGRAM -> "N-gram • ${settings.draftMax} tokens/pass"
-    }
+    var expanded by remember { mutableStateOf(mode != SpecSource.OFF) }
+    val summary = if (mode == SpecSource.OFF) "Off" else "${guessLabel(mode)} • ${settings.draftMax} tokens/pass"
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(
@@ -79,38 +75,28 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
             if (expanded) {
                 ChoiceSetting(
                     "Mode",
-                    listOf(
-                        GuessMode.OFF to "Off",
-                        GuessMode.MTP_OWN_HEAD to "MTP • model's own head",
-                        GuessMode.MTP_DRAFTER to "MTP • separate drafter (MTP GGUF)",
-                        GuessMode.NGRAM to "N-gram • repeated text"
-                    ),
+                    listOf(SpecSource.OFF to "Off", SpecSource.MTP to "MTP", SpecSource.NGRAM to "N-gram (repeated text)"),
                     mode,
                     enabled = !blocked
-                ) { m ->
-                    when (m) {
-                        GuessMode.OFF -> viewModel.updateSpec(SpecSource.OFF)
-                        GuessMode.MTP_OWN_HEAD -> { viewModel.updateSeparateMtpDraftEnabled(false); viewModel.updateSpec(SpecSource.MTP) }
-                        GuessMode.MTP_DRAFTER -> { viewModel.updateSeparateMtpDraftEnabled(true); viewModel.updateSpec(SpecSource.MTP) }
-                        GuessMode.NGRAM -> viewModel.updateSpec(SpecSource.NGRAM)
-                    }
-                }
+                ) { viewModel.updateSpec(it) }
                 if (blocked) Hint("Not available while Route-ahead or row streaming is on (Settings → Engine performance).")
                 when (mode) {
-                    GuessMode.OFF -> Hint(
-                        "Drafts several likely next tokens and verifies them together. MTP uses a trained head: Qwen3.5/3.6 GGUFs " +
-                            "usually carry their own, other models need a separate drafter attached below. N-gram drafts from text " +
-                            "that already appeared and only helps when text repeats."
+                    SpecSource.OFF -> Hint(
+                        "Drafts several likely next tokens and verifies them together. MTP uses a trained head, n-gram drafts " +
+                            "from text that already appeared and only helps when text repeats."
                     )
-                    GuessMode.MTP_DRAFTER -> Hint("Attach the drafter (an MTP-only GGUF, converted with llama.cpp's --mtp) to each model in the list below. A model without one falls back to its own MTP head, if it has one.")
-                    else -> Unit
+                    SpecSource.MTP -> Hint(
+                        "A model with an MTP drafter attached in the list below uses that drafter (an MTP-only GGUF); any other " +
+                            "model uses its own MTP head. Qwen3.5/3.6 GGUFs usually carry one; a model with neither fails to load with MTP on."
+                    )
+                    SpecSource.NGRAM -> Unit
                 }
-                if (mode != GuessMode.OFF) {
+                if (mode != SpecSource.OFF) {
                     ChoiceSetting("Tokens drafted per pass", DRAFT_MAX.map { it to it.toString() }, settings.draftMax) {
                         viewModel.updateDraftMax(it)
                     }
                 }
-                if (mode == GuessMode.MTP_OWN_HEAD || mode == GuessMode.MTP_DRAFTER) {
+                if (mode == SpecSource.MTP) {
                     ChoiceSetting(
                         "Confidence floor",
                         listOf(0 to "Always draft", 40 to "Above 40%", 60 to "Above 60%", 80 to "Above 80%"),
@@ -118,7 +104,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                     ) { viewModel.updateMtpPMinPct(it) }
                     Hint("Stops a draft early when the drafter's confidence in its next token is below this. A message with an image is answered without drafting; text-only messages still use MTP. A separate drafter adds its weights to memory use.")
                 }
-                if (mode == GuessMode.NGRAM) {
+                if (mode == SpecSource.NGRAM) {
                     ChoiceSetting(
                         "Minimum match",
                         NGRAM_MIN.filter { it <= settings.ngramMaxMatch }.map { it to "$it tokens" },
@@ -137,7 +123,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                     }
                     Hint("Minimum controls how exact a repeated suffix must be before drafting. Maximum bounds the lookup work; long matches are not always more useful.")
                 }
-                if (mode != GuessMode.OFF) Hint("Guess ahead forces greedy decoding (temperature 0). More tokens per pass only pay off when most of them are accepted.")
+                if (mode != SpecSource.OFF) Hint("Guess ahead forces greedy decoding (temperature 0). More tokens per pass only pay off when most of them are accepted.")
             }
         }
     }
@@ -153,7 +139,7 @@ internal fun DrafterRow(
     onPickDraft: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    val inUse = guessMode(settings) == GuessMode.MTP_DRAFTER
+    val inUse = settings.spec == SpecSource.MTP
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.weight(1f)) {
             Text("MTP drafter", style = MaterialTheme.typography.labelMedium)
@@ -161,7 +147,7 @@ internal fun DrafterRow(
                 when {
                     attachedName == null -> "None attached"
                     inUse -> "$attachedName • in use"
-                    else -> "$attachedName • not used (Guess ahead is not set to a separate drafter)"
+                    else -> "$attachedName • used when Guess ahead is set to MTP"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

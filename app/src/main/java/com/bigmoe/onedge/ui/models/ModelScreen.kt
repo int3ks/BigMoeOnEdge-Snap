@@ -538,7 +538,7 @@ private fun ModelRow(
                 }
             }
             // Guess-ahead settings apply to every model (card above the list); only the drafter file is per model.
-            if (guessMode(settings) == GuessMode.MTP_DRAFTER || attachedName != null) {
+            if (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP || attachedName != null) {
                 DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
             }
             if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)

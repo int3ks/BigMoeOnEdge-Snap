@@ -224,7 +224,7 @@ class ModelViewModel(
     private fun loadNow(path: String, mmprojPath: String?, currentDraftPath: String? = null) {
         viewModelScope.launch {
             val s = settingsDataStore.settingsFlow.first()
-            val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP && s.separateMtpDraftEnabled)
+            val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP)
                 currentDraftPath?.takeIf { File(it).isFile } ?: modelManager.draftForModel(path) else null
             val error = engineController.loadModel(path, s.toLoadConfig(), mmprojPath, draftPath)
             if (error == null) {

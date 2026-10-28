@@ -204,6 +204,7 @@ fun AppNavigation(
                                 onOpenChat = { id -> openChat(id) },
                                 onNavigateHome = { goTo(TopTab.CHATS) },
                                 onNavigateToModels = { goTo(TopTab.MODELS) },
+                                onNavigateToSettings = { goTo(TopTab.SETTINGS) },
                                 onOpenFile = { path -> navController.navigate(Screen.File.createRoute(path)) },
                                 modelViewModel = modelViewModel,
                                 wideMode = true,
@@ -220,6 +221,7 @@ fun AppNavigation(
                             onOpenChat = { id -> openChat(id) },
                             onNavigateHome = { goTo(TopTab.CHATS) },
                             onNavigateToModels = { goTo(TopTab.MODELS) },
+                            onNavigateToSettings = { goTo(TopTab.SETTINGS) },
                             onOpenFile = { path -> navController.navigate(Screen.File.createRoute(path)) },
                             modelViewModel = modelViewModel
                         )

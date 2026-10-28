@@ -631,6 +631,22 @@ class ChatViewModel(
      * Everything the new turn needs (the message's attachments are read again) is prepared before the chat is
      * changed, so a failure leaves the chat exactly as it was.
      */
+    /**
+     * Regenerate without editing: answers the turn again from the same user message. On an assistant message that is
+     * the user message right before it. Same path as Edit & regenerate with the text unchanged.
+     */
+    fun regenerate(messageId: String) {
+        val messages = _uiState.value.messages
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index < 0) return
+        val user = messages.subList(0, index + 1).lastOrNull { it.role == MessageRole.USER }
+        if (user == null) {
+            _uiState.update { it.copy(notice = "There is no message to answer again.") }
+            return
+        }
+        editUserMessage(user.id, user.rawContent.ifEmpty { user.text })
+    }
+
     fun editUserMessage(messageId: String, newText: String) {
         val state = _uiState.value
         val session = state.currentSession ?: return

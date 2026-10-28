@@ -50,7 +50,9 @@ import com.bigmoe.onedge.ui.history.HistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.bigmoe.onedge.ui.onSecondaryClick
+import com.bigmoe.onedge.ui.ContextMenuAt
+import com.bigmoe.onedge.ui.contextMenuTrigger
+import com.bigmoe.onedge.ui.rememberContextMenuState
 
 /** Home tab: the saved conversations. Creating a chat is the "+" button of the navigation bar. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -181,6 +183,8 @@ private fun SessionRow(
     onDelete: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // Right-click / long-press open the menu at the pointer; the ⋮ button keeps its own menu beside it.
+    val ctx = rememberContextMenuState()
     val date = remember(session.updatedAt) {
         SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(session.updatedAt))
     }
@@ -190,9 +194,10 @@ private fun SessionRow(
         tonalElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .onSecondaryClick { menuOpen = true }
-            .combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
+            .contextMenuTrigger(ctx)
+            .combinedClickable(onClick = onOpen, onLongClick = { ctx.open() })
     ) {
+      Box {
         Row(
             modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -228,5 +233,18 @@ private fun SessionRow(
                 }
             }
         }
+        ContextMenuAt(ctx) {
+            DropdownMenuItem(
+                text = { Text("Rename") },
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                onClick = { ctx.close(); onRename() }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete") },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                onClick = { ctx.close(); onDelete() }
+            )
+        }
+      }
     }
 }

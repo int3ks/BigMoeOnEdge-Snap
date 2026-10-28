@@ -76,7 +76,7 @@ data class EngineSettings(
     val spec: SpecSource = SpecSource.OFF,
     val draftMax: Int = 3,
     val mtpPMinPct: Int = 0,
-    /** Explicitly opt into a separate MTP draft GGUF; target-model expert streaming stays enabled for MoE. */
+    /** No longer read: with MTP on, a drafter attached to the model is always used, else the model's own head. */
     val separateMtpDraftEnabled: Boolean = false,
     // Optional diagnostics perform per-token formatting and memory snapshots; keep the
     // interactive decode path lean unless the user explicitly enables Metrics CSV.

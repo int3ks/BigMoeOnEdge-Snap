@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
@@ -89,6 +90,7 @@ fun ChatScreen(
     onOpenChat: (String) -> Unit,
     onNavigateHome: () -> Unit,
     onNavigateToModels: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     onOpenFile: (String) -> Unit,
     modelViewModel: ModelViewModel,
     wideMode: Boolean = false,
@@ -246,6 +248,9 @@ fun ChatScreen(
                         isGenerating = uiState.isGenerating,
                         onManageModels = onNavigateToModels
                     )
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                    }
                 }
             )
         },
@@ -298,6 +303,10 @@ fun ChatScreen(
                                     // Long-press: user message -> Edit + Copy, assistant message -> Copy.
                                     onEdit = if (message.role == MessageRole.USER && !uiState.isGenerating) {
                                         { editingMessage = message }
+                                    } else null,
+                                    // Long-press / right-click: answer this turn again without editing it first.
+                                    onRegenerate = if ((message.role == MessageRole.USER || message.role == MessageRole.ASSISTANT) && !uiState.isGenerating) {
+                                        { follow = true; viewModel.regenerate(message.id) }
                                     } else null,
                                     // The complete message exactly as stored: no telemetry, labels or renderer fences.
                                     onCopy = if (message.rawContent.isNotEmpty()) {

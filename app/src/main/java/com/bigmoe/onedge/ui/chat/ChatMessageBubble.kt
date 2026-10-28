@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Visibility
@@ -60,7 +61,9 @@ import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.parser.ArtifactModel
 import com.bigmoe.onedge.parser.ArtifactType
 import com.bigmoe.onedge.ui.theme.AppTheme
-import com.bigmoe.onedge.ui.onSecondaryClick
+import com.bigmoe.onedge.ui.ContextMenuAt
+import com.bigmoe.onedge.ui.contextMenuTrigger
+import com.bigmoe.onedge.ui.rememberContextMenuState
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -81,10 +84,12 @@ fun ChatMessageBubble(
     onEdit: (() -> Unit)? = null,
     /** Long-press menu and the Copy button under assistant messages. Copies the complete raw message. */
     onCopy: (() -> Unit)? = null,
+    /** Long-press menu: answer this turn again, without editing it first. Null hides the entry. */
+    onRegenerate: (() -> Unit)? = null,
     /** URLs returned by web-search/tool messages for the same user turn. */
     additionalSources: List<String> = emptyList()
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
+    val menu = rememberContextMenuState()
     var sourcesOpen by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
     val sourceTextKey = if (isStreaming) null else text
@@ -96,7 +101,7 @@ fun ChatMessageBubble(
                 .take(12)
         }
     }
-    val hasMenu = onEdit != null || onCopy != null
+    val hasMenu = onEdit != null || onCopy != null || onRegenerate != null
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val bubbleShape = if (isUser) {
         RoundedCornerShape(topStart = 20.dp, topEnd = 4.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
@@ -148,8 +153,10 @@ fun ChatMessageBubble(
                                 .wrapContentHeight(Alignment.Top)
                         }
                     )
-                    .then(if (hasMenu) Modifier.onSecondaryClick { menuOpen = true }.combinedClickable(onClick = {}, onLongClick = { menuOpen = true }) else Modifier)
+                    .then(if (hasMenu) Modifier.contextMenuTrigger(menu).combinedClickable(onClick = {}, onLongClick = { menu.open() }) else Modifier)
               ) {
+               // The menu opens where the bubble was right-clicked or long-pressed; this Box shares the bubble's origin.
+               Box {
                 Column(
                     modifier = Modifier
                         .wrapContentHeight(Alignment.Top)
@@ -164,23 +171,31 @@ fun ChatMessageBubble(
                     // No separate block cursor: it appeared on its own line beneath short streamed replies.
                     // Live text updates already indicate progress without adding a stray rectangle.
                 }
+                ContextMenuAt(menu) {
+                    if (onEdit != null) {
+                        DropdownMenuItem(
+                            text = { Text("Edit") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = { menu.close(); onEdit() }
+                        )
+                    }
+                    if (onRegenerate != null) {
+                        DropdownMenuItem(
+                            text = { Text("Regenerate") },
+                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                            onClick = { menu.close(); onRegenerate() }
+                        )
+                    }
+                    if (onCopy != null) {
+                        DropdownMenuItem(
+                            text = { Text("Copy") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = { menu.close(); onCopy() }
+                        )
+                    }
+                }
+               }
               }
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                if (onEdit != null) {
-                    DropdownMenuItem(
-                        text = { Text("Edit") },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                        onClick = { menuOpen = false; onEdit() }
-                    )
-                }
-                if (onCopy != null) {
-                    DropdownMenuItem(
-                        text = { Text("Copy") },
-                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                        onClick = { menuOpen = false; onCopy() }
-                    )
-                }
             }
           }
         }
