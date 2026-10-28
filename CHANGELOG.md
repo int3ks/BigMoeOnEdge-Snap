@@ -12,6 +12,8 @@
 - Every CI build counts the version up: 0.6.1, 0.6.2, ... (commits since the 0.6.0 baseline), with versionCode raised to match.
 - Launcher icon: dark blue with light blue lettering and a red superscript 2.
 - In-app update (Settings → App update): checks the fork's newest GitHub release, downloads its APK and hands it to the system installer (Android asks once to allow installs from this app). Releases are published by hand once a build is approved: the "Publish release" workflow takes the APK of the latest successful NPU build and releases it as v0.6.N.
+- MTP is set in one place: Models → a model → "MTP draft" offers Off / the model's own MTP head / a separate drafter (with the drafter picker), tokens drafted per pass and the confidence floor. Settings → Speculation and routing keeps only n-gram guess-ahead.
+- Settings open with "Engine performance" expanded and "Appearance" collapsed.
 - A separate MTP draft (MTP-only sidecar GGUF) is no longer limited to Qwen4Exp targets: Qwen3.5/3.6 (`qwen35`, `qwen35moe`) and other architectures with an MTP head can use one, as upstream BigMoeOnEdge's `--mtp-head` does. The sidecar is still checked against the target (architecture, MTP block, width, vocabulary). Qwen3.5/3.6 GGUFs usually carry the head already, so MTP works on them without a sidecar.
 
 ## Unreleased - NPU prefill + MTP fix

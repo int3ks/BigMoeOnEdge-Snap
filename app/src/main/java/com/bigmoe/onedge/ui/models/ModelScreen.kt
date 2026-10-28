@@ -519,16 +519,15 @@ private fun ModelRow(
     settings: EngineSettings,
     viewModel: ModelViewModel
 ) {
-    var draftMenu by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember(model.path, model.displayName) { mutableStateOf(model.displayName) }
     // MTP is optional and most people never use it, so its section stays folded until the arrow is pressed.
     var mtpExpanded by remember(model.path) { mutableStateOf(false) }
     val attachedName = drafts.firstOrNull { it.path == attachedDraftPath }?.name
-    val mtpSummary = when (settings.spec) {
-        SpecSource.MTP -> "On \u2022 " + (attachedName ?: "model's own head")
-        SpecSource.NGRAM -> "Off (n-gram guess-ahead is on)"
-        SpecSource.OFF -> if (attachedName != null) "Off \u2022 sidecar: $attachedName" else "Off"
+    val mtpSummary = when (mtpMode(settings)) {
+        MtpMode.OWN_HEAD -> "On \u2022 model's own head \u2022 ${settings.draftMax} tokens/pass"
+        MtpMode.DRAFTER -> "On \u2022 drafter: ${attachedName ?: "none attached"} \u2022 ${settings.draftMax} tokens/pass"
+        MtpMode.OFF -> if (settings.spec == SpecSource.NGRAM) "Off (n-gram guess-ahead is on)" else "Off"
     }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -565,31 +564,10 @@ private fun ModelRow(
                 )
             }
             if (mtpExpanded) {
-                Text(
-                    "Note: with an mmproj (vision projector), a message that contains an image is answered without guessing ahead (normal speed, greedy decoding). Text-only messages still use MTP.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                MtpSettingsPanel(
+                    settings = settings, viewModel = viewModel, drafts = drafts, attachedName = attachedName,
+                    onAttachDraft = onAttachDraft, onPickDraft = onPickDraft
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Separate MTP sidecar", style = MaterialTheme.typography.labelMedium)
-                        Text(attachedName ?: "No sidecar attached", style = MaterialTheme.typography.bodySmall)
-                    }
-                    androidx.compose.foundation.layout.Box {
-                        OutlinedButton(onClick = { draftMenu = true }) { Text("Attach") }
-                        DropdownMenu(expanded = draftMenu, onDismissRequest = { draftMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Choose separate MTP GGUF…") },
-                                onClick = { draftMenu = false; onPickDraft() }
-                            )
-                            DropdownMenuItem(text = { Text("Use model's built-in MTP / none") }, onClick = { draftMenu = false; onAttachDraft(null) })
-                            drafts.forEach { d ->
-                                DropdownMenuItem(text = { Text(d.name) }, onClick = { draftMenu = false; onAttachDraft(d.path) })
-                            }
-                        }
-                    }
-                }
-                MtpSettingsPanel(settings = settings, viewModel = viewModel)
             }
             if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
         }

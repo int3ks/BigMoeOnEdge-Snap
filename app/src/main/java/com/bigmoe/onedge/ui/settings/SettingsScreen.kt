@@ -179,10 +179,10 @@ private fun SettingsContent(
     var contextText by remember { mutableStateOf(settings.contextLength.toString()) }
     val contextValid = ContextInput.parse(contextText) != null
     var experimental by remember { mutableStateOf(false) }
-    var performanceExpanded by remember { mutableStateOf(false) }
+    var performanceExpanded by remember { mutableStateOf(true) }
     var toolsMediaExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
-    var appearanceExpanded by remember { mutableStateOf(true) }
+    var appearanceExpanded by remember { mutableStateOf(false) }
     var chatExpanded by remember { mutableStateOf(false) }
     var mediaExpanded by remember { mutableStateOf(false) }
     var toolsExpanded by remember { mutableStateOf(false) }
@@ -546,26 +546,19 @@ private fun SettingsContent(
                 ) { viewModel.updateIoTwoWave(it) }
                 Spacer(Modifier.height(8.dp))
                 Section("Speculation and routing")
+                // MTP (on/off, drafter, tokens per pass) lives on the Models page; only n-gram guessing is set here.
                 ChoiceSetting(
-                    "Guess ahead",
-                    listOf(SpecSource.OFF to "Off", SpecSource.MTP to "Model's own head (MTP)", SpecSource.NGRAM to "Repeated text (n-gram)"),
+                    "Guess ahead from repeated text (n-gram)",
+                    listOf(SpecSource.OFF to "Off", SpecSource.NGRAM to "On") +
+                        (if (settings.spec == SpecSource.MTP) listOf(SpecSource.MTP to "Off (MTP is on)") else emptyList()),
                     settings.spec,
                     enabled = settings.routeAhead == 0 && !settings.rowStream
-                ) { viewModel.updateSpec(it) }
-                Hint("Draft several likely next tokens and verify them together. It can improve tokens/s but may use more memory. MTP requires a compatible embedded head or an attached sidecar on the Models page; n-gram only helps when text repeats. Guess ahead forces greedy decoding (temperature 0).")
-                if (settings.spec != SpecSource.OFF) {
+                ) { if (it != SpecSource.MTP) viewModel.updateSpec(it) }
+                Hint("Drafts the next tokens from text that already appeared and verifies them together; only helps when text repeats. Forces greedy decoding (temperature 0). MTP is set per model on the Models page under \"MTP draft\"; turning n-gram on replaces MTP.")
+                if (settings.spec == SpecSource.NGRAM) {
                     ChoiceSetting("Tokens guessed per pass", Choices.DRAFT_MAX.map { it to it.toString() }, settings.draftMax) {
                         viewModel.updateDraftMax(it)
                     }
-                }
-                if (settings.spec == SpecSource.MTP) {
-                    ChoiceSetting(
-                        "MTP confidence floor",
-                        listOf(0 to "Always draft", 40 to "Above 40%", 60 to "Above 60%", 80 to "Above 80%"),
-                        settings.mtpPMinPct
-                    ) { viewModel.updateMtpPMinPct(it) }
-                    Hint("Stops drafting when the MTP head's probability for its next token is below this threshold. Higher values spend less time on weak guesses, but may draft fewer tokens.")
-                    Hint("The separate MTP GGUF attachment and its enable switch remain under Models → MTP draft.")
                 }
                 if (settings.spec == SpecSource.NGRAM) {
                     ChoiceSetting(
@@ -619,7 +612,6 @@ private fun SettingsContent(
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error
                     )
                 }
-                Hint("Guess ahead (MTP / n-gram) and the MTP sidecar moved to the Models page: open a model and expand \"MTP draft\".")
                 ChoiceSetting(
                     "Route-ahead (layers)",
                     Choices.ROUTE_AHEAD.map { it to if (it == 0) "off" else "$it" },
