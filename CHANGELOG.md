@@ -7,6 +7,10 @@
 - Engine core adapted to the newer llama.cpp `common` API (`common_chat_prompt`, `common_chat_input`, `common_batch` for the MTP driver, reasoning format set on the template inputs), the same way upstream BigMoeOnEdge did.
 - `flint` added to the MoE streaming registry (standard `ffn_{gate,up,down}_exps`).
 - APK builds: `.github/workflows/android-npu.yml` builds the NPU (Hexagon) APK on every push, `.github/workflows/android-apk.yml` the CPU-only APK on demand. Both are signed with the same release key (secrets `BMOE_KEYSTORE_*`, certificate pinned in the workflows), so every build installs as an update.
+- Live tokens/second in the footer while a reply is generated, measured from the first generated token (so the prefill does not drag it down); the final figure after the turn is still the engine's own.
+- A mouse right-click opens the context menu of a chat message or a chat in the list right away, like a long-press does with a finger.
+- Every CI build counts the version up: 0.6.1, 0.6.2, ... (commits since the 0.6.0 baseline), with versionCode raised to match.
+- Launcher icon: dark blue with light blue lettering and a red superscript 2.
 - A separate MTP draft (MTP-only sidecar GGUF) is no longer limited to Qwen4Exp targets: Qwen3.5/3.6 (`qwen35`, `qwen35moe`) and other architectures with an MTP head can use one, as upstream BigMoeOnEdge's `--mtp-head` does. The sidecar is still checked against the target (architecture, MTP block, width, vocabulary). Qwen3.5/3.6 GGUFs usually carry the head already, so MTP works on them without a sidecar.
 
 ## Unreleased - NPU prefill + MTP fix

@@ -65,6 +65,8 @@ if (bmoeRequireStableSigning) {
     check(File(bmoeKeystoreFile!!).isFile) { "BMOE_KEYSTORE_FILE does not exist: $bmoeKeystoreFile" }
 }
 
+val bmoeBuildNumber: Int = providers.gradleProperty("bmoeBuildNumber").orNull?.trim()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+
 val bmoeAbis: List<String> = (providers.gradleProperty("bmoeAbis").orNull ?: "arm64-v8a")
     .split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -80,8 +82,10 @@ android {
         // dependable from Android 10 (upstream uses 29); the NDK toolchain also links against this platform level.
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.6.0"
+        // CI passes -PbmoeBuildNumber (commits since the 0.6.0 baseline), so every build counts up:
+        // 0.6.1, 0.6.2, ... with a matching versionCode. Local builds without it stay 0.6.0 (versionCode 11).
+        versionCode = 11 + bmoeBuildNumber
+        versionName = "0.6.$bmoeBuildNumber"
         manifestPlaceholders["bmoeAppCategory"] = bmoeAppCategory
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

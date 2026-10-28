@@ -55,6 +55,7 @@ import com.bigmoe.onedge.ui.history.HistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.bigmoe.onedge.ui.onSecondaryClick
 
 /** Persistent tablet-side history panel; it deliberately uses the same HistoryViewModel as HomeScreen. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -174,7 +175,7 @@ private fun PanelSessionRow(
         shape = RoundedCornerShape(14.dp),
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         tonalElevation = if (selected) 2.dp else 0.dp,
-        modifier = Modifier.fillMaxWidth().combinedClickable(
+        modifier = Modifier.fillMaxWidth().onSecondaryClick { menuOpen = true }.combinedClickable(
             onClick = onOpen,
             onLongClick = { menuOpen = true }
         )

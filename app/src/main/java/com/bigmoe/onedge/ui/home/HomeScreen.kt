@@ -50,6 +50,7 @@ import com.bigmoe.onedge.ui.history.HistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.bigmoe.onedge.ui.onSecondaryClick
 
 /** Home tab: the saved conversations. Creating a chat is the "+" button of the navigation bar. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -189,6 +190,7 @@ private fun SessionRow(
         tonalElevation = 1.dp,
         modifier = Modifier
             .fillMaxWidth()
+            .onSecondaryClick { menuOpen = true }
             .combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
     ) {
         Row(

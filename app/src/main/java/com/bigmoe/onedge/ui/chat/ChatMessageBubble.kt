@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.parser.ArtifactModel
 import com.bigmoe.onedge.parser.ArtifactType
 import com.bigmoe.onedge.ui.theme.AppTheme
+import com.bigmoe.onedge.ui.onSecondaryClick
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -147,7 +148,7 @@ fun ChatMessageBubble(
                                 .wrapContentHeight(Alignment.Top)
                         }
                     )
-                    .then(if (hasMenu) Modifier.combinedClickable(onClick = {}, onLongClick = { menuOpen = true }) else Modifier)
+                    .then(if (hasMenu) Modifier.onSecondaryClick { menuOpen = true }.combinedClickable(onClick = {}, onLongClick = { menuOpen = true }) else Modifier)
               ) {
                 Column(
                     modifier = Modifier

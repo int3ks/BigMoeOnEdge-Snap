@@ -60,6 +60,8 @@ data class ChatUiState(
     val isGenerating: Boolean = false,
     val generationElapsedMs: Long = 0L,
     val generationTokens: Int = 0,
+    /** Live decode rate of the turn being generated (tokens since the first one / time since then). */
+    val liveTokensPerSecond: Double? = null,
     val contextUsed: Int = 0,
     val contextTotal: Int = 0,
     /** Answer text of the message being generated (tool-call blocks already removed). */
@@ -148,6 +150,7 @@ class ChatViewModel(
                         isGenerating = sameChat && g.active,
                         generationElapsedMs = if (sameChat) g.elapsedMs else 0L,
                         generationTokens = if (sameChat) g.generatedTokens else 0,
+                        liveTokensPerSecond = if (sameChat && g.active) g.liveTokensPerSecond else null,
                         contextUsed = if (sameChat) g.contextUsed else 0,
                         contextTotal = if (sameChat) g.contextTotal else 0,
                         liveText = if (sameChat && g.active) g.liveText else if (sameChat) it.liveText else "",
@@ -207,6 +210,7 @@ class ChatViewModel(
                     isGenerating = same && g.active,
                     generationElapsedMs = if (same) g.elapsedMs else 0L,
                     generationTokens = if (same) g.generatedTokens else 0,
+                    liveTokensPerSecond = if (same && g.active) g.liveTokensPerSecond else null,
                     contextUsed = if (same) g.contextUsed else 0,
                     contextTotal = if (same) g.contextTotal else 0,
                     liveText = if (same && g.active) g.liveText else it.liveText,

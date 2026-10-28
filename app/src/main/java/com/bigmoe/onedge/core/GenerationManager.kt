@@ -30,8 +30,24 @@ class GenerationManager(
         val liveReasoning: String = "",
         val liveStatus: String? = null,
         val notice: String? = null,
-        val pendingConfirmation: ConfirmationRequest? = null
-    )
+        val pendingConfirmation: ConfirmationRequest? = null,
+        /** When the first generated token was seen and the count then: the live rate starts there, after the prefill. */
+        val decodeStartAt: Long? = null,
+        val decodeStartTokens: Int = 0,
+        /** Live decode rate while generating, null until a second token has arrived. */
+        val liveTokensPerSecond: Double? = null
+    ) {
+        /** The new token count, with the live rate measured from the first generated token. */
+        fun withTokens(tokens: Int, now: Long = System.currentTimeMillis()): State {
+            val n = maxOf(generatedTokens, tokens)
+            if (n <= 0) return this
+            val startAt = decodeStartAt ?: now
+            val startTokens = if (decodeStartAt == null) n else decodeStartTokens
+            val ms = now - startAt
+            val rate = if (n > startTokens && ms > 0) (n - startTokens) * 1000.0 / ms else liveTokensPerSecond
+            return copy(generatedTokens = n, decodeStartAt = startAt, decodeStartTokens = startTokens, liveTokensPerSecond = rate)
+        }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _state = MutableStateFlow(State())
@@ -85,9 +101,8 @@ class GenerationManager(
                             liveText = liveText + textChunk,
                             liveReasoning = liveReasoning + reasoningChunk,
                             liveStatus = if (textChunk.isNotEmpty()) null else liveStatus,
-                            generatedTokens = progress?.let { maxOf(generatedTokens, it.generatedTokens) } ?: generatedTokens,
                             contextUsed = progress?.contextUsed ?: contextUsed
-                        )
+                        ).let { s -> progress?.let { s.withTokens(it.generatedTokens) } ?: s }
                     }
                 }
                 lastUiFlushNanos = System.nanoTime()
@@ -188,7 +203,7 @@ class GenerationManager(
     }
 
     fun updateTokenProgress(generatedTokens: Int, contextUsed: Int? = null) = update {
-        copy(generatedTokens = maxOf(this.generatedTokens, generatedTokens), contextUsed = contextUsed ?: this.contextUsed)
+        withTokens(generatedTokens).copy(contextUsed = contextUsed ?: this.contextUsed)
     }
 
     fun resolveConfirmation(approved: Boolean) { confirmation?.complete(approved) }
