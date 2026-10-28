@@ -57,7 +57,9 @@ class FakeEngineBackend(
     var lastConfig: LoadConfig? = null
     override fun capabilities() = EngineCaps(overlapHook = true, multimodal = true, npuPrefill = false)
 
-    override fun load(modelPath: String, config: LoadConfig, csvPath: String?, mmprojPath: String?, draftPath: String?): String? {
+    override fun load(
+        modelPath: String, config: LoadConfig, csvPath: String?, mmprojPath: String?, draftPath: String?, lora: LoraChoice?
+    ): String? {
         lastCsvPath = csvPath
         lastConfig = config
         lastDraftPath = draftPath

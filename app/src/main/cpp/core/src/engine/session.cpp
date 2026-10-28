@@ -964,6 +964,16 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     im.ctx.reset(ctx);
     llama_set_n_threads(ctx, cfg.n_threads, cfg.n_threads_batch);
 
+    // Optional LoRA adapter. llama.cpp frees it together with the model, so it needs no handle of its own.
+    llama_adapter_lora * lora = nullptr;
+    float lora_scale = cfg.lora_scale;
+    if (!cfg.lora_path.empty()) {
+        lora = llama_adapter_lora_init(model, cfg.lora_path.c_str());
+        if (!lora) return fail("failed to load the LoRA adapter (it must be made for this model): " + cfg.lora_path);
+        if (llama_set_adapters_lora(ctx, &lora, 1, &lora_scale) != 0)
+            return fail("failed to apply the LoRA adapter: " + cfg.lora_path);
+    }
+
     // Optional multimodal projector; kept CPU-side. It coexists with speculative decoding: a turn that
     // carries images decodes plainly (spec_on / mtp_on are off for it) and both contexts' KV is wiped
     // before and after it, so the draft context never sees media positions.
@@ -1029,6 +1039,10 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         if (!ctx_dft) return fail("failed to create the MTP draft context");
         im.ctx_dft.reset(ctx_dft);
         llama_set_n_threads(ctx_dft, cfg.n_threads, cfg.n_threads_batch);
+        // The model's own MTP head drafts with the same weights the target runs, LoRA included; a separate
+        // drafter file is a model of its own the adapter was not made for.
+        if (lora && draft_model == model && llama_set_adapters_lora(ctx_dft, &lora, 1, &lora_scale) != 0)
+            return fail("failed to apply the LoRA adapter to the MTP draft context: " + cfg.lora_path);
     }
 
     // Opt-in sampling. temp <= 0 leaves smpl null and the decode loop on argmax — the deterministic

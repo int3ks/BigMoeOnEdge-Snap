@@ -40,6 +40,9 @@ data class ModelsUiState(
     val drafts: List<ModelFile> = emptyList(),
     val incompleteImports: List<com.bigmoe.onedge.core.IncompleteModelImport> = emptyList(),
     val modelDrafts: Map<String, String> = emptyMap(),
+    /** LoRA adapters in app storage, and the one attached to each model (with its strength). */
+    val loras: List<ModelFile> = emptyList(),
+    val modelLoras: Map<String, com.bigmoe.onedge.core.LoraChoice> = emptyMap(),
     val existingPathInput: String = "",
     val importProgress: ImportProgress? = null,
     val pendingLoad: PendingLoad? = null,
@@ -75,7 +78,11 @@ class ModelViewModel(
             val list = modelManager.listModels()
             val drafts = modelManager.listDrafts()
             val links = list.mapNotNull { model -> modelManager.draftForModel(model.path)?.let { model.path to it } }.toMap()
-            _uiState.update { it.copy(models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links) }
+            val loras = modelManager.listLoras()
+            val loraLinks = list.mapNotNull { model -> modelManager.loraForModel(model.path)?.let { model.path to it } }.toMap()
+            _uiState.update {
+                it.copy(models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras, modelLoras = loraLinks)
+            }
         }
     }
 
@@ -140,6 +147,54 @@ class ModelViewModel(
                 refresh()
             } catch (e: Exception) {
                 _uiState.update { it.copy(message = e.message ?: "Could not attach the draft") }
+            }
+        }
+    }
+
+    /** Attaches a LoRA adapter to a model (null detaches). Applied the next time that model loads. */
+    fun attachLora(modelPath: String, loraPath: String?) {
+        viewModelScope.launch {
+            try {
+                modelManager.attachLora(modelPath, loraPath)
+                _uiState.update {
+                    it.copy(message = if (loraPath == null) "Detached the LoRA adapter." else "Attached ${File(loraPath).name}. It applies the next time this model loads.")
+                }
+                refresh()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not attach the LoRA adapter") }
+            }
+        }
+    }
+
+    fun setLoraScale(modelPath: String, scale: Float) {
+        viewModelScope.launch {
+            modelManager.setLoraScale(modelPath, scale)
+            refresh()
+        }
+    }
+
+    /** Copy a LoRA adapter GGUF into private storage, check its header, then attach it to [modelPath]. */
+    fun importAndAttachLora(resolver: ContentResolver, uri: Uri, modelPath: String) {
+        if (importJob?.isActive == true) {
+            _uiState.update { it.copy(message = "Wait for the current import to finish before adding a LoRA adapter.") }
+            return
+        }
+        importJob = viewModelScope.launch {
+            _uiState.update { it.copy(message = null, importProgress = ImportProgress("LoRA adapter", 0, 0)) }
+            try {
+                val lora = modelManager.importAndAttachLora(resolver, uri, modelPath) { copied, total ->
+                    _uiState.update { it.copy(importProgress = ImportProgress("LoRA adapter", copied, total)) }
+                }
+                _uiState.update { it.copy(message = "Imported and attached ${lora.name}. It applies the next time this model loads.") }
+                refresh()
+            } catch (e: CancellationException) {
+                _uiState.update { it.copy(message = "LoRA import cancelled.") }
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not import the LoRA adapter.") }
+                refresh()
+            } finally {
+                _uiState.update { it.copy(importProgress = null) }
             }
         }
     }

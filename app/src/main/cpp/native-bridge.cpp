@@ -272,7 +272,7 @@ JNIEXPORT jbyteArray JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     JNIEnv * env, jobject /* thiz */,
     jbyteArray j_model_path, jintArray j_ints, jfloatArray j_floats, jbyteArray j_csv_path,
-    jbyteArray j_mmproj_path, jbyteArray j_draft_path)
+    jbyteArray j_mmproj_path, jbyteArray j_draft_path, jbyteArray j_lora_path, jfloat j_lora_scale)
 {
     const std::string model_path = from_bytes(env, j_model_path);
     if (model_path.empty()) return to_bytes(env, "model path is empty");
@@ -287,6 +287,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     const std::string csv_path = from_bytes(env, j_csv_path);
     const std::string mmproj_path = from_bytes(env, j_mmproj_path);
     const std::string draft_path = from_bytes(env, j_draft_path);
+    const std::string lora_path = from_bytes(env, j_lora_path);
 
     release_session_blocking();
 
@@ -318,6 +319,8 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     cfg.n_expert_used = std::max<int>(0, iv[I_N_EXPERT_USED]); // 0 = the model's own top-k
     cfg.mmproj_path = mmproj_path; // patch 0003; empty = text only
     cfg.spec.draft_model_path = draft_path;
+    cfg.lora_path = lora_path; // empty = no LoRA adapter
+    cfg.lora_scale = std::clamp<float>((float) j_lora_scale, 0.0f, 4.0f);
 #ifdef BMOE_HAVE_HEXAGON
     if (npu_requested) {
         cfg.prefill.device = "HTP0";

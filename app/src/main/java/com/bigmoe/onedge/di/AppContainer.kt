@@ -87,7 +87,8 @@ class AppContainer(private val context: Context) {
     val engineController: EngineController by lazy {
         EngineController(
             backendProvider = { NativeEngineBackend(EngineNativeBridge()) },
-            csvPathProvider = { newMetricsCsvPath() }
+            csvPathProvider = { newMetricsCsvPath() },
+            loraProvider = { path -> modelManager.loraForModel(path) }
         )
     }
 

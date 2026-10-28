@@ -150,6 +150,8 @@ data class ModelInfo(
     val mmprojPath: String?,
     val config: LoadConfig,
     val draftModelPath: String? = null,
+    /** LoRA adapter applied at load (path + strength); null = none or it failed to load. */
+    val lora: LoraChoice? = null,
     val loadWarning: String? = null,
     /** True only when the model load successfully initialized the requested HTP prefill path. */
     val npuPrefillReady: Boolean = false
@@ -253,3 +255,6 @@ data class DecisionResult(
     val best: Int = -1,
     val metrics: String = ""
 )
+
+/** A LoRA adapter GGUF applied on top of a model at load, with its strength (1.0 = as trained). */
+data class LoraChoice(val path: String, val scale: Float)

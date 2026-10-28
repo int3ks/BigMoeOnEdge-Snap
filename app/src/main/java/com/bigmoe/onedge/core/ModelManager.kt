@@ -101,11 +101,13 @@ class ModelManager(
         cleanupStaleSingleFileImportTemps()
         val displayNames = completedDisplayNames()
         val internal = modelsDir.listFiles { f ->
-            f.isFile && f.name.endsWith(".gguf", ignoreCase = true) && !isLaterShard(f.name) && !isDraftName(f.name) && hasCompleteShardFiles(f)
+            f.isFile && f.name.endsWith(".gguf", ignoreCase = true) && !isLaterShard(f.name) && !isDraftName(f.name) &&
+                !isLoraName(f.name) && hasCompleteShardFiles(f)
         }.orEmpty().map { f -> ModelFile(f.canonicalPath, f.name, logicalModelSize(f), true, displayNames[f.canonicalPath]) }
         val external = registeredPaths().mapNotNull { path ->
             val f = File(path)
-            if (f.isFile && f.name.endsWith(".gguf", true) && !isLaterShard(f.name) && !isDraftName(f.name) && hasCompleteShardFiles(f)) {
+            if (f.isFile && f.name.endsWith(".gguf", true) && !isLaterShard(f.name) && !isDraftName(f.name) &&
+                !isLoraName(f.name) && hasCompleteShardFiles(f)) {
                 val canonical = runCatching { f.canonicalPath }.getOrDefault(path)
                 ModelFile(canonical, f.name, logicalModelSize(f), false, displayNames[canonical])
             } else null
@@ -199,6 +201,11 @@ class ModelManager(
             }
             keysToRemove.forEach(props::remove)
             saveDraftLinks(props)
+            val loras = loraLinks()
+            loras.stringPropertyNames().filter { k ->
+                !k.endsWith(SCALE_SUFFIX) && (decodePath(k) == canonical || decodePath(loras.getProperty(k)) == canonical)
+            }.forEach { k -> loras.remove(k); loras.remove(k + SCALE_SUFFIX) }
+            saveLoraLinks(loras)
         }
         ok
     }
@@ -244,6 +251,13 @@ class ModelManager(
         props.remove(encodePath(oldPath))
         if (existing != null) props.setProperty(encodePath(newPath), existing)
         saveDraftLinks(props)
+        val loras = loraLinks()
+        for (suffix in listOf("", SCALE_SUFFIX)) {
+            val value = loras.getProperty(encodePath(oldPath) + suffix) ?: continue
+            loras.remove(encodePath(oldPath) + suffix)
+            loras.setProperty(encodePath(newPath) + suffix, value)
+        }
+        saveLoraLinks(loras)
         ModelFile(newPath, newFiles.first().name, newFiles.first().length(), true)
     }
 
@@ -310,6 +324,14 @@ class ModelManager(
     }
 
     private val registeredFile: File get() = File(modelsDir, ".registered-paths")
+    private val loraLinksFile: File get() = File(modelsDir, ".lora-links.properties")
+    private fun loraLinks(): java.util.Properties = java.util.Properties().also { props ->
+        try { loraLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
+    }
+    private fun saveLoraLinks(props: java.util.Properties) {
+        loraLinksFile.outputStream().use { props.store(it, "BigMoeOnEdge LoRA adapter links") }
+    }
+
     private val draftLinksFile: File get() = File(modelsDir, ".draft-links.properties")
     private fun draftLinks(): java.util.Properties = java.util.Properties().also { props ->
         try { draftLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
@@ -444,6 +466,105 @@ class ModelManager(
             throw t
         } finally {
             activePaths.forEach(ACTIVE_IMPORT_PATHS::remove)
+        }
+    }
+
+    /** LoRA adapters imported into app storage (named lora-*.gguf on import, so they never show up as models). */
+    suspend fun listLoras(): List<ModelFile> = withContext(io) {
+        modelsDir.listFiles { f -> f.isFile && f.name.endsWith(".gguf", true) && isLoraName(f.name) }
+            .orEmpty().map { ModelFile(it.canonicalPath, it.name, it.length(), true) }
+            .sortedBy { it.name.lowercase() }
+    }
+
+    /** Attaches [loraPath] to [modelPath] (null detaches). The strength stays as set, default [DEFAULT_LORA_SCALE]. */
+    suspend fun attachLora(modelPath: String, loraPath: String?) = withContext(io) {
+        val key = encodePath(canonicalPath(modelPath))
+        val props = loraLinks()
+        if (loraPath.isNullOrBlank()) {
+            props.remove(key)
+        } else {
+            val lora = File(loraPath).canonicalFile
+            if (!lora.isFile || !lora.canRead() || !isLoraFile(lora)) throw IOException("Not a readable LoRA adapter GGUF: $loraPath")
+            props.setProperty(key, encodePath(lora.path))
+        }
+        saveLoraLinks(props)
+    }
+
+    suspend fun setLoraScale(modelPath: String, scale: Float) = withContext(io) {
+        val props = loraLinks()
+        props.setProperty(encodePath(canonicalPath(modelPath)) + SCALE_SUFFIX, scale.coerceIn(0f, 4f).toString())
+        saveLoraLinks(props)
+    }
+
+    /** The adapter attached to [modelPath] and its strength; null when none is attached or the file is gone. */
+    suspend fun loraForModel(modelPath: String): LoraChoice? = withContext(io) {
+        val props = loraLinks()
+        val key = encodePath(canonicalPath(modelPath))
+        val path = props.getProperty(key)?.let(::decodePath)?.takeIf { File(it).isFile } ?: return@withContext null
+        LoraChoice(path, props.getProperty(key + SCALE_SUFFIX)?.toFloatOrNull() ?: DEFAULT_LORA_SCALE)
+    }
+
+    /**
+     * Imports a LoRA adapter GGUF from SAF into app storage as lora-<name>.gguf and attaches it to [modelPath]. The
+     * file is recognised by its GGUF header (the `adapter.type` key llama.cpp requires), not by its name.
+     */
+    suspend fun importAndAttachLora(
+        resolver: ContentResolver,
+        uri: Uri,
+        modelPath: String,
+        onProgress: (copiedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+    ): ModelFile = withContext(io) {
+        val target = File(canonicalPath(modelPath))
+        if (!target.isFile) throw IOException("Choose a model before attaching a LoRA adapter.")
+        val (displayName, reportedSize) = queryNameAndSize(resolver, uri)
+        val originalName = sanitizeFileName(displayName ?: "adapter.gguf")
+        if (!originalName.endsWith(".gguf", ignoreCase = true)) throw IOException("Choose a LoRA adapter in .gguf format.")
+        val loraName = if (isLoraName(originalName)) originalName else "lora-$originalName"
+        val extensionless = loraName.removeSuffixIgnoreCase(".gguf")
+        var destination = File(modelsDir, loraName)
+        var suffix = 2
+        while (destination.exists()) {
+            destination = File(modelsDir, "$extensionless-$suffix.gguf")
+            suffix++
+        }
+        val temp = File(modelsDir, ".import-lora-${System.nanoTime()}.part")
+        val active = temp.canonicalPath
+        ACTIVE_IMPORT_PATHS.add(active)
+        try {
+            if (reportedSize > 0 && modelsDir.usableSpace < reportedSize + SPACE_MARGIN) {
+                throw IOException("Not enough free app storage to copy this LoRA adapter (about ${formatBytes(reportedSize)}).")
+            }
+            var copied = 0L
+            resolver.openInputStream(uri).use { input ->
+                if (input == null) throw IOException("Android could not open the selected file.")
+                temp.outputStream().use { output ->
+                    val buffer = ByteArray(1024 * 1024)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        copied += read
+                        onProgress(copied, reportedSize)
+                    }
+                    output.fd.sync()
+                }
+            }
+            if (!hasGgufMagic(temp)) throw IOException("The selected file does not have a GGUF header.")
+            if (!isLoraFile(temp)) throw IOException("The selected GGUF is not a LoRA adapter (its header has no adapter.type).")
+            if (!temp.renameTo(destination)) throw IOException("Could not finalize the copied LoRA adapter in app storage.")
+            try {
+                attachLora(target.canonicalPath, destination.canonicalPath)
+            } catch (t: Throwable) {
+                destination.delete()
+                throw t
+            }
+            ModelFile(destination.canonicalPath, destination.name, destination.length(), true)
+        } catch (t: Throwable) {
+            temp.delete()
+            throw t
+        } finally {
+            ACTIVE_IMPORT_PATHS.remove(active)
         }
     }
 
@@ -1141,6 +1262,32 @@ class ModelManager(
         fun isDraftName(fileName: String): Boolean {
             val n = fileName.lowercase()
             return n.startsWith("mtp-") || n.startsWith("mtp_") || n.contains("-mtp-") || n.contains("_mtp_") || n.contains("-shared-mtp")
+        }
+
+        const val DEFAULT_LORA_SCALE = 1.75f
+        private const val SCALE_SUFFIX = ".scale"
+        private val LORA_MARK = "adapter.type".toByteArray(Charsets.US_ASCII)
+
+        fun isLoraName(fileName: String): Boolean {
+            val n = fileName.lowercase()
+            return n.startsWith("lora-") || n.startsWith("lora_")
+        }
+
+        /** LoRA adapters carry "adapter.type" in their GGUF header (llama.cpp requires it); the name proves nothing. */
+        fun isLoraFile(file: File): Boolean = try {
+            val buf = ByteArray(256 * 1024)
+            val n = file.inputStream().use { input ->
+                var total = 0
+                while (total < buf.size) {
+                    val r = input.read(buf, total, buf.size - total)
+                    if (r <= 0) break
+                    total += r
+                }
+                total
+            }
+            (0..n - LORA_MARK.size).any { i -> LORA_MARK.indices.all { j -> buf[i + j] == LORA_MARK[j] } }
+        } catch (_: Exception) {
+            false
         }
 
         fun isProjectorName(fileName: String): Boolean = fileName.contains("mmproj", ignoreCase = true) && fileName.endsWith(".gguf", ignoreCase = true)

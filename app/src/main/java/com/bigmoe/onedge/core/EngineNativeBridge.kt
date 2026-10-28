@@ -87,7 +87,9 @@ class EngineNativeBridge {
         floats: FloatArray,
         csvPath: ByteArray,
         mmprojPath: ByteArray,
-        draftPath: ByteArray
+        draftPath: ByteArray,
+        loraPath: ByteArray,
+        loraScale: Float
     ): ByteArray
 
     /** Bit 0: expert-ready hook; bit 1: multimodal; bit 2: HTP backend runtime probe succeeded. */

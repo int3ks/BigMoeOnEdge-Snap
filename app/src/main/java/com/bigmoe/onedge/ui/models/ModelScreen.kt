@@ -70,6 +70,7 @@ fun ModelScreen(
     var showAdvancedPath by remember { mutableStateOf(false) }
     var targetIncompleteImportId by remember { mutableStateOf<String?>(null) }
     var targetMtpModelPath by remember { mutableStateOf<String?>(null) }
+    var targetLoraModelPath by remember { mutableStateOf<String?>(null) }
 
     // MANAGE_EXTERNAL_STORAGE is a special Settings grant, not a normal runtime prompt.
     // When the user returns, retry registration automatically so the path is not copied.
@@ -139,6 +140,14 @@ fun ModelScreen(
         targetMtpModelPath = null
         if (uri != null && modelPath != null) {
             viewModel.importAndAttachDraft(context.contentResolver, uri, modelPath)
+        }
+    }
+    // Same for a LoRA adapter: copied into app storage, checked by its GGUF header, attached to the model.
+    val loraPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val modelPath = targetLoraModelPath
+        targetLoraModelPath = null
+        if (uri != null && modelPath != null) {
+            viewModel.importAndAttachLora(context.contentResolver, uri, modelPath)
         }
     }
 
@@ -341,6 +350,14 @@ fun ModelScreen(
                         mtpPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     },
                     onRename = { viewModel.rename(model.path, it) },
+                    loras = ui.loras,
+                    attachedLora = ui.modelLoras[model.path],
+                    onAttachLora = { viewModel.attachLora(model.path, it) },
+                    onPickLora = {
+                        targetLoraModelPath = model.path
+                        loraPicker.launch(arrayOf("application/octet-stream", "*/*"))
+                    },
+                    onLoraScale = { viewModel.setLoraScale(model.path, it) },
                     settings = settings
                 )
             }
@@ -461,6 +478,12 @@ private fun StatusCard(
                     val info = engine.info
                     Text("Loaded: ${info.name}", style = MaterialTheme.typography.titleMedium)
                     info.draftModelPath?.let { Text("Separate MTP draft: ${it.substringAfterLast('/')}", style = MaterialTheme.typography.bodySmall) }
+                    info.lora?.let {
+                        Text(
+                            "LoRA adapter: ${it.path.substringAfterLast('/')} • strength " + String.format(java.util.Locale.US, "%.2f", it.scale),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     info.loadWarning?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                     Text(
                         if (info.mmprojPath.isNullOrBlank()) "Vision: inactive (no mmproj)"
@@ -512,6 +535,11 @@ private fun ModelRow(
     onAttachDraft: (String?) -> Unit,
     onPickDraft: () -> Unit,
     onRename: (String) -> Unit,
+    loras: List<ModelFile>,
+    attachedLora: com.bigmoe.onedge.core.LoraChoice?,
+    onAttachLora: (String?) -> Unit,
+    onPickLora: () -> Unit,
+    onLoraScale: (Float) -> Unit,
     settings: EngineSettings
 ) {
     var renameDialog by remember { mutableStateOf(false) }
@@ -541,6 +569,7 @@ private fun ModelRow(
             if (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP || attachedName != null) {
                 DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
             }
+            LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
             if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
         }
     }

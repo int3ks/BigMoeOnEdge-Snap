@@ -30,7 +30,9 @@ class EngineController(
     private val backendProvider: () -> EngineBackend,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /** Where to write this session's metrics CSV (null = no CSV). Only asked when metrics CSV is enabled. */
-    private val csvPathProvider: () -> String? = { null }
+    private val csvPathProvider: () -> String? = { null },
+    /** The LoRA adapter attached to a model (Models page), applied whenever that model loads; null = none. */
+    private val loraProvider: suspend (modelPath: String) -> LoraChoice? = { null }
 ) {
     private val backend: EngineBackend by lazy(backendProvider)
 
@@ -100,13 +102,30 @@ class EngineController(
             val csv = if (config.metricsCsv) csvPathProvider() else null
             var activeConfig = config
             var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
+            var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
             var warning: String? = null
             var error = try {
-                backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath)
+                backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)
             } catch (e: UnsatisfiedLinkError) {
                 "Native engine library failed to load: ${e.message}"
             } catch (e: Throwable) {
                 "Unexpected error while loading: ${e.message ?: e.javaClass.simpleName}"
+            }
+
+            // A LoRA adapter made for another model must not brick the model either: load it without the adapter
+            // and say so, rather than claiming the adapter is active.
+            if (error != null && activeLora != null) {
+                val withoutLora = try {
+                    backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, null)
+                } catch (e: Throwable) {
+                    "Unexpected error while retrying without the LoRA adapter: ${e.message ?: e.javaClass.simpleName}"
+                }
+                // Only blame the adapter when the model loads without it; otherwise the cause is elsewhere.
+                if (withoutLora == null) {
+                    warning = "LoRA adapter failed to load ($error). Loaded without it."
+                    activeLora = null
+                    error = null
+                }
             }
 
             // A broken/mismatched sidecar must not brick the target model. Retry a plain decode and
@@ -115,14 +134,16 @@ class EngineController(
                 val draftError = error
                 val plainConfig = config.copy(spec = SpecSource.OFF)
                 val plainError = try {
-                    backend.load(modelPath, plainConfig, csv, mmprojPath, null)
+                    backend.load(modelPath, plainConfig, csv, mmprojPath, null, activeLora)
                 } catch (e: Throwable) {
                     "Unexpected error while retrying without the MTP draft: ${e.message ?: e.javaClass.simpleName}"
                 }
                 if (plainError == null) {
                     activeConfig = plainConfig
                     activeDraftPath = null
-                    warning = "Separate MTP draft failed to load ($draftError). Loaded with normal decoding; speculation is OFF."
+                    warning = listOfNotNull(
+                        warning, "Separate MTP draft failed to load ($draftError). Loaded with normal decoding; speculation is OFF."
+                    ).joinToString("\n")
                     error = null
                 } else {
                     error = "Separate MTP draft failed: $draftError\nFallback without speculation also failed: $plainError"
@@ -147,6 +168,7 @@ class EngineController(
                     mmprojPath = mmprojPath,
                     config = activeConfig,
                     draftModelPath = activeDraftPath,
+                    lora = activeLora,
                     loadWarning = warning,
                     npuPrefillReady = info["npu_prefill"] == "ready"
                 )

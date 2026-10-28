@@ -37,6 +37,10 @@ struct SessionConfig {
     std::string model_path;
     // Multimodal projector path (.gguf); empty = text-only session.
     std::string mmproj_path;
+    // Optional LoRA adapter (.gguf whose header says adapter.type = lora), applied on top of the model at load,
+    // e.g. an uncensored fine-tune. It must have been trained for this base model. Empty = none.
+    std::string lora_path;
+    float lora_scale = 1.0f; // strength: 1.0 = as trained, higher = stronger
     int n_threads = 4;
     int n_threads_batch = 4;
     int n_ctx = 2048;

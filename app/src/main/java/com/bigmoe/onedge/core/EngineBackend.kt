@@ -6,7 +6,10 @@ package com.bigmoe.onedge.core
  */
 interface EngineBackend {
     /** Blocking. Returns null on success, otherwise the error message. */
-    fun load(modelPath: String, config: LoadConfig, csvPath: String?, mmprojPath: String?, draftPath: String? = null): String?
+    fun load(
+        modelPath: String, config: LoadConfig, csvPath: String?, mmprojPath: String?, draftPath: String? = null,
+        lora: LoraChoice? = null
+    ): String?
 
     /** Capabilities verified by the native runtime, not only build flags. */
     fun capabilities(): EngineCaps
@@ -62,14 +65,18 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
 
     override fun npuPrefillStatus(): String = decodeUtf8(bridge.nativeNpuStatus())
 
-    override fun load(modelPath: String, config: LoadConfig, csvPath: String?, mmprojPath: String?, draftPath: String?): String? {
+    override fun load(
+        modelPath: String, config: LoadConfig, csvPath: String?, mmprojPath: String?, draftPath: String?, lora: LoraChoice?
+    ): String? {
         val err = bridge.nativeLoadModel(
             modelPath = encodeUtf8(modelPath),
             ints = config.toIntArray(),
             floats = config.toFloatArray(),
             csvPath = encodeUtf8(csvPath.orEmpty()),
             mmprojPath = encodeUtf8(mmprojPath.orEmpty()),
-            draftPath = encodeUtf8(draftPath.orEmpty())
+            draftPath = encodeUtf8(draftPath.orEmpty()),
+            loraPath = encodeUtf8(lora?.path.orEmpty()),
+            loraScale = lora?.scale ?: 1f
         )
         return if (err.isEmpty()) null else decodeUtf8(err)
     }
