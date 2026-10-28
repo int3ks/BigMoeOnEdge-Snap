@@ -23,8 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,6 +69,7 @@ fun ModelScreen(
     var targetIncompleteImportId by remember { mutableStateOf<String?>(null) }
     var targetMtpModelPath by remember { mutableStateOf<String?>(null) }
     var targetLoraModelPath by remember { mutableStateOf<String?>(null) }
+    var targetMmprojModelPath by remember { mutableStateOf<String?>(null) }
 
     // MANAGE_EXTERNAL_STORAGE is a special Settings grant, not a normal runtime prompt.
     // When the user returns, retry registration automatically so the path is not copied.
@@ -140,6 +139,13 @@ fun ModelScreen(
         targetMtpModelPath = null
         if (uri != null && modelPath != null) {
             viewModel.importAndAttachDraft(context.contentResolver, uri, modelPath)
+        }
+    }
+    val mmprojPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val modelPath = targetMmprojModelPath
+        targetMmprojModelPath = null
+        if (uri != null && modelPath != null) {
+            viewModel.importAndAttachMmproj(context.contentResolver, uri, modelPath)
         }
     }
     // Same for a LoRA adapter: copied into app storage, checked by its GGUF header, attached to the model.
@@ -281,22 +287,21 @@ fun ModelScreen(
                 }
             }
 
+            item(key = "guess_ahead") { GuessAheadCard(settings, viewModel) }
+
+            // Auxiliary files, each kind in its own list: attach them to a model in the model list below.
             if (ui.drafts.isNotEmpty()) {
-                item {
-                    Text("MTP draft sidecars", style = MaterialTheme.typography.titleMedium)
-                    Text("Attach one to each target above. Sidecars are hidden from the target-model list.", style = MaterialTheme.typography.bodySmall)
-                }
-                items(ui.drafts, key = { "draft:${it.path}" }) { draft ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(draft.name, style = MaterialTheme.typography.titleSmall)
-                                Text("${ModelManager.formatBytes(draft.sizeBytes)} • " + if (draft.inAppStorage) "App storage" else "Registered path (no copy)", style = MaterialTheme.typography.labelSmall)
-                            }
-                            TextButton(onClick = { viewModel.delete(draft.path) }) { Text("Remove") }
-                        }
-                    }
-                }
+                item(key = "drafts_header") { SectionHeader("MTP drafters", "Attach one to a model below; used when Guess ahead is MTP.") }
+                items(ui.drafts, key = { "draft:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
+            }
+            if (ui.loras.isNotEmpty()) {
+                item(key = "loras_header") { SectionHeader("LoRA adapters", "Attach one to a model below; applied when that model loads.") }
+                items(ui.loras, key = { "lora:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
+            }
+            val projectors = ui.models.filter { ModelManager.isProjectorName(it.name) }
+            if (projectors.isNotEmpty()) {
+                item(key = "mmproj_header") { SectionHeader("Vision projectors (mmproj)", "Attach one to a model below; it loads together with that model.") }
+                items(projectors, key = { "mmproj:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
             }
             if (ui.incompleteImports.isNotEmpty()) {
                 item {
@@ -331,10 +336,10 @@ fun ModelScreen(
                     }
                 }
             }
+            item(key = "models_header") { SectionHeader("Models", null) }
             if (ui.models.isEmpty() && ui.incompleteImports.isEmpty()) {
                 item { Text("No models yet.", color = MaterialTheme.colorScheme.secondary) }
             }
-            item(key = "guess_ahead") { GuessAheadCard(settings, viewModel) }
             items(ui.models.filterNot { ModelManager.isProjectorName(it.name) }, key = { it.path }) { model ->
                 ModelRow(
                     model = model,
@@ -358,6 +363,13 @@ fun ModelScreen(
                         loraPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     },
                     onLoraScale = { viewModel.setLoraScale(model.path, it) },
+                    projectors = projectors,
+                    attachedMmproj = ui.modelMmprojs[model.path],
+                    onAttachMmproj = { viewModel.attachMmproj(model.path, it) },
+                    onPickMmproj = {
+                        targetMmprojModelPath = model.path
+                        mmprojPicker.launch(arrayOf("application/octet-stream", "*/*"))
+                    },
                     settings = settings
                 )
             }
@@ -369,7 +381,7 @@ fun ModelScreen(
     ui.pendingLoad?.let { pending -> PendingLoadDialog(viewModel, pending) }
 }
 
-/** The confirmation step of a load (memory advice + projector choice). Shared by the Models page and the chat's model picker. */
+/** Shown before a load only when the pre-flight checks warn about something. Shared by the Models page and the chat's model picker. */
 @Composable
 internal fun PendingLoadDialog(viewModel: ModelViewModel, pending: PendingLoad) {
     AlertDialog(
@@ -380,10 +392,9 @@ internal fun PendingLoadDialog(viewModel: ModelViewModel, pending: PendingLoad) 
                 pending.advice.errors.forEach { Text("• $it", color = MaterialTheme.colorScheme.error) }
                 pending.advice.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
                 if (pending.advice.canLoad) {
-                    ProjectorPicker(
-                        projectors = pending.projectors,
-                        selected = pending.selectedProjector,
-                        onSelect = viewModel::selectProjector
+                    Text(
+                        "Vision projector: " + (pending.selectedProjector?.substringAfterLast('/') ?: "none (text only)"),
+                        style = MaterialTheme.typography.bodySmall
                     )
                     Text(
                         "Loading can take a minute or more and uses a lot of memory. Keep the app open.",
@@ -403,6 +414,31 @@ internal fun PendingLoadDialog(viewModel: ModelViewModel, pending: PendingLoad) 
 }
 
 @Composable
+private fun SectionHeader(title: String, subtitle: String?) {
+    Column(Modifier.padding(top = 6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/** One MTP drafter, LoRA adapter or projector file in its list, with its size and a Remove button. */
+@Composable
+private fun AuxFileCard(file: ModelFile, onRemove: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(file.name, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "${ModelManager.formatBytes(file.sizeBytes)} • " + if (file.inAppStorage) "App storage" else "Registered path (no copy)",
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            TextButton(onClick = onRemove) { Text("Remove") }
+        }
+    }
+}
+
+@Composable
 private fun SupportedModelsCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -411,42 +447,6 @@ private fun SupportedModelsCard() {
                 "Even regular (dense) models can work: they are detected automatically and loaded the ordinary way.",
                 style = MaterialTheme.typography.bodyMedium
             )
-        }
-    }
-}
-
-@Composable
-private fun ProjectorPicker(
-    projectors: List<ModelFile>,
-    selected: String?,
-    onSelect: (String?) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val selectedName = when {
-        selected == null -> "None"
-        else -> projectors.firstOrNull { it.path == selected }?.name ?: "None"
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Vision projector (mmproj)", style = MaterialTheme.typography.labelMedium)
-        androidx.compose.foundation.layout.Box {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(selectedName, modifier = Modifier.weight(1f))
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                DropdownMenuItem(text = { Text("None") }, onClick = { expanded = false; onSelect(null) })
-                projectors.forEach { projector ->
-                    DropdownMenuItem(
-                        text = { Text(projector.name) },
-                        onClick = { expanded = false; onSelect(projector.path) }
-                    )
-                }
-            }
-        }
-        if (projectors.isEmpty()) {
-            Text("Put an mmproj .gguf beside the model to enable images and video.", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -540,6 +540,10 @@ private fun ModelRow(
     onAttachLora: (String?) -> Unit,
     onPickLora: () -> Unit,
     onLoraScale: (Float) -> Unit,
+    projectors: List<ModelFile>,
+    attachedMmproj: String?,
+    onAttachMmproj: (String?) -> Unit,
+    onPickMmproj: () -> Unit,
     settings: EngineSettings
 ) {
     var renameDialog by remember { mutableStateOf(false) }
@@ -569,6 +573,7 @@ private fun ModelRow(
             if (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP || attachedName != null) {
                 DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
             }
+            MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
             LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
             if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
         }

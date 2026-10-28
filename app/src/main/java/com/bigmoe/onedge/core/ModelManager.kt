@@ -206,6 +206,11 @@ class ModelManager(
                 !k.endsWith(SCALE_SUFFIX) && (decodePath(k) == canonical || decodePath(loras.getProperty(k)) == canonical)
             }.forEach { k -> loras.remove(k); loras.remove(k + SCALE_SUFFIX) }
             saveLoraLinks(loras)
+            val projectors = mmprojLinks()
+            projectors.stringPropertyNames().filter { k ->
+                decodePath(k) == canonical || decodePath(projectors.getProperty(k)) == canonical
+            }.forEach(projectors::remove)
+            saveMmprojLinks(projectors)
         }
         ok
     }
@@ -258,6 +263,15 @@ class ModelManager(
             loras.setProperty(encodePath(newPath) + suffix, value)
         }
         saveLoraLinks(loras)
+        val projectors = mmprojLinks()
+        // The renamed file may be the model (its link moves) or a projector other models point at (they follow).
+        projectors.getProperty(encodePath(oldPath))?.let { v ->
+            projectors.remove(encodePath(oldPath))
+            projectors.setProperty(encodePath(newPath), v)
+        }
+        projectors.stringPropertyNames().filter { decodePath(projectors.getProperty(it)) == oldPath }
+            .forEach { projectors.setProperty(it, encodePath(newPath)) }
+        saveMmprojLinks(projectors)
         ModelFile(newPath, newFiles.first().name, newFiles.first().length(), true)
     }
 
@@ -324,6 +338,14 @@ class ModelManager(
     }
 
     private val registeredFile: File get() = File(modelsDir, ".registered-paths")
+    private val mmprojLinksFile: File get() = File(modelsDir, ".mmproj-links.properties")
+    private fun mmprojLinks(): java.util.Properties = java.util.Properties().also { props ->
+        try { mmprojLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
+    }
+    private fun saveMmprojLinks(props: java.util.Properties) {
+        mmprojLinksFile.outputStream().use { props.store(it, "BigMoeOnEdge vision projector links") }
+    }
+
     private val loraLinksFile: File get() = File(modelsDir, ".lora-links.properties")
     private fun loraLinks(): java.util.Properties = java.util.Properties().also { props ->
         try { loraLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
@@ -467,6 +489,27 @@ class ModelManager(
         } finally {
             activePaths.forEach(ACTIVE_IMPORT_PATHS::remove)
         }
+    }
+
+    /** Attaches the vision projector [mmprojPath] to [modelPath] (null detaches). Loaded with the model, never asked. */
+    suspend fun attachMmproj(modelPath: String, mmprojPath: String?) = withContext(io) {
+        val key = encodePath(canonicalPath(modelPath))
+        val props = mmprojLinks()
+        if (mmprojPath.isNullOrBlank()) {
+            props.remove(key)
+        } else {
+            val projector = File(mmprojPath).canonicalFile
+            if (!projector.isFile || !projector.canRead() || !isProjectorName(projector.name)) {
+                throw IOException("Not a readable vision projector (mmproj) GGUF: $mmprojPath")
+            }
+            props.setProperty(key, encodePath(projector.path))
+        }
+        saveMmprojLinks(props)
+    }
+
+    /** The projector attached to [modelPath]; null when none is attached or the file is gone. */
+    suspend fun mmprojForModel(modelPath: String): String? = withContext(io) {
+        mmprojLinks().getProperty(encodePath(canonicalPath(modelPath)))?.let(::decodePath)?.takeIf { File(it).isFile }
     }
 
     /** LoRA adapters imported into app storage (named lora-*.gguf on import, so they never show up as models). */

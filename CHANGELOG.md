@@ -17,6 +17,8 @@
 - A Settings button in the chat's top bar, next to Home, chat files and the model picker.
 - Settings open with "Engine performance" expanded and "Appearance" collapsed.
 - LoRA adapters (e.g. an uncensored fine-tune), as in LlamaLauncher: Models → a model → "LoRA adapter" adds a LoRA GGUF (copied into app storage as lora-*.gguf, recognised by the `adapter.type` key in its GGUF header, not by its name) with a strength of 1.00–2.50 (default 1.75). The engine applies it at load (`llama_adapter_lora_init` + `llama_set_adapters_lora`, also on the MTP draft context when the model drafts with its own head). An adapter that does not fit the model is dropped with a warning and the model loads without it.
+- Vision projectors (mmproj) are attached to a model like drafters and LoRA adapters (Models → a model → "Vision projector": pick one, import a file, or detach) and load together with it. Loading no longer asks for a projector, and the confirmation step only appears when the pre-flight checks warn about something. A model loaded with a projector before this keeps it as its attachment.
+- Models page order: "Load the last model" switch, Guess ahead card, then the MTP drafters, LoRA adapters and vision projectors each in their own list, then the models.
 - A separate MTP draft (MTP-only sidecar GGUF) is no longer limited to Qwen4Exp targets: Qwen3.5/3.6 (`qwen35`, `qwen35moe`) and other architectures with an MTP head can use one, as upstream BigMoeOnEdge's `--mtp-head` does. The sidecar is still checked against the target (architecture, MTP block, width, vocabulary). Qwen3.5/3.6 GGUFs usually carry the head already, so MTP works on them without a sidecar.
 
 ## Unreleased - NPU prefill + MTP fix

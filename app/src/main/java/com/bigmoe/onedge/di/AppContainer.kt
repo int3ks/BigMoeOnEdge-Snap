@@ -185,7 +185,8 @@ class AppContainer(private val context: Context) {
         appScope.launch {
             val s = settingsDataStore.settingsFlow.first()
             if (s.autoLoadLastModel && s.lastModelPath.isNotBlank() && File(s.lastModelPath).isFile) {
-                val projector = s.lastMmprojPath.takeIf { it.isNotBlank() && File(it).isFile }
+                val projector = modelManager.mmprojForModel(s.lastModelPath)
+                    ?: s.lastMmprojPath.takeIf { it.isNotBlank() && File(it).isFile }
                 val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP)
                     modelManager.draftForModel(s.lastModelPath) else null
                 engineController.loadModel(s.lastModelPath, s.toLoadConfig(), projector, draftPath)

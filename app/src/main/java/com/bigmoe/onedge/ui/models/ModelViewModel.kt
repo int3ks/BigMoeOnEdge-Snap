@@ -27,11 +27,11 @@ import java.io.File
 
 data class ImportProgress(val name: String, val copiedBytes: Long, val totalBytes: Long)
 
-/** A load the person still has to confirm (shows [advice] first). */
+/** A load the person still has to confirm because the pre-flight checks found something ([advice]). */
 data class PendingLoad(
     val path: String,
     val advice: LoadAdvice,
-    val projectors: List<ModelFile> = emptyList(),
+    /** The vision projector attached to the model, loaded with it; null = text only. */
     val selectedProjector: String? = null
 )
 
@@ -43,6 +43,8 @@ data class ModelsUiState(
     /** LoRA adapters in app storage, and the one attached to each model (with its strength). */
     val loras: List<ModelFile> = emptyList(),
     val modelLoras: Map<String, com.bigmoe.onedge.core.LoraChoice> = emptyMap(),
+    /** The vision projector (mmproj) attached to each model. */
+    val modelMmprojs: Map<String, String> = emptyMap(),
     val existingPathInput: String = "",
     val importProgress: ImportProgress? = null,
     val pendingLoad: PendingLoad? = null,
@@ -80,8 +82,12 @@ class ModelViewModel(
             val links = list.mapNotNull { model -> modelManager.draftForModel(model.path)?.let { model.path to it } }.toMap()
             val loras = modelManager.listLoras()
             val loraLinks = list.mapNotNull { model -> modelManager.loraForModel(model.path)?.let { model.path to it } }.toMap()
+            val mmprojLinks = list.mapNotNull { model -> modelManager.mmprojForModel(model.path)?.let { model.path to it } }.toMap()
             _uiState.update {
-                it.copy(models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras, modelLoras = loraLinks)
+                it.copy(
+                    models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
+                    modelLoras = loraLinks, modelMmprojs = mmprojLinks
+                )
             }
         }
     }
@@ -147,6 +153,53 @@ class ModelViewModel(
                 refresh()
             } catch (e: Exception) {
                 _uiState.update { it.copy(message = e.message ?: "Could not attach the draft") }
+            }
+        }
+    }
+
+    /** Attaches a vision projector (mmproj) to a model (null detaches). Loaded together with the model from then on. */
+    fun attachMmproj(modelPath: String, mmprojPath: String?) {
+        viewModelScope.launch {
+            try {
+                modelManager.attachMmproj(modelPath, mmprojPath)
+                _uiState.update {
+                    it.copy(message = if (mmprojPath == null) "Detached the vision projector." else "Attached ${File(mmprojPath).name}. It loads together with this model.")
+                }
+                refresh()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not attach the vision projector") }
+            }
+        }
+    }
+
+    /** Import an mmproj GGUF (its name must contain "mmproj") into app storage and attach it to [modelPath]. */
+    fun importAndAttachMmproj(resolver: ContentResolver, uri: Uri, modelPath: String) {
+        if (importJob?.isActive == true) {
+            _uiState.update { it.copy(message = "Wait for the current import to finish before adding a vision projector.") }
+            return
+        }
+        importJob = viewModelScope.launch {
+            _uiState.update { it.copy(message = null, importProgress = ImportProgress("Vision projector", 0, 0)) }
+            try {
+                val projector = modelManager.importModel(resolver, uri) { copied, total ->
+                    _uiState.update { it.copy(importProgress = ImportProgress("Vision projector", copied, total)) }
+                }
+                if (!ModelManager.isProjectorName(projector.name)) {
+                    modelManager.delete(projector.path)
+                    _uiState.update { it.copy(message = "${projector.name} does not look like a vision projector: its file name must contain \"mmproj\".") }
+                } else {
+                    modelManager.attachMmproj(modelPath, projector.path)
+                    _uiState.update { it.copy(message = "Imported and attached ${projector.name}. It loads together with this model.") }
+                }
+                refresh()
+            } catch (e: CancellationException) {
+                _uiState.update { it.copy(message = "Import cancelled.") }
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not import the vision projector.") }
+                refresh()
+            } finally {
+                _uiState.update { it.copy(importProgress = null) }
             }
         }
     }
@@ -242,21 +295,26 @@ class ModelViewModel(
             val advice = withContext(Dispatchers.IO) {
                 ModelManager.adviseLoad(File(path), totalRamBytes(), s.toLoadConfig())
             }
-            val projectors = _uiState.value.models.filter { ModelManager.isProjectorName(it.name) }
-            // By name, or the projector this very model was loaded with last time. Never a projector that was
-            // used with a different model: a mismatched mmproj makes the whole load fail.
-            val selected = ModelManager.suggestProjector(ModelFile(path, File(path).name, File(path).length()), projectors)?.path
-                ?: s.lastMmprojPath.takeIf { candidate -> s.lastModelPath == path && projectors.any { it.path == candidate } }
-            _uiState.update { it.copy(pendingLoad = PendingLoad(path, advice, projectors, selected), message = null) }
+            // The projector attached to this model (Models page). A model loaded with one before attachments existed
+            // keeps it: that choice becomes its attachment, once.
+            var projector = modelManager.mmprojForModel(path)
+            if (projector == null && s.lastModelPath == path && s.lastMmprojPath.isNotBlank() && File(s.lastMmprojPath).isFile) {
+                projector = s.lastMmprojPath
+                runCatching { modelManager.attachMmproj(path, projector) }
+                refresh()
+            }
+            // Nothing to ask when the checks found nothing: load right away. Warnings or errors still show first.
+            if (advice.canLoad && advice.errors.isEmpty() && advice.warnings.isEmpty()) {
+                _uiState.update { it.copy(message = null) }
+                loadNow(path, projector)
+            } else {
+                _uiState.update { it.copy(pendingLoad = PendingLoad(path, advice, projector), message = null) }
+            }
         }
     }
 
     fun dismissPendingLoad() {
         _uiState.update { it.copy(pendingLoad = null) }
-    }
-
-    fun selectProjector(path: String?) {
-        _uiState.update { state -> state.copy(pendingLoad = state.pendingLoad?.copy(selectedProjector = path)) }
     }
 
     /** Step 2: load. The engine state (Loading / Ready / Failed) is observed through [engineState]. */
