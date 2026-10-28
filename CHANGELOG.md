@@ -6,7 +6,8 @@
 - Updated the vendored llama.cpp from 965f897 (2026-09-26) to Helldez/llama.cpp `bmoe/expert-ready-hook-2210-dl` (ad98071, the revision BigMoeOnEdge 0.38 pins). This adds the **Flint** architecture (`FlintForCausalLM`, e.g. flint-40B-A2.5B) and the Jinja `\x` hex escapes its chat template uses. Local llama.cpp changes kept on top: patches/0007.
 - Engine core adapted to the newer llama.cpp `common` API (`common_chat_prompt`, `common_chat_input`, `common_batch` for the MTP driver, reasoning format set on the template inputs), the same way upstream BigMoeOnEdge did.
 - `flint` added to the MoE streaming registry (standard `ffn_{gate,up,down}_exps`).
-- New workflow `.github/workflows/android-apk.yml` builds the CPU APK on push / on demand.
+- APK builds: `.github/workflows/android-npu.yml` builds the NPU (Hexagon) APK on every push, `.github/workflows/android-apk.yml` the CPU-only APK on demand. Both are signed with the same release key (secrets `BMOE_KEYSTORE_*`, certificate pinned in the workflows), so every build installs as an update.
+- A separate MTP draft (MTP-only sidecar GGUF) is no longer limited to Qwen4Exp targets: Qwen3.5/3.6 (`qwen35`, `qwen35moe`) and other architectures with an MTP head can use one, as upstream BigMoeOnEdge's `--mtp-head` does. The sidecar is still checked against the target (architecture, MTP block, width, vocabulary). Qwen3.5/3.6 GGUFs usually carry the head already, so MTP works on them without a sidecar.
 
 ## Unreleased - NPU prefill + MTP fix
 

@@ -1,14 +1,33 @@
 name: Android NPU APK
 
+# The main APK: the engine with the optional Hexagon/NPU prefill path (application id com.bigmoe.onedge.snap).
+# Phones without a supported Snapdragon NPU run it CPU-only. Signed with the same release key as the CPU-only
+# workflow, so either APK installs as an update over the other.
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - 'scripts/build-hexagon-onedge-engine.sh'
+      - 'scripts/verify-npu-payload.sh'
+      - '.github/workflows/android-npu.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: android-npu-${{ github.ref }}
+  # Queue behind a running build instead of cancelling it.
+  cancel-in-progress: false
+
 jobs:
+  # A third-party image, so it runs in its own job without secrets; only the job below signs.
   native-hexagon:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,20 +37,28 @@ jobs:
         run: |
           docker run --rm \
             -e OUT=/workspace/build-hexagon-onedge \
+            -e BMOE_BUILD_JOBS="$(nproc)" \
             -v "$PWD:/workspace" \
             ghcr.io/snapdragon-toolchain/arm64-android@sha256:91714433626f0d94a926538a1e46ec43756c5b8e3262b91b95df1e812940aed1 \
             bash /workspace/scripts/build-hexagon-onedge-engine.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: onedge-hexagon-jni
-          path: app/src/main/jniLibs/arm64-v8a
+          name: onedge-hexagon-native
+          path: |
+            app/src/main/jniLibs/arm64-v8a
+            app/src/main/assets/hexagon
           if-no-files-found: error
           retention-days: 1
 
   apk:
     needs: native-hexagon
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # SHA-256 of the release certificate (public). Every APK is checked against it, so a build can never
+      # ship with another key and break updates over an installed copy.
+      BMOE_EXPECTED_CERT_SHA256: 655108e1291983045db6079d4fc44c5dcf04cc14aa0a83db89fd16ec8cec6db0
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,39 +69,69 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android NDK 27.2.12479018
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" >/dev/null
+      - uses: gradle/actions/setup-gradle@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: onedge-hexagon-jni
-          path: app/src/main/jniLibs/arm64-v8a
+          name: onedge-hexagon-native
+          path: app/src/main
 
       - name: Verify native NPU payload
         run: |
-          cd app/src/main/jniLibs/arm64-v8a
-          for f in libonedge-engine.so libc++_shared.so libggml-htp-v73.so libggml-htp-v75.so libggml-htp-v79.so libggml-htp-v81.so; do
-            test -s "$f" || { echo "Missing NPU library: $f"; exit 1; }
-          done
-          file libonedge-engine.so
+          ls -la app/src/main/jniLibs/arm64-v8a app/src/main/assets/hexagon
+          bash scripts/verify-npu-payload.sh app/src/main/jniLibs/arm64-v8a app/src/main/assets/hexagon
+
+      # The same key signs every build, so each APK installs as an update over the previous one.
+      # Secrets: BMOE_KEYSTORE_BASE64, BMOE_KEYSTORE_PASSWORD, BMOE_KEY_ALIAS (see docs/SIGNING.md).
+      - name: Restore signing key
+        env:
+          BMOE_KEYSTORE_BASE64: ${{ secrets.BMOE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$BMOE_KEYSTORE_BASE64" ]; then
+            echo "::error::Secret BMOE_KEYSTORE_BASE64 is not set. Without the release key the APK could not update an installed copy. See docs/SIGNING.md."
+            exit 1
+          fi
+          # Line breaks and spaces picked up while pasting the secret are dropped.
+          printf '%s' "$BMOE_KEYSTORE_BASE64" | tr -d ' \t\r\n' | base64 -d > "$RUNNER_TEMP/bmoe-release.jks" || {
+            echo "::error::Secret BMOE_KEYSTORE_BASE64 is not valid base64 (A-Z, a-z, 0-9, +, /, =). Paste the content of snap-release.jks.b64, not snap-release.jks."
+            exit 1
+          }
+          echo "BMOE_KEYSTORE_FILE=$RUNNER_TEMP/bmoe-release.jks" >> "$GITHUB_ENV"
 
       - name: Build NPU-enabled debug APK
-        working-directory: app
+        env:
+          BMOE_KEYSTORE_PASSWORD: ${{ secrets.BMOE_KEYSTORE_PASSWORD }}
+          BMOE_KEY_ALIAS: ${{ secrets.BMOE_KEY_ALIAS }}
+          BMOE_KEY_PASSWORD: ${{ secrets.BMOE_KEY_PASSWORD }}
         run: |
-          chmod +x ../gradlew
-          ../gradlew --no-daemon assembleDebug -PbmoePrebuiltNative=true
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug -PbmoePrebuiltNative=true -PbmoeRequireStableSigning=true
 
-      - name: Verify APK contains the real NPU backend payload
+      - name: Verify APK contents and signing certificate
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libonedge-engine.so'
           for f in libggml-htp-v73.so libggml-htp-v75.so libggml-htp-v79.so libggml-htp-v81.so; do
-            unzip -l "$APK" | grep -q "lib/arm64-v8a/$f" || { echo "Missing $f in APK"; exit 1; }
+            unzip -l "$APK" | grep -q "assets/hexagon/$f" || { echo "::error::Missing $f in APK"; exit 1; }
           done
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+          echo "$CERTS"
+          echo "$CERTS" | grep -qi "SHA-256 digest: $BMOE_EXPECTED_CERT_SHA256" || {
+            echo "::error::APK is not signed with the expected release certificate ($BMOE_EXPECTED_CERT_SHA256)"
+            exit 1
+          }
+
+      - name: Rename APK
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk "out/BigMoeOnEdge-Snap-NPU-${VERSION}-${GITHUB_SHA::7}.apk"
+          ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: onedge-npu-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: BigMoeOnEdge-Snap-NPU-apk
+          path: out/*.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30

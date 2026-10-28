@@ -1,16 +1,10 @@
 name: Android APK (CPU)
 
-# Builds the regular CPU-only APK (application id com.bigmoe.onedge.snap). Runs on every push that
-# touches the app or the build, and on demand from the Actions tab.
+# Builds the CPU-only APK (application id com.bigmoe.onedge.snap) on demand from the Actions tab, as a fallback
+# when the NPU build (android-npu.yml, built on every push) cannot run. Same release key, so either APK
+# installs as an update over the other.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'app/**'
-      - 'gradle/**'
-      - '*.gradle.kts'
-      - 'gradle.properties'
-      - '.github/workflows/android-apk.yml'
 
 permissions:
   contents: read

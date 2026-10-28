@@ -888,8 +888,9 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     im.arch = arch;
     if (cfg.spec.is_mtp() && cfg.spec.draft_model_path.empty() && im.n_layer_nextn <= 0)
         return fail("MTP requested, but this GGUF has no embedded nextn/MTP block. Attach a separate MTP-only GGUF in Models, or use n-gram speculation.");
-    if (cfg.spec.is_mtp() && !cfg.spec.draft_model_path.empty() && std::strcmp(arch, "qwen4exp") != 0)
-        return fail("A separate MTP draft is currently supported only for Qwen4Exp targets (general.architecture=qwen4exp).");
+    // A separate MTP-only GGUF (llama.cpp's convert_hf_to_gguf.py --mtp) works for any architecture whose head
+    // llama.cpp can draft with (qwen35, qwen35moe, qwen4exp, ...), as upstream BigMoeOnEdge's --mtp-head does. The
+    // sidecar is checked against the target below: same architecture, an MTP block, same width and vocabulary.
 
     const MoeRecipe * recipe = nullptr;
     if (cfg.moe.enabled) {
@@ -982,7 +983,8 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     }
 
     // MTP's draft context is either the target's embedded nextn head, or an independently loaded
-    // MTP-only GGUF. The detached Qwen4Exp head borrows token embeddings/output through ctx_other.
+    // MTP-only GGUF. A detached head reads the target's hidden states through ctx_other (a Qwen4Exp head
+    // converted with --mtp-shared-embd also borrows the token embeddings/output there).
     if (cfg.spec.is_mtp()) {
         llama_model * draft_model = model;
         if (!cfg.spec.draft_model_path.empty()) {
