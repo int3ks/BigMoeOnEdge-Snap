@@ -185,7 +185,11 @@ class ChatRepository(
         val names = runCatching {
             org.json.JSONArray(session.modelNamesJson).let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }
         }.getOrDefault(emptyList()).toMutableList()
-        if (modelName.isNotBlank() && modelName !in names) names += modelName
+        // Most recent last: the chat header shows the last model this chat used.
+        if (modelName.isNotBlank()) {
+            names.remove(modelName)
+            names += modelName
+        }
         val json = org.json.JSONArray().apply { names.forEach(::put) }.toString()
         sessionDao.updateModelNames(sessionId, json)
     }

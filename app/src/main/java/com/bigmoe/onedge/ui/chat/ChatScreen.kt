@@ -207,10 +207,12 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(uiState.currentSession?.title ?: "New chat", maxLines = 1)
-                        val names = uiState.currentSession?.modelNames.orEmpty()
-                        if (names.isNotEmpty()) {
+                        // One model: the loaded one (it answers the next message), else the last one this chat used.
+                        val modelName = (uiState.engineState as? EngineState.Ready)?.info?.name
+                            ?: uiState.currentSession?.modelNames?.lastOrNull()
+                        if (modelName != null) {
                             Text(
-                                text = if (names.size == 1) names.first() else "Models: ${names.joinToString(", ")}",
+                                text = modelName,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall,
