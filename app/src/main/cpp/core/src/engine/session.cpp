@@ -2222,6 +2222,7 @@ RunResult Session::generate(const GenerateRequest & req,
             m.step = n_gen;
             m.steps = n_predict;
             m.mtp_batch = (int) confirmed.size();
+            m.n_ctx_used = (image_turn ? (int) n_pos_img : n_prompt) + n_gen;
             m.loop_overhead_ms = e == 0 ? overhead * 1000.0 : 0.0;
             // Charged to the group's first row like every other group cost. This is a SLICE of
             // loop_overhead_ms, not an addition to it: both measure time outside the decode.

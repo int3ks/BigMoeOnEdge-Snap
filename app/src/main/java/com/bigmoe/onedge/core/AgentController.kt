@@ -181,7 +181,7 @@ class AgentController(
                         // token-by-token; refresh the counter every 8 tokens and always send the final exact total.
                         val total = generatedTotal + ev.generatedTokens
                         if (total % PROGRESS_TOKEN_INTERVAL == 0) {
-                            emit(AgentEvent.GenerationProgress(total))
+                            emit(AgentEvent.GenerationProgress(total, ev.contextUsed.takeIf { it > 0 }))
                         }
                     }
                     is EngineEvent.Answer -> {

@@ -445,9 +445,9 @@ class EngineController(
                         images = request.images,
                         callback = object : NativeGenerationCallback {
                             private var generated = 0
-                            override fun onToken(answerDelta: ByteArray, reasoningDelta: ByteArray): Boolean {
+                            override fun onToken(answerDelta: ByteArray, reasoningDelta: ByteArray, contextUsed: Int): Boolean {
                                 generated++
-                                events.trySend(EngineEvent.Progress(generated))
+                                events.trySend(EngineEvent.Progress(generated, contextUsed))
                                 if (reasoningDelta.isNotEmpty()) events.trySend(EngineEvent.Reasoning(decodeUtf8(reasoningDelta)))
                                 if (answerDelta.isNotEmpty()) events.trySend(EngineEvent.Answer(decodeUtf8(answerDelta)))
                                 return !stopped.get()

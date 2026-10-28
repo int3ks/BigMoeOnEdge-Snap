@@ -12,10 +12,11 @@ interface NativeGenerationCallback {
     /**
      * Called once for every confirmed generated token. The visible answer/reasoning deltas may both be
      * empty for a hidden/special token; progress accounting must still count that callback. Deltas always
-     * end on a complete UTF-8 character.
+     * end on a complete UTF-8 character. [contextUsed] is the context the turn occupies after this token
+     * (prompt + tokens generated so far), so the UI can show it filling up live.
      * @return true to continue, false to cancel the generation.
      */
-    fun onToken(answerDelta: ByteArray, reasoningDelta: ByteArray): Boolean
+    fun onToken(answerDelta: ByteArray, reasoningDelta: ByteArray, contextUsed: Int): Boolean
 
     /**
      * Always called exactly once, last. [answer]/[reasoning] are the authoritative complete texts

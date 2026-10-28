@@ -198,7 +198,8 @@ data class GenerationStats(
 )
 
 sealed interface EngineEvent {
-    data class Progress(val generatedTokens: Int) : EngineEvent
+    /** [contextUsed]: prompt + tokens generated so far in this turn; 0 = unknown. */
+    data class Progress(val generatedTokens: Int, val contextUsed: Int = 0) : EngineEvent
     data class Answer(val delta: String) : EngineEvent
     data class Reasoning(val delta: String) : EngineEvent
     data class Finished(

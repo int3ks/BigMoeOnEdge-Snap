@@ -83,6 +83,10 @@ struct TokenMetrics {
     // zeros read as free tokens. Divide the first row's wall_ms by mtp_batch for the per-token cost.
     int mtp_batch = 1;
 
+    // Context the turn occupies after this token: prompt positions + tokens generated so far. The same counter
+    // RunSummary::n_ctx_used reports at the end of the turn, so a UI can show the context filling up live.
+    int n_ctx_used = 0;
+
     // Time this group spent drafting and catching the draft context up — everything speculation
     // adds OUTSIDE the target decode. A SLICE of loop_overhead_ms, not an addition: both measure
     // the gap between decodes. Charged to the group's first row like every other group cost, and 0

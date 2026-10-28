@@ -86,7 +86,7 @@ class FakeEngineBackend(
         var stopped = false
         for (t in turn.tokens) {
             answer.append(t)
-            if (!callback.onToken(t.toByteArray(Charsets.UTF_8), ByteArray(0))) { stopped = true; break }
+            if (!callback.onToken(t.toByteArray(Charsets.UTF_8), ByteArray(0), 0)) { stopped = true; break }
         }
         if (turn.blockUntilStopped && !stopped) stopLatch.await(10, TimeUnit.SECONDS)
         val cancelled = turn.cancelled || stopped || turn.blockUntilStopped

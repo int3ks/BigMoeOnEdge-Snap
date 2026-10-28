@@ -320,7 +320,7 @@ fun ChatScreen(
                                         uiState.liveStatus ?: "Reading…",
                                         formatStats(
                                             uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
-                                            uiState.generationElapsedMs, uiState.contextUsed, uiState.contextTotal
+                                            uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                         )
                                     )
                                 } else {
@@ -332,7 +332,7 @@ fun ChatScreen(
                                         isReasoningStreaming = uiState.liveText.isEmpty(),
                                         stats = formatStats(
                                             uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
-                                            uiState.generationElapsedMs, uiState.contextUsed, uiState.contextTotal
+                                            uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                         ),
                                         onOpenCodeArtifact = viewModel::saveCodeAsArtifact
                                     )
@@ -341,7 +341,7 @@ fun ChatScreen(
                                             it,
                                             formatStats(
                                                 uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
-                                                uiState.generationElapsedMs, uiState.contextUsed, uiState.contextTotal
+                                                uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                             )
                                         )
                                     }

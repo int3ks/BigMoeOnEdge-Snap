@@ -537,7 +537,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
 #endif
 
     jclass cb_cls = env->GetObjectClass(callback);
-    jmethodID on_token_mid = env->GetMethodID(cb_cls, "onToken", "([B[B)Z");
+    jmethodID on_token_mid = env->GetMethodID(cb_cls, "onToken", "([B[BI)Z");
     jmethodID on_finished_mid = env->GetMethodID(cb_cls, "onFinished", "(ZZ[B[B[BIIIDDD)V");
     if (on_token_mid == nullptr || on_finished_mid == nullptr) {
         LOGE("callback is missing onToken/onFinished");
@@ -621,7 +621,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
 
         jbyteArray j_a = to_bytes(env, answer_delta);
         jbyteArray j_r = to_bytes(env, reasoning_delta);
-        const jboolean keep_going = env->CallBooleanMethod(callback, on_token_mid, j_a, j_r);
+        const jboolean keep_going = env->CallBooleanMethod(callback, on_token_mid, j_a, j_r, (jint) m.n_ctx_used);
         env->DeleteLocalRef(j_a);
         env->DeleteLocalRef(j_r);
         if (env->ExceptionCheck()) {
