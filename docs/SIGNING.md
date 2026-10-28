@@ -1,5 +1,9 @@
 # Release signing
 
+> **Snap fork:** `.github/workflows/android-apk.yml` requires the secrets `BMOE_KEYSTORE_BASE64`,
+> `BMOE_KEYSTORE_PASSWORD` and `BMOE_KEY_ALIAS` and refuses to build without them. It also checks every APK against
+> the certificate fingerprint pinned in the workflow (`BMOE_EXPECTED_CERT_SHA256`), so all builds update each other.
+
 Android only installs an APK as an update over an installed app if both are signed with the same key.
 
 ## What went wrong up to 0.6.0

@@ -24,7 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      HAS_SIGNING_KEY: ${{ secrets.BMOE_KEYSTORE_BASE64 != '' }}
+      # SHA-256 of the release certificate (public). Every APK is checked against it, so a build can never
+      # ship with another key and break updates over an installed copy.
+      BMOE_EXPECTED_CERT_SHA256: 655108e1291983045db6079d4fc44c5dcf04cc14aa0a83db89fd16ec8cec6db0
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,13 +39,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # Optional: with the BMOE_KEYSTORE_* secrets set (see docs/SIGNING.md) every APK carries the same
-      # certificate and installs as an update. Without them the runner's throwaway debug key is used.
+      # The same key signs every build, so each APK installs as an update over the previous one.
+      # Secrets: BMOE_KEYSTORE_BASE64, BMOE_KEYSTORE_PASSWORD, BMOE_KEY_ALIAS (see docs/SIGNING.md).
       - name: Restore signing key
-        if: env.HAS_SIGNING_KEY == 'true'
         env:
           BMOE_KEYSTORE_BASE64: ${{ secrets.BMOE_KEYSTORE_BASE64 }}
         run: |
+          if [ -z "$BMOE_KEYSTORE_BASE64" ]; then
+            echo "::error::Secret BMOE_KEYSTORE_BASE64 is not set. Without the release key the APK could not update an installed copy. See docs/SIGNING.md."
+            exit 1
+          fi
           echo "$BMOE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/bmoe-release.jks"
           echo "BMOE_KEYSTORE_FILE=$RUNNER_TEMP/bmoe-release.jks" >> "$GITHUB_ENV"
 
@@ -54,7 +59,17 @@ jobs:
           BMOE_KEY_PASSWORD: ${{ secrets.BMOE_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleDebug
+          ./gradlew --no-daemon :app:assembleDebug -PbmoeRequireStableSigning=true
+
+      - name: Verify signing certificate
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          CERTS=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
+          echo "$CERTS"
+          echo "$CERTS" | grep -qi "SHA-256 digest: $BMOE_EXPECTED_CERT_SHA256" || {
+            echo "::error::APK is not signed with the expected release certificate ($BMOE_EXPECTED_CERT_SHA256)"
+            exit 1
+          }
 
       - name: Rename APK
         run: |
