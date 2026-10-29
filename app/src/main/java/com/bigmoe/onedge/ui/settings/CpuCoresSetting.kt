@@ -34,7 +34,7 @@ private fun readCores(): List<CpuCore> {
  * Cores Android does not let the app use are shown but cannot help: the engine only ever uses chosen AND allowed cores.
  */
 @Composable
-internal fun CpuCoresSetting(mask: Long, allowed: Long, threads: Int, onChange: (Long) -> Unit) {
+internal fun CpuCoresSetting(mask: Long, allowed: Long, onChange: (Long) -> Unit) {
     val cores = remember { readCores() }
     val fastest = cores.maxOfOrNull { it.maxKhz } ?: 0L
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -52,7 +52,6 @@ internal fun CpuCoresSetting(mask: Long, allowed: Long, threads: Int, onChange: 
                 )
             }
         }
-        val chosen = java.lang.Long.bitCount(mask)
         val usable = java.lang.Long.bitCount(if (allowed == 0L) mask else mask and allowed)
         Text(
             when {
@@ -63,16 +62,10 @@ internal fun CpuCoresSetting(mask: Long, allowed: Long, threads: Int, onChange: 
             style = MaterialTheme.typography.bodySmall
         )
         if (mask != 0L) TextButton(onClick = { onChange(0L) }) { Text("Back to automatic") }
-        if (mask != 0L && threads > chosen) {
-            Text(
-                "More decode threads ($threads) than chosen cores ($chosen): threads will share cores, which is usually slower.",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error
-            )
-        }
         Hint(
-            "Pins the engine's compute threads to these cores (★ = fastest). Takes effect with the next message; the " +
-                "expert-loading threads follow on the next model load. Android can block cores for an app; those are " +
-                "marked blocked and skipped."
+            "Pins the engine's threads to these cores (★ = fastest) and uses one compute thread per chosen core. The " +
+                "cores apply with the next message, the thread count with the next model load. Android can block cores " +
+                "for an app; those are marked blocked and skipped."
         )
     }
 }

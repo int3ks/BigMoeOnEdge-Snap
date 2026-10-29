@@ -148,8 +148,9 @@ data class EngineSettings(
 
     fun toLoadConfig(): LoadConfig = LoadConfig(
         nCtx = contextLength,
-        nThreads = threadCount,
-        nThreadsBatch = batchThreadCount,
+        // Chosen CPU cores fix the thread count: one compute thread per chosen core, for decode and prompt alike.
+        nThreads = if (cpuMask != 0L) java.lang.Long.bitCount(cpuMask).coerceIn(1, 32) else threadCount,
+        nThreadsBatch = if (cpuMask != 0L) java.lang.Long.bitCount(cpuMask).coerceIn(1, 32) else batchThreadCount,
         batchWidth = batchWidth,
         seed = seed,
         // The engine refuses to open a model when "guess ahead" (speculation) is on together with sampling:

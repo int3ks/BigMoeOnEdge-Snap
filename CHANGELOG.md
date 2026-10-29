@@ -22,6 +22,7 @@
 - The chat header shows one model under the chat title: the loaded one, or else the last model this chat used (instead of every model the chat ever used).
 - The Chats tab returns to where the person was: the open chat when Models or Settings was opened from it, otherwise the chat list. The Home button in a chat still opens the chat list.
 - CPU cores (Settings → Engine performance → CPU compute & memory): pick the cores the engine runs on, one by one as in GameHub (cpu0…cpu7 with their maximum clock, ★ = fastest). The mask is set on the engine's calling thread around load and every generate call, so ggml's compute threads and the expert-loading threads inherit it. Cores Android does not allow the app are marked blocked and skipped; nothing picked = Android decides.
+- With CPU cores chosen, both thread counts (decode and prompt) follow them: one compute thread per chosen core; the two thread pickers show the value and are locked.
 - Models page order: "Load the last model" switch, Guess ahead card, then the MTP drafters, LoRA adapters and vision projectors each in their own list, then the models.
 - A separate MTP draft (MTP-only sidecar GGUF) is no longer limited to Qwen4Exp targets: Qwen3.5/3.6 (`qwen35`, `qwen35moe`) and other architectures with an MTP head can use one, as upstream BigMoeOnEdge's `--mtp-head` does. The sidecar is still checked against the target (architecture, MTP block, width, vocabulary). Qwen3.5/3.6 GGUFs usually carry the head already, so MTP works on them without a sidecar.
 
