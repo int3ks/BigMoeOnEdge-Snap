@@ -74,9 +74,9 @@ class EngineController(
             "Unavailable: native engine status could not be read (${t.message ?: t.javaClass.simpleName})."
         }
 
-    /** The CPU cores chosen in Settings (bit i = cpu i, 0 = Android decides); applies from the next generate call. */
-    fun setCpuMask(mask: Long) {
-        try { backend.setCpuMask(mask) } catch (_: Throwable) {}
+    /** The CPU cores chosen in Settings for decode and prefill (bit i = cpu i, 0 = Android decides). */
+    fun setCpuMasks(decode: Long, prefill: Long) {
+        try { backend.setCpuMasks(decode, prefill) } catch (_: Throwable) {}
     }
 
     /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */

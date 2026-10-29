@@ -632,26 +632,25 @@ private fun SettingsContent(
             // ------------------------------------------------------------ compute
             PerformanceGroup("CPU compute & memory", "Prompt evaluation, context and sampling") {
             CpuCoresSetting(
-                mask = settings.cpuMask,
-                allowed = remember { viewModel.allowedCpus }
-            ) { viewModel.updateCpuMask(it) }
-            // With cores chosen, both thread counts follow them (one thread per chosen core).
-            val coreThreads = java.lang.Long.bitCount(settings.cpuMask)
-            val coresChosen = coreThreads > 0
-            ChoiceSetting(
-                "Decode compute threads",
-                Choices.THREADS.map { it to it.toString() } + (if (coresChosen) listOf(coreThreads to "$coreThreads (one per chosen core)") else emptyList()),
-                if (coresChosen) coreThreads else settings.threadCount,
-                enabled = !coresChosen
-            ) { viewModel.updateThreadCount(it) }
-            Hint("Threads that compute while the answer is written, one token at a time. " + if (coresChosen) "Set by the chosen CPU cores." else "4–5 is a sensible start; more is not automatically faster.")
-            ChoiceSetting(
-                "Prompt / batch threads",
-                Choices.THREADS.map { it to it.toString() } + (if (coresChosen) listOf(coreThreads to "$coreThreads (one per chosen core)") else emptyList()),
-                if (coresChosen) coreThreads else settings.batchThreadCount,
-                enabled = !coresChosen
-            ) { viewModel.updateBatchThreadCount(it) }
-            Hint("Threads that read your message (the prompt) before the answer starts, many tokens at once, when the CPU does it rather than the NPU. " + if (coresChosen) "Set by the chosen CPU cores." else "More can speed up long prompts but competes for memory bandwidth and heat.")
+                decodeMask = settings.cpuMask,
+                prefillMask = settings.cpuMaskPrefill,
+                allowed = remember { viewModel.allowedCpus },
+                onDecode = viewModel::updateCpuMask,
+                onPrefill = viewModel::updateCpuMaskPrefill
+            )
+            // A row of ticked cores sets that thread count (one thread per ticked core); the pickers are for automatic.
+            if (settings.cpuMask == 0L) {
+                ChoiceSetting("Decode compute threads", Choices.THREADS.map { it to it.toString() }, settings.threadCount) {
+                    viewModel.updateThreadCount(it)
+                }
+                Hint("Threads that compute while the answer is written, one token at a time. 4–5 is a sensible start; more is not automatically faster.")
+            }
+            if (settings.cpuMaskPrefill == 0L) {
+                ChoiceSetting("Prompt / batch threads", Choices.THREADS.map { it to it.toString() }, settings.batchThreadCount) {
+                    viewModel.updateBatchThreadCount(it)
+                }
+                Hint("Threads that read your message (the prompt) before the answer starts, many tokens at once, when the CPU does it rather than the NPU. More can speed up long prompts but competes for memory bandwidth and heat.")
+            }
             ChoiceSetting(
                 "Batch width (ubatch)",
                 Choices.BATCH_WIDTH.map { it to "$it tokens" },

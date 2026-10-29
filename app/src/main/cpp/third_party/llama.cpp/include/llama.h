@@ -503,6 +503,10 @@ extern "C" {
 
     LLAMA_API void llama_detach_threadpool(struct llama_context * ctx);
 
+    // BigMoeOnEdge Snap: process-global hook called before every graph compute, on the computing thread, with whether
+    // the graph is batched (more than one token, i.e. prompt / verify) or a single-token decode. NULL clears it.
+    LLAMA_API void llama_set_graph_compute_hook(void (*hook)(bool batched));
+
     typedef void (*llama_model_set_tensor_data_t)(struct ggml_tensor * tensor, void * userdata);
 
     // Create a new model from GGUF metadata as well as a function to set the tensor data

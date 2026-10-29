@@ -92,8 +92,11 @@ class EngineNativeBridge {
         loraScale: Float
     ): ByteArray
 
-    /** The CPU cores (bit i = cpu i) the engine's threads run on from the next load/generate call; 0 = Android decides. */
-    external fun nativeSetCpuMask(mask: Long)
+    /**
+     * The CPU cores (bit i = cpu i) the engine's compute threads run on: [decode] for single-token graphs, [prefill]
+     * for batched (prompt) graphs; 0 = Android decides. Applies from the next graph computed.
+     */
+    external fun nativeSetCpuMasks(decode: Long, prefill: Long)
 
     /** The CPU cores Android lets this app use (bit i = cpu i); 0 when it cannot be read. */
     external fun nativeAllowedCpus(): Long

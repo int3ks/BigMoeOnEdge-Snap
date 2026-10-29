@@ -2744,9 +2744,20 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph 
             lctx->n_reallocs_same, lctx->n_reallocs_diff);
 }
 
+// BigMoeOnEdge Snap: called before every graph compute with whether it is a batched (prompt) graph, so the app can
+// place this graph's CPU threads (created from the calling thread) on the cores chosen for decode or for prefill.
+static void (*g_graph_compute_hook)(bool batched) = nullptr;
+
+void llama_set_graph_compute_hook(void (*hook)(bool batched)) {
+    g_graph_compute_hook = hook;
+}
+
 ggml_status llama_context::graph_compute(
             ggml_cgraph * gf,
                    bool   batched) {
+    if (g_graph_compute_hook) {
+        g_graph_compute_hook(batched);
+    }
     int n_threads        = batched ? cparams.n_threads_batch : cparams.n_threads;
     ggml_threadpool_t tp = batched ? threadpool_batch        : threadpool;
 

@@ -162,8 +162,23 @@ index e09616b..51614f9 100755
          model_instance = model_class(dir_model, output_type, fname_out,
                                       is_big_endian=args.bigendian, use_temp_file=args.use_temp_file,
                                       eager=args.no_lazy,
+diff --git a/include/llama.h b/include/llama.h
+index 3af6e22..b7f5b4f 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -503,6 +503,10 @@ extern "C" {
+ 
+     LLAMA_API void llama_detach_threadpool(struct llama_context * ctx);
+ 
++    // BigMoeOnEdge Snap: process-global hook called before every graph compute, on the computing thread, with whether
++    // the graph is batched (more than one token, i.e. prompt / verify) or a single-token decode. NULL clears it.
++    LLAMA_API void llama_set_graph_compute_hook(void (*hook)(bool batched));
++
+     typedef void (*llama_model_set_tensor_data_t)(struct ggml_tensor * tensor, void * userdata);
+ 
+     // Create a new model from GGUF metadata as well as a function to set the tensor data
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index ca84fc4..eda318c 100644
+index ca84fc4..7c6bccd 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -245,7 +245,7 @@ llama_context::llama_context(
@@ -175,3 +190,24 @@ index ca84fc4..eda318c 100644
          if (model.tok_embd == nullptr || model.output == nullptr) {
              if (params.ctx_other == nullptr) {
                  throw std::runtime_error(model.arch_name() + " requires ctx_other to be set (this warning is normal during memory fitting)");
+@@ -2744,9 +2744,20 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph
+             lctx->n_reallocs_same, lctx->n_reallocs_diff);
+ }
+ 
++// BigMoeOnEdge Snap: called before every graph compute with whether it is a batched (prompt) graph, so the app can
++// place this graph's CPU threads (created from the calling thread) on the cores chosen for decode or for prefill.
++static void (*g_graph_compute_hook)(bool batched) = nullptr;
++
++void llama_set_graph_compute_hook(void (*hook)(bool batched)) {
++    g_graph_compute_hook = hook;
++}
++
+ ggml_status llama_context::graph_compute(
+             ggml_cgraph * gf,
+                    bool   batched) {
++    if (g_graph_compute_hook) {
++        g_graph_compute_hook(batched);
++    }
+     int n_threads        = batched ? cparams.n_threads_batch : cparams.n_threads;
+     ggml_threadpool_t tp = batched ? threadpool_batch        : threadpool;
+ 

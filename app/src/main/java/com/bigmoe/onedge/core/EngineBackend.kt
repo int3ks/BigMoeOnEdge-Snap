@@ -14,8 +14,8 @@ interface EngineBackend {
     /** Capabilities verified by the native runtime, not only build flags. */
     fun capabilities(): EngineCaps
 
-    /** CPU cores for the engine's threads (bit i = cpu i), 0 = Android decides. Fakes ignore it. */
-    fun setCpuMask(mask: Long) {}
+    /** CPU cores for the engine's decode and prefill threads (bit i = cpu i), 0 = Android decides. Fakes ignore it. */
+    fun setCpuMasks(decode: Long, prefill: Long) {}
 
     /** CPU cores Android lets the app use (bit i = cpu i), 0 = unknown. */
     fun allowedCpus(): Long = 0L
@@ -87,7 +87,7 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
         return if (err.isEmpty()) null else decodeUtf8(err)
     }
 
-    override fun setCpuMask(mask: Long) = bridge.nativeSetCpuMask(mask)
+    override fun setCpuMasks(decode: Long, prefill: Long) = bridge.nativeSetCpuMasks(decode, prefill)
 
     override fun allowedCpus(): Long = bridge.nativeAllowedCpus()
 

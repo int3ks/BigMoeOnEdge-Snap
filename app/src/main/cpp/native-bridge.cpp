@@ -33,6 +33,7 @@
 
 #include "bmoe/session.h"
 #include "ggml-backend.h"
+#include "llama.h" // llama_set_graph_compute_hook (local patch, see patches/0007)
 #include "ggml-cpu.h" // ggml_cpu_has_* : one-time CPU feature line in the log (diagnostic only)
 #ifdef BMOE_PIN_FAST_CORES
 #include "perf_tuning.h"
@@ -44,10 +45,12 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 // ---- CPU cores chosen in Settings ---------------------------------------------------------------------------
-// Bit i = cpu i. 0 = let Android place the threads. Applied to the engine's calling thread around load and every
-// generate call: ggml creates its compute threads from that thread (a disposable pool per graph, default empty
-// cpumask) and the streaming I/O threads at load, and all of them inherit the mask.
-static std::atomic<unsigned long long> g_cpu_mask{0};
+// Bit i = cpu i, one mask for decode (single-token graphs) and one for prefill (batched graphs); 0 = let Android
+// place the threads. ggml creates each graph's compute threads from the calling thread (a disposable pool, default
+// empty cpumask), so they inherit its affinity: llama.cpp's graph-compute hook sets the calling thread to the
+// decode or prefill cores right before every graph, and ScopedCpuMask restores the thread's own affinity afterwards.
+static std::atomic<unsigned long long> g_decode_mask{0};
+static std::atomic<unsigned long long> g_prefill_mask{0};
 
 // The cores Android lets this process run on: the main thread's affinity (cpusets apply process-wide).
 static unsigned long long allowed_cpu_mask() {
@@ -60,33 +63,50 @@ static unsigned long long allowed_cpu_mask() {
     return m;
 }
 
+// Puts the calling thread on `want` (limited to the allowed cores); 0 or nothing allowed = all allowed cores.
+static void place_thread(unsigned long long want) {
+    const unsigned long long allowed = allowed_cpu_mask();
+    unsigned long long use = want & allowed;
+    if (use == 0) use = allowed;
+    if (use == 0) return;
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    for (int i = 0; i < 64 && i < CPU_SETSIZE; i++)
+        if ((use >> i) & 1ULL) CPU_SET(i, &set);
+    sched_setaffinity(0, sizeof(set), &set);
+}
+
+// Called by llama.cpp before every graph compute, on the computing thread.
+static void on_graph_compute(bool batched) {
+    const unsigned long long want = batched ? g_prefill_mask.load() : g_decode_mask.load();
+    if (want != 0) place_thread(want);
+}
+
+// Restores the calling thread's affinity when a JNI call ends, so a pooled Java thread does not keep the engine's
+// cores. While the call runs, threads created outside a graph (the streaming loaders at load) get both core sets.
 class ScopedCpuMask {
 public:
     ScopedCpuMask() {
-        const unsigned long long want = g_cpu_mask.load();
-        if (want == 0) return;
+        const unsigned long long d = g_decode_mask.load(), p = g_prefill_mask.load();
+        if ((d | p) == 0) return;
         if (sched_getaffinity(0, sizeof(old_), &old_) != 0) return;
-        const unsigned long long use = want & allowed_cpu_mask();
-        cpu_set_t set;
-        CPU_ZERO(&set);
-        for (int i = 0; i < 64 && i < CPU_SETSIZE; i++)
-            if ((use >> i) & 1ULL) CPU_SET(i, &set);
-        if (CPU_COUNT(&set) > 0 && sched_setaffinity(0, sizeof(set), &set) == 0) applied_ = true;
+        saved_ = true;
+        place_thread(d | p);
         static std::atomic<unsigned long long> last_logged{~0ULL};
-        if (last_logged.exchange(want) != want) {
-            LOGI("CPU cores: chosen 0x%llx, allowed 0x%llx, used 0x%llx (%s)", want, allowed_cpu_mask(), use,
-                 applied_ ? "applied" : "not applied: none of the chosen cores is allowed");
+        const unsigned long long key = d ^ (p << 32);
+        if (last_logged.exchange(key) != key) {
+            LOGI("CPU cores: decode 0x%llx, prefill 0x%llx, allowed 0x%llx", d, p, allowed_cpu_mask());
         }
     }
     ~ScopedCpuMask() {
-        if (applied_) sched_setaffinity(0, sizeof(old_), &old_);
+        if (saved_) sched_setaffinity(0, sizeof(old_), &old_);
     }
     ScopedCpuMask(const ScopedCpuMask &) = delete;
     ScopedCpuMask & operator=(const ScopedCpuMask &) = delete;
 
 private:
     cpu_set_t old_;
-    bool applied_ = false;
+    bool saved_ = false;
 };
 
 #ifdef BMOE_PIN_FAST_CORES
@@ -928,8 +948,12 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeDecide(
 } // extern "C"
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCpuMask(JNIEnv *, jobject, jlong mask) {
-    g_cpu_mask.store(static_cast<unsigned long long>(mask));
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCpuMasks(JNIEnv *, jobject, jlong decode, jlong prefill) {
+    g_decode_mask.store(static_cast<unsigned long long>(decode));
+    g_prefill_mask.store(static_cast<unsigned long long>(prefill));
+    // Installed once and left in place: with both masks 0 it does nothing.
+    static std::once_flag hook_once;
+    std::call_once(hook_once, [] { llama_set_graph_compute_hook(&on_graph_compute); });
 }
 
 extern "C" JNIEXPORT jlong JNICALL

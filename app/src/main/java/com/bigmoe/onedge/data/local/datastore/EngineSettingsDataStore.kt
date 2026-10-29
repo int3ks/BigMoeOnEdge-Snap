@@ -41,8 +41,10 @@ data class EngineSettings(
     // ---- engine (needs reload) ----
     val contextLength: Int = 4096,
     val threadCount: Int = 4,
-    /** CPU cores the engine's threads run on (bit i = cpu i); 0 = Android decides. */
+    /** CPU cores the decode threads run on (bit i = cpu i); 0 = Android decides. */
     val cpuMask: Long = 0L,
+    /** CPU cores the prompt (prefill) threads run on (bit i = cpu i); 0 = Android decides. */
+    val cpuMaskPrefill: Long = 0L,
     /** Threads used by multi-token prompt batches; independent of single-token decode threads. */
     val batchThreadCount: Int = 4,
     /** Widest graph evaluated at once. Lower values conserve RAM; capped to the context at load. */
@@ -148,9 +150,9 @@ data class EngineSettings(
 
     fun toLoadConfig(): LoadConfig = LoadConfig(
         nCtx = contextLength,
-        // Chosen CPU cores fix the thread count: one compute thread per chosen core, for decode and prompt alike.
+        // Chosen CPU cores fix the thread counts: one compute thread per chosen core, decode and prefill each.
         nThreads = if (cpuMask != 0L) java.lang.Long.bitCount(cpuMask).coerceIn(1, 32) else threadCount,
-        nThreadsBatch = if (cpuMask != 0L) java.lang.Long.bitCount(cpuMask).coerceIn(1, 32) else batchThreadCount,
+        nThreadsBatch = if (cpuMaskPrefill != 0L) java.lang.Long.bitCount(cpuMaskPrefill).coerceIn(1, 32) else batchThreadCount,
         batchWidth = batchWidth,
         seed = seed,
         // The engine refuses to open a model when "guess ahead" (speculation) is on together with sampling:
@@ -214,6 +216,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val CONTEXT_LENGTH = intPreferencesKey("context_length")
         val THREAD_COUNT = intPreferencesKey("thread_count")
         val CPU_MASK = longPreferencesKey("cpu_mask")
+        val CPU_MASK_PREFILL = longPreferencesKey("cpu_mask_prefill")
         val BATCH_THREAD_COUNT = intPreferencesKey("batch_thread_count")
         val BATCH_WIDTH = intPreferencesKey("batch_width")
         val TEMPERATURE = floatPreferencesKey("temperature")
@@ -290,6 +293,7 @@ class EngineSettingsDataStore(private val context: Context) {
             contextLength = p[Keys.CONTEXT_LENGTH] ?: d.contextLength,
             threadCount = p[Keys.THREAD_COUNT] ?: d.threadCount,
             cpuMask = p[Keys.CPU_MASK] ?: d.cpuMask,
+            cpuMaskPrefill = p[Keys.CPU_MASK_PREFILL] ?: d.cpuMaskPrefill,
             batchThreadCount = p[Keys.BATCH_THREAD_COUNT] ?: d.batchThreadCount,
             batchWidth = p[Keys.BATCH_WIDTH] ?: d.batchWidth,
             temperature = p[Keys.TEMPERATURE] ?: d.temperature,
@@ -395,6 +399,7 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateContextLength(v: Int) = set(Keys.CONTEXT_LENGTH, v.coerceAtLeast(1))
     suspend fun updateThreadCount(v: Int) = set(Keys.THREAD_COUNT, v.coerceIn(1, 32))
     suspend fun updateCpuMask(v: Long) = set(Keys.CPU_MASK, v)
+    suspend fun updateCpuMaskPrefill(v: Long) = set(Keys.CPU_MASK_PREFILL, v)
     suspend fun updateBatchThreadCount(v: Int) = set(Keys.BATCH_THREAD_COUNT, v.coerceIn(1, 32))
     suspend fun updateBatchWidth(v: Int) = set(Keys.BATCH_WIDTH, v.coerceIn(32, 8192))
     suspend fun updateTemperature(v: Float) = set(Keys.TEMPERATURE, v.coerceIn(0f, 2f))

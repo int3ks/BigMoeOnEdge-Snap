@@ -186,11 +186,12 @@ class AppContainer(private val context: Context) {
      */
     fun followCpuCoreSetting() {
         appScope.launch {
-            var applied = 0L
+            var applied = 0L to 0L
             settingsDataStore.settingsFlow.collect { s ->
-                if (s.cpuMask != applied) {
-                    engineController.setCpuMask(s.cpuMask)
-                    applied = s.cpuMask
+                val masks = s.cpuMask to s.cpuMaskPrefill
+                if (masks != applied) {
+                    engineController.setCpuMasks(masks.first, masks.second)
+                    applied = masks
                 }
             }
         }
@@ -201,7 +202,7 @@ class AppContainer(private val context: Context) {
         appScope.launch {
             val s = settingsDataStore.settingsFlow.first()
             if (s.autoLoadLastModel && s.lastModelPath.isNotBlank() && File(s.lastModelPath).isFile) {
-                engineController.setCpuMask(s.cpuMask) // before the load, so the load's threads start on those cores
+                engineController.setCpuMasks(s.cpuMask, s.cpuMaskPrefill) // before the load, so its threads start there
                 val projector = modelManager.mmprojForModel(s.lastModelPath)
                     ?: s.lastMmprojPath.takeIf { it.isNotBlank() && File(it).isFile }
                 val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP)
