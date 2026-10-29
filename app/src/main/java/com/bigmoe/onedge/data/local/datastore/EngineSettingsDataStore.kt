@@ -41,9 +41,9 @@ data class EngineSettings(
     // ---- engine (needs reload) ----
     val contextLength: Int = 4096,
     val threadCount: Int = 4,
-    /** CPU cores the decode threads run on (bit i = cpu i); 0 = Android decides. */
+    /** CPU cores the decode threads run on (bit i = cpu i); 0 = the default, see [com.bigmoe.onedge.core.CpuTopology]. */
     val cpuMask: Long = 0L,
-    /** CPU cores the prompt (prefill) threads run on (bit i = cpu i); 0 = Android decides. */
+    /** CPU cores the prompt (prefill) threads run on (bit i = cpu i); 0 = the default, see [com.bigmoe.onedge.core.CpuTopology]. */
     val cpuMaskPrefill: Long = 0L,
     /** Threads used by multi-token prompt batches; independent of single-token decode threads. */
     val batchThreadCount: Int = 4,
@@ -150,9 +150,9 @@ data class EngineSettings(
 
     fun toLoadConfig(): LoadConfig = LoadConfig(
         nCtx = contextLength,
-        // Chosen CPU cores fix the thread counts: one compute thread per chosen core, decode and prefill each.
-        nThreads = if (cpuMask != 0L) java.lang.Long.bitCount(cpuMask).coerceIn(1, 32) else threadCount,
-        nThreadsBatch = if (cpuMaskPrefill != 0L) java.lang.Long.bitCount(cpuMaskPrefill).coerceIn(1, 32) else batchThreadCount,
+        // The chosen CPU cores fix the thread counts: one compute thread per core, decode and prefill each.
+        nThreads = java.lang.Long.bitCount(com.bigmoe.onedge.core.CpuTopology.effective(cpuMask)).coerceIn(1, 32),
+        nThreadsBatch = java.lang.Long.bitCount(com.bigmoe.onedge.core.CpuTopology.effective(cpuMaskPrefill)).coerceIn(1, 32),
         batchWidth = batchWidth,
         seed = seed,
         // The engine refuses to open a model when "guess ahead" (speculation) is on together with sampling:

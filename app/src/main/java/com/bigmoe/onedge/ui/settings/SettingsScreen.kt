@@ -85,8 +85,6 @@ private object Choices {
     val ROUTE_AHEAD = listOf(0, 1, 2, 4)
     val DROP_COLD = listOf(0, 50, 75, 100)
     val SUBSTITUTE = listOf(0, 10, 15, 20, 30)
-    // Odd counts matter on 1+4+3 phones (e.g. Snapdragon 8 Gen 2): 5 threads fill the five fast cores exactly.
-    val THREADS = listOf(1, 2, 3, 4, 5, 6, 7, 8)
     val BATCH_WIDTH = listOf(32, 64, 128, 256, 384, 512, 768, 1024, 1536, 2048)
     val NPU_MIN_TOKENS = listOf(8, 16, 32, 64, 128, 256)
     val NPU_ROUTED_FULL_PCT = listOf(50, 70, 85, 95, 100)
@@ -632,25 +630,12 @@ private fun SettingsContent(
             // ------------------------------------------------------------ compute
             PerformanceGroup("CPU compute & memory", "Prompt evaluation, context and sampling") {
             CpuCoresSetting(
-                decodeMask = settings.cpuMask,
-                prefillMask = settings.cpuMaskPrefill,
+                decodeMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMask),
+                prefillMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMaskPrefill),
                 allowed = remember { viewModel.allowedCpus },
                 onDecode = viewModel::updateCpuMask,
                 onPrefill = viewModel::updateCpuMaskPrefill
             )
-            // A row of ticked cores sets that thread count (one thread per ticked core); the pickers are for automatic.
-            if (settings.cpuMask == 0L) {
-                ChoiceSetting("Decode compute threads", Choices.THREADS.map { it to it.toString() }, settings.threadCount) {
-                    viewModel.updateThreadCount(it)
-                }
-                Hint("Threads that compute while the answer is written, one token at a time. 4–5 is a sensible start; more is not automatically faster.")
-            }
-            if (settings.cpuMaskPrefill == 0L) {
-                ChoiceSetting("Prompt / batch threads", Choices.THREADS.map { it to it.toString() }, settings.batchThreadCount) {
-                    viewModel.updateBatchThreadCount(it)
-                }
-                Hint("Threads that read your message (the prompt) before the answer starts, many tokens at once, when the CPU does it rather than the NPU. More can speed up long prompts but competes for memory bandwidth and heat.")
-            }
             ChoiceSetting(
                 "Batch width (ubatch)",
                 Choices.BATCH_WIDTH.map { it to "$it tokens" },

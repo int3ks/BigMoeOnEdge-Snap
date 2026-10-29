@@ -40,7 +40,8 @@ private val CELL_WIDTH = 52.dp
 
 /**
  * The CPU cores the engine computes on, as a table: one column per core, one row for decode (writing the answer,
- * one token at a time) and one for prefill (reading the prompt, many tokens at once). An empty row = Android decides.
+ * one token at a time) and one for prefill (reading the prompt, many tokens at once). An empty row = the default
+ * (first two and last two cores, see CpuTopology).
  * Cores Android does not let the app use are marked and skipped: the engine only ever uses ticked AND allowed cores.
  */
 @Composable
@@ -84,14 +85,15 @@ internal fun CpuCoresSetting(
             describe("Decode", decodeMask, allowed) + "\n" + describe("Prefill", prefillMask, allowed),
             style = MaterialTheme.typography.bodySmall
         )
-        if (decodeMask != 0L || prefillMask != 0L) {
-            TextButton(onClick = { onDecode(0L); onPrefill(0L) }) { Text("Back to automatic") }
+        val default = com.bigmoe.onedge.core.CpuTopology.defaultMask(cores.size)
+        if (decodeMask != default || prefillMask != default) {
+            TextButton(onClick = { onDecode(0L); onPrefill(0L) }) { Text("Reset to default (first two and last two cores)") }
         }
         Hint(
             "Decode writes the answer one token at a time (this sets the t/s), prefill reads your message before the answer " +
                 "starts (with NPU prefill on, the NPU does most of it). Each row pins its threads to the ticked cores " +
-                "(★ = fastest, ✕ = blocked by Android) and uses one thread per ticked core. Cores apply with the next " +
-                "message, thread counts with the next model load."
+                "(★ = fastest, ✕ = blocked by Android) and uses one thread per ticked core. Default: the first two and " +
+                "the last two cores. Cores apply with the next message, thread counts with the next model load."
         )
     }
 }
@@ -103,6 +105,7 @@ private fun CoreRow(label: String, cores: List<CpuCore>, mask: Long, onChange: (
         cores.forEach { core ->
             val bit = 1L shl core.index
             Box(Modifier.width(CELL_WIDTH), contentAlignment = Alignment.Center) {
+                // Unticking the last core falls back to the default (0 is stored as "default").
                 Checkbox(checked = (mask and bit) != 0L, onCheckedChange = { onChange(mask xor bit) })
             }
         }
@@ -112,7 +115,7 @@ private fun CoreRow(label: String, cores: List<CpuCore>, mask: Long, onChange: (
 private fun describe(label: String, mask: Long, allowed: Long): String {
     val usable = java.lang.Long.bitCount(if (allowed == 0L) mask else mask and allowed)
     return when {
-        mask == 0L -> "$label: automatic (Android decides)"
+        mask == 0L -> "$label: default cores"
         usable == 0 -> "$label: none of the ticked cores is allowed, so Android decides"
         else -> "$label: $usable core${if (usable == 1) "" else "s"}, $usable thread${if (usable == 1) "" else "s"}"
     }
