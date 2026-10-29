@@ -179,6 +179,7 @@ Generated files and code are handled as artifacts instead of plain chat text:
 * JavaScript execution only through an explicit, approved tool flow; code artifacts themselves are not implicitly executed
 
 * Workspace browsing and file management
+* Optional shared workspace folder (`Internal storage/BigMoe/workspace`, Settings → Workspace) that Termux and other apps can read and write; needs all-files access, and turning it off moves the files back to private storage
 
 * Saving, editing, sharing, and downloading files
 

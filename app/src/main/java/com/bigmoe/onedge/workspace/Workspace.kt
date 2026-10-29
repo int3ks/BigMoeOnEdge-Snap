@@ -8,12 +8,21 @@ class WorkspaceException(message: String) : IOException(message)
 data class WorkspaceEntry(val path: String, val isDirectory: Boolean, val sizeBytes: Long, val modifiedMs: Long)
 
 /**
- * The only place the AI's file tools (and the viewer) may touch: a private directory tree. Every path is a
+ * The only place the AI's file tools (and the viewer) may touch: one directory tree. Every path is a
  * RELATIVE path inside it; anything that would leave the root (`..`, absolute paths, symlinks) is refused.
- * Pure java.io, so it is unit-tested on the JVM.
+ * The tree is app-private by default; Settings → Workspace can move it to shared storage (see
+ * [WorkspaceMover] and com.bigmoe.onedge.core.WorkspaceSwitcher), and [relocate] then points every holder of
+ * this object at the new root. Pure java.io, so it is unit-tested on the JVM.
  */
 class Workspace(root: File) {
-    val rootDir: File = root.apply { mkdirs() }.canonicalFile
+    @Volatile
+    var rootDir: File = root.apply { mkdirs() }.canonicalFile
+        private set
+
+    /** Points the workspace at [newRoot] (created if missing). Files are not moved here: see [WorkspaceMover]. */
+    fun relocate(newRoot: File) {
+        rootDir = newRoot.apply { mkdirs() }.canonicalFile
+    }
 
     /** Normalises user/model input: backslashes, leading "./" and "/", repeated separators. */
     fun normalize(path: String): String {
@@ -24,11 +33,12 @@ class Workspace(root: File) {
 
     /** Resolves a relative path to a file inside the root, or throws. "" / "." is the root itself. */
     fun resolve(path: String): File {
+        val root = rootDir
         val norm = normalize(path)
         if (norm.split('/').any { it == ".." }) throw WorkspaceException("Path escapes the workspace: $path")
-        val f = if (norm.isEmpty()) rootDir else File(rootDir, norm)
+        val f = if (norm.isEmpty()) root else File(root, norm)
         val canonical = try { f.canonicalFile } catch (e: IOException) { throw WorkspaceException("Bad path: $path") }
-        val rootPath = rootDir.path
+        val rootPath = root.path
         if (canonical.path != rootPath && !canonical.path.startsWith(rootPath + File.separator)) {
             throw WorkspaceException("Path escapes the workspace: $path")
         }
@@ -37,8 +47,9 @@ class Workspace(root: File) {
 
     /** Workspace-relative form of [file] ("" for the root). */
     fun relative(file: File): String {
+        val rootPath = rootDir.path
         val p = file.canonicalFile.path
-        return if (p == rootDir.path) "" else p.removePrefix(rootDir.path + File.separator).replace(File.separatorChar, '/')
+        return if (p == rootPath) "" else p.removePrefix(rootPath + File.separator).replace(File.separatorChar, '/')
     }
 
     fun exists(path: String): Boolean = resolve(path).exists()
@@ -54,6 +65,7 @@ class Workspace(root: File) {
             val children = d.listFiles()?.sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() })) ?: return
             for (c in children) {
                 if (out.size >= maxEntries) return
+                if (c.name in HIDDEN_NAMES) continue
                 out.add(WorkspaceEntry(relative(c), c.isDirectory, if (c.isFile) c.length() else 0L, c.lastModified()))
                 if (recursive && c.isDirectory) walk(c)
             }
@@ -72,6 +84,7 @@ class Workspace(root: File) {
             val children = d.listFiles()?.sortedBy { it.name.lowercase() } ?: return
             for (c in children) {
                 if (out.size >= maxFiles) return
+                if (c.name in HIDDEN_NAMES) continue
                 if (c.isDirectory) walk(c) else if (c.isFile) out.add(c)
             }
         }
@@ -154,5 +167,13 @@ class Workspace(root: File) {
             if (!resolve(candidate).exists()) return candidate
             n++
         }
+    }
+
+    companion object {
+        /** Keeps the media scanner out of a workspace in shared storage (written by WorkspaceSwitcher). */
+        const val NO_MEDIA = ".nomedia"
+
+        /** Housekeeping files that listings, searches and the AI's file tools never show. */
+        val HIDDEN_NAMES: Set<String> = setOf(NO_MEDIA)
     }
 }

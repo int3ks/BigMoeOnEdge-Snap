@@ -51,4 +51,32 @@ class WorkspaceTest {
             assertEquals(listOf("dir/a.kt", "z.txt"), w.walkFiles().map(w::relative).sorted())
         } finally { root.deleteRecursively() }
     }
+
+    @Test
+    fun relocatePointsEveryCallAtTheNewRoot() {
+        val (w, root) = ws()
+        val other = File.createTempFile("bmoe-ws2", "").apply { delete() }
+        try {
+            w.writeText("old.txt", "old", overwrite = true)
+            w.relocate(other)
+            assertTrue(other.isDirectory)
+            assertEquals(other.canonicalPath, w.rootDir.path)
+            assertFalse(w.exists("old.txt"))
+            w.writeText("dir/new.txt", "new", overwrite = true)
+            assertTrue(File(other, "dir/new.txt").isFile)
+            assertEquals("dir/new.txt", w.relative(File(other, "dir/new.txt")))
+            try { w.resolve("../" + root.name + "/old.txt"); throw AssertionError("escape accepted") } catch (_: WorkspaceException) { }
+        } finally { root.deleteRecursively(); other.deleteRecursively() }
+    }
+
+    @Test
+    fun noMediaMarkerIsHiddenFromListingsAndWalks() {
+        val (w, root) = ws()
+        try {
+            File(root, Workspace.NO_MEDIA).createNewFile()
+            w.writeText("a.txt", "a", overwrite = true)
+            assertEquals(listOf("a.txt"), w.list("").map { it.path })
+            assertEquals(listOf("a.txt"), w.walkFiles().map(w::relative))
+        } finally { root.deleteRecursively() }
+    }
 }

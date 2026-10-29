@@ -831,11 +831,8 @@ private fun SettingsContent(
             OutlinedButton(onClick = { shareLatestCsv(context) }) { Text("Share latest metrics CSV") }
             Divider()
 
-            // ------------------------------------------------------------ workspace
-            Section("Workspace")
-            Text("Files attached to chats and files created by the AI live in the private workspace.", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onOpenWorkspace) { Text("Workspace files") }
+            // ------------------------------------------------------------ workspace (private or shared folder)
+            WorkspaceLocationSection(viewModel = viewModel, onOpenWorkspace = onOpenWorkspace)
             Divider()
 
             Section("Capabilities")

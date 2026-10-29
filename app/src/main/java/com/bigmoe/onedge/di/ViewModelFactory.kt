@@ -33,7 +33,8 @@ class AppViewModelFactory(
                 dataStore = container.settingsDataStore,
                 engineController = container.engineController,
                 modelManager = container.modelManager,
-                apiServer = container.apiServerController
+                apiServer = container.apiServerController,
+                workspaceSwitcher = container.workspaceSwitcher
             ) as T
             modelClass.isAssignableFrom(AutoTuneViewModel::class.java) -> AutoTuneViewModel(
                 dataStore = container.settingsDataStore,

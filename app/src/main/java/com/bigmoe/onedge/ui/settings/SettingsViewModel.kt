@@ -24,7 +24,8 @@ class SettingsViewModel(
     private val dataStore: EngineSettingsDataStore,
     private val engineController: EngineController,
     private val modelManager: ModelManager,
-    private val apiServer: com.bigmoe.onedge.server.ApiServerController
+    private val apiServer: com.bigmoe.onedge.server.ApiServerController,
+    private val workspaceSwitcher: com.bigmoe.onedge.core.WorkspaceSwitcher
 ) : ViewModel() {
 
     /** null until the first DataStore read finished, so the screen never seeds text fields with defaults. */
@@ -113,6 +114,12 @@ class SettingsViewModel(
     fun updateServerBindAll(v: Boolean) = launch { dataStore.updateServerBindAll(v) }
     fun updateServerForceSettings(v: Boolean) = launch { dataStore.updateServerForceSettings(v) }
     fun updateServerQueueTimeoutSec(v: Int) = launch { dataStore.updateServerQueueTimeoutSec(v) }
+
+    // ---- workspace location (private or shared folder) ----
+    val workspaceState: StateFlow<com.bigmoe.onedge.core.WorkspaceSwitcher.State> = workspaceSwitcher.state
+    fun refreshWorkspace() = workspaceSwitcher.refresh()
+    fun setSharedWorkspace(v: Boolean) = workspaceSwitcher.requestShared(v)
+    fun showWorkspaceMessage(text: String) = workspaceSwitcher.showMessage(text)
 
     // ---- appearance ----
     fun selectTheme(id: String) = launch { dataStore.updateThemeId(id) }

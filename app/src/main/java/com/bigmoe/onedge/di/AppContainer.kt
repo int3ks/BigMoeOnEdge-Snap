@@ -96,8 +96,18 @@ class AppContainer(private val context: Context) {
         ModelManager(File(context.applicationContext.filesDir, "models"))
     }
 
-    /** The sandbox every file tool, attachment and artifact lives in: `<app files>/workspace`. */
-    val workspace: Workspace by lazy { Workspace(File(context.applicationContext.filesDir, "workspace")) }
+    /** Private (`<app files>/workspace`) or shared (`<internal storage>/BigMoe/workspace`), see [workspaceSwitcher]. */
+    val workspaceLocation: com.bigmoe.onedge.core.WorkspaceLocation by lazy {
+        com.bigmoe.onedge.core.WorkspaceLocation(context.applicationContext)
+    }
+
+    /** The sandbox every file tool, attachment and artifact lives in; its root is picked once at start. */
+    val workspace: Workspace by lazy { Workspace(workspaceLocation.startupRoot()) }
+
+    /** Settings → Workspace: moves the files between private and shared storage and repoints [workspace]. */
+    val workspaceSwitcher: com.bigmoe.onedge.core.WorkspaceSwitcher by lazy {
+        com.bigmoe.onedge.core.WorkspaceSwitcher(workspace, workspaceLocation)
+    }
 
     val artifactRepository: ArtifactRepository by lazy { ArtifactRepository(database.artifactDao()) }
 
