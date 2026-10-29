@@ -2,6 +2,8 @@
 
 ## Snap fork
 
+- llama.cpp updated again, to Helldez/llama.cpp `bmoe/expert-ready-hook-2810` (396b6c4, upstream of 2026-10-28, the revision BigMoeOnEdge moved to): Hexagon MUL_MAT_ID row skipping, multicore HMX flash attention and op fusion (NPU prefill), DeepSeek V4.1 Flash, LiquidAI LFM3 / d1, MiniCPM-OCR, GLM5-Next / Laguna / MiniMax-M3 / Nemotron fixes, a DRY-sampler resource-exhaustion fix and recursion limits for grammars and JSON. The engine builds against it unchanged; local changes: patches/0007-llama-cpp-local-on-2810.patch.
+- Engine fix from upstream BigMoeOnEdge (#446): the router's prediction worker is joined before the expert source frees the gate weights, so unloading or switching a model with predictive prefetch on cannot read freed memory.
 - Own application id `com.bigmoe.onedge.snap` and app name "BigMoeOnEdge Snap", so this build installs next to BigMoeOnEdge+ (`com.bigmoe.onedge`). The Kotlin package stays `com.bigmoe.onedge`.
 - Updated the vendored llama.cpp from 965f897 (2026-09-26) to Helldez/llama.cpp `bmoe/expert-ready-hook-2210-dl` (ad98071, the revision BigMoeOnEdge 0.38 pins). This adds the **Flint** architecture (`FlintForCausalLM`, e.g. flint-40B-A2.5B) and the Jinja `\x` hex escapes its chat template uses. Local llama.cpp changes kept on top: patches/0007.
 - Engine core adapted to the newer llama.cpp `common` API (`common_chat_prompt`, `common_chat_input`, `common_batch` for the MTP driver, reasoning format set on the template inputs), the same way upstream BigMoeOnEdge did.

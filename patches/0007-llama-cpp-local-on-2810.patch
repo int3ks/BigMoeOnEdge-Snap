@@ -1,8 +1,8 @@
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index 5a0b5b5..9abbfd9 100644
+index 4305ac6a..a4fb0a83 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
-@@ -1520,7 +1520,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1577,7 +1577,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
          llama_set_embeddings_nextn(ctx_tgt, true, /*masked*/ false);
          llama_set_embeddings_nextn(ctx_dft, true, /*masked*/ true);
  
@@ -14,7 +14,7 @@ index 5a0b5b5..9abbfd9 100644
  
          if (chain_heads) {
 diff --git a/conversion/bailingmoe3.py b/conversion/bailingmoe3.py
-index 36b9315..6f016d1 100644
+index 36b93156..6f016d12 100644
 --- a/conversion/bailingmoe3.py
 +++ b/conversion/bailingmoe3.py
 @@ -123,9 +123,9 @@ class BailingMoeV3Model(TextModel):
@@ -30,7 +30,7 @@ index 36b9315..6f016d1 100644
  
          return super().filter_tensors((name, gen))
 diff --git a/conversion/base.py b/conversion/base.py
-index f3bbe7b..a135a1f 100644
+index d8420eb3..cea91836 100644
 --- a/conversion/base.py
 +++ b/conversion/base.py
 @@ -121,6 +121,7 @@ class ModelBase:
@@ -42,7 +42,7 @@ index f3bbe7b..a135a1f 100644
      def __init__(self, dir_model: Path, ftype: gguf.LlamaFileType, fname_out: Path, *, is_big_endian: bool = False,
                   use_temp_file: bool = False, eager: bool = False,
 diff --git a/conversion/command_r.py b/conversion/command_r.py
-index 0db6eb6..e8dca18 100644
+index 0db6eb68..e8dca186 100644
 --- a/conversion/command_r.py
 +++ b/conversion/command_r.py
 @@ -131,9 +131,9 @@ class Cohere2MoeModel(TextModel):
@@ -58,7 +58,7 @@ index 0db6eb6..e8dca18 100644
  
          return name, gen
 diff --git a/conversion/dots3.py b/conversion/dots3.py
-index c7ac231..e8d3f35 100644
+index c7ac2319..e8d3f350 100644
 --- a/conversion/dots3.py
 +++ b/conversion/dots3.py
 @@ -99,9 +99,9 @@ class Dots3NoteModel(DeepseekV2Model):
@@ -74,7 +74,7 @@ index c7ac231..e8d3f35 100644
  
          return name, gen
 diff --git a/conversion/glm.py b/conversion/glm.py
-index 10f3ef1..45a93ab 100644
+index 10f3ef11..45a93abc 100644
 --- a/conversion/glm.py
 +++ b/conversion/glm.py
 @@ -138,9 +138,9 @@ class Glm4MoeModel(TextModel):
@@ -114,7 +114,7 @@ index 10f3ef1..45a93ab 100644
  
          return name, gen
 diff --git a/conversion/qwen.py b/conversion/qwen.py
-index e1013dd..8c533e4 100644
+index 5ec4ab43..8e0f8920 100644
 --- a/conversion/qwen.py
 +++ b/conversion/qwen.py
 @@ -300,6 +300,7 @@ class _QwenMtpMixin:
@@ -135,7 +135,7 @@ index e1013dd..8c533e4 100644
                  "embed_tokens.weight", "norm.weight",
              )
 diff --git a/convert_hf_to_gguf.py b/convert_hf_to_gguf.py
-index e09616b..51614f9 100755
+index 5e263fd1..be715474 100755
 --- a/convert_hf_to_gguf.py
 +++ b/convert_hf_to_gguf.py
 @@ -125,6 +125,10 @@ def parse_args() -> argparse.Namespace:
@@ -149,7 +149,7 @@ index e09616b..51614f9 100755
      parser.add_argument(
          "--dspark", action="store_true",
          help="Export only the DeepSeek-V4 DSpark draft tensors as a separate GGUF.",
-@@ -282,6 +286,12 @@ def main() -> None:
+@@ -286,6 +290,12 @@ def main() -> None:
              if args.mtp:
                  model_class.mtp_only = True
  
@@ -163,7 +163,7 @@ index e09616b..51614f9 100755
                                       is_big_endian=args.bigendian, use_temp_file=args.use_temp_file,
                                       eager=args.no_lazy,
 diff --git a/include/llama.h b/include/llama.h
-index 3af6e22..b7f5b4f 100644
+index ae54e661..6889ea59 100644
 --- a/include/llama.h
 +++ b/include/llama.h
 @@ -503,6 +503,10 @@ extern "C" {
@@ -178,7 +178,7 @@ index 3af6e22..b7f5b4f 100644
  
      // Create a new model from GGUF metadata as well as a function to set the tensor data
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index ca84fc4..7c6bccd 100644
+index 33ad7845..b15c9ab8 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -245,7 +245,7 @@ llama_context::llama_context(
@@ -190,7 +190,7 @@ index ca84fc4..7c6bccd 100644
          if (model.tok_embd == nullptr || model.output == nullptr) {
              if (params.ctx_other == nullptr) {
                  throw std::runtime_error(model.arch_name() + " requires ctx_other to be set (this warning is normal during memory fitting)");
-@@ -2744,9 +2744,20 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph
+@@ -2751,9 +2751,20 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph
              lctx->n_reallocs_same, lctx->n_reallocs_diff);
  }
  

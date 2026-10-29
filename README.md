@@ -41,9 +41,10 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 
 ### Engine and models
 * **Newer llama.cpp:** the vendored tree moved from 965f897 (2026-09-26) to Helldez/llama.cpp
-  `bmoe/expert-ready-hook-2210-dl`, the revision BigMoeOnEdge 0.38 uses. This adds the **Flint** architecture
+  `bmoe/expert-ready-hook-2810` (upstream of 2026-10-28), the revision BigMoeOnEdge uses. It brings faster Hexagon
+  (NPU) MoE kernels, DeepSeek V4.1 Flash, LFM3 and more models, and the **Flint** architecture
   (`FlintForCausalLM`, e.g. flint-40B-A2.5B) and the Jinja hex escapes its chat template needs; Flint is also
-  registered for expert streaming. Local changes on top are recorded in [`patches/0007`](patches/0007-llama-cpp-local-on-2210-dl.patch).
+  registered for expert streaming. Local changes on top are recorded in [`patches/0007`](patches/0007-llama-cpp-local-on-2810.patch).
 * **NPU prefill builds on every push:** the Snapdragon Hexagon build runs in CI and is the APK that gets released.
 * **MTP for every architecture:** a separate MTP drafter (MTP-only GGUF) is no longer limited to Qwen4Exp; Qwen3.5/3.6
   and others can use one. Most Qwen3.5/3.6 GGUFs carry their own MTP head anyway.
@@ -237,8 +238,8 @@ Full details, every curl command, and what was and was not verified: [`docs/API_
 ### Native engine
 
 * `app/src/main/cpp/core`: the customised BigMoeOnEdge engine (0.28 baseline with local patches, see `patches/`).
-* `app/src/main/cpp/third_party/llama.cpp`: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-2210-dl` (ad98071) with
-  the local changes in `patches/0007`.
+* `app/src/main/cpp/third_party/llama.cpp`: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-2810` (396b6c4,
+  upstream of 2026-10-28) with the local changes in `patches/0007`.
 * `app/src/main/cpp/native-bridge.cpp` and `EngineNativeBridge.kt`: the JNI bridge.
 
 ### Known limitations
