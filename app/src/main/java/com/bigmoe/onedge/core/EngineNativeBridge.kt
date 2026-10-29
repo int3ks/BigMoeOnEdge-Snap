@@ -92,6 +92,12 @@ class EngineNativeBridge {
         loraScale: Float
     ): ByteArray
 
+    /** The CPU cores (bit i = cpu i) the engine's threads run on from the next load/generate call; 0 = Android decides. */
+    external fun nativeSetCpuMask(mask: Long)
+
+    /** The CPU cores Android lets this app use (bit i = cpu i); 0 when it cannot be read. */
+    external fun nativeAllowedCpus(): Long
+
     /** Bit 0: expert-ready hook; bit 1: multimodal; bit 2: HTP backend runtime probe succeeded. */
     external fun nativeCapabilities(): Int
 

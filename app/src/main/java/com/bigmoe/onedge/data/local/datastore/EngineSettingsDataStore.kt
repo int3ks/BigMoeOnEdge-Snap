@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.bigmoe.onedge.core.CacheMode
@@ -40,6 +41,8 @@ data class EngineSettings(
     // ---- engine (needs reload) ----
     val contextLength: Int = 4096,
     val threadCount: Int = 4,
+    /** CPU cores the engine's threads run on (bit i = cpu i); 0 = Android decides. */
+    val cpuMask: Long = 0L,
     /** Threads used by multi-token prompt batches; independent of single-token decode threads. */
     val batchThreadCount: Int = 4,
     /** Widest graph evaluated at once. Lower values conserve RAM; capped to the context at load. */
@@ -209,6 +212,7 @@ class EngineSettingsDataStore(private val context: Context) {
     private object Keys {
         val CONTEXT_LENGTH = intPreferencesKey("context_length")
         val THREAD_COUNT = intPreferencesKey("thread_count")
+        val CPU_MASK = longPreferencesKey("cpu_mask")
         val BATCH_THREAD_COUNT = intPreferencesKey("batch_thread_count")
         val BATCH_WIDTH = intPreferencesKey("batch_width")
         val TEMPERATURE = floatPreferencesKey("temperature")
@@ -284,6 +288,7 @@ class EngineSettingsDataStore(private val context: Context) {
         EngineSettings(
             contextLength = p[Keys.CONTEXT_LENGTH] ?: d.contextLength,
             threadCount = p[Keys.THREAD_COUNT] ?: d.threadCount,
+            cpuMask = p[Keys.CPU_MASK] ?: d.cpuMask,
             batchThreadCount = p[Keys.BATCH_THREAD_COUNT] ?: d.batchThreadCount,
             batchWidth = p[Keys.BATCH_WIDTH] ?: d.batchWidth,
             temperature = p[Keys.TEMPERATURE] ?: d.temperature,
@@ -388,6 +393,7 @@ class EngineSettingsDataStore(private val context: Context) {
 
     suspend fun updateContextLength(v: Int) = set(Keys.CONTEXT_LENGTH, v.coerceAtLeast(1))
     suspend fun updateThreadCount(v: Int) = set(Keys.THREAD_COUNT, v.coerceIn(1, 32))
+    suspend fun updateCpuMask(v: Long) = set(Keys.CPU_MASK, v)
     suspend fun updateBatchThreadCount(v: Int) = set(Keys.BATCH_THREAD_COUNT, v.coerceIn(1, 32))
     suspend fun updateBatchWidth(v: Int) = set(Keys.BATCH_WIDTH, v.coerceIn(32, 8192))
     suspend fun updateTemperature(v: Float) = set(Keys.TEMPERATURE, v.coerceIn(0f, 2f))

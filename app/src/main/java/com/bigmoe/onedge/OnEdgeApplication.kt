@@ -15,6 +15,7 @@ class OnEdgeApplication : Application() {
         // The ordinary CPU build contains no DSP skeleton assets; setup then safely no-ops.
         HexagonRuntimeSetup.prepare(this)
         container = AppContainer(this)
+        container.followCpuCoreSetting()
         container.autoLoadLastModelIfEnabled()
         container.startApiServerIfEnabled()
     }

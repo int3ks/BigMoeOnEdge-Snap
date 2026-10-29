@@ -74,6 +74,14 @@ class EngineController(
             "Unavailable: native engine status could not be read (${t.message ?: t.javaClass.simpleName})."
         }
 
+    /** The CPU cores chosen in Settings (bit i = cpu i, 0 = Android decides); applies from the next generate call. */
+    fun setCpuMask(mask: Long) {
+        try { backend.setCpuMask(mask) } catch (_: Throwable) {}
+    }
+
+    /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */
+    fun allowedCpus(): Long = try { backend.allowedCpus() } catch (_: Throwable) { 0L }
+
     /**
      * Loads [modelPath]; blocks (on the IO dispatcher) for as long as the engine takes. Any previously
      * loaded model is released first. Returns null on success or the error message.

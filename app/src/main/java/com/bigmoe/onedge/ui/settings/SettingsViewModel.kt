@@ -87,6 +87,9 @@ class SettingsViewModel(
     fun updateLoadAllExpertsForBenchmark(v: Boolean) = launch { dataStore.updateLoadAllExpertsForBenchmark(v) }
     fun updateReleaseMmap(v: Boolean) = launch { dataStore.updateReleaseMmap(v) }
     fun updateSpec(v: SpecSource) = launch { dataStore.updateSpec(v) }
+    fun updateCpuMask(v: Long) = launch { dataStore.updateCpuMask(v) }
+    /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */
+    val allowedCpus: Long get() = engineController.allowedCpus()
     fun updateDraftMax(v: Int) = launch { dataStore.updateDraftMax(v) }
     fun updateMtpPMinPct(v: Int) = launch { dataStore.updateMtpPMinPct(v) }
     fun updateSeparateMtpDraftEnabled(v: Boolean) = launch { dataStore.updateSeparateMtpDraftEnabled(v) }

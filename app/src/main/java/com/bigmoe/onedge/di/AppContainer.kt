@@ -180,11 +180,28 @@ class AppContainer(private val context: Context) {
         appScope.launch { apiServerController.startIfEnabled() }
     }
 
+    /**
+     * Called once from Application.onCreate: keeps the engine on the CPU cores chosen in Settings. The native library
+     * is only touched once a core choice exists, so the default (Android decides) costs nothing at start.
+     */
+    fun followCpuCoreSetting() {
+        appScope.launch {
+            var applied = 0L
+            settingsDataStore.settingsFlow.collect { s ->
+                if (s.cpuMask != applied) {
+                    engineController.setCpuMask(s.cpuMask)
+                    applied = s.cpuMask
+                }
+            }
+        }
+    }
+
     /** Called once from Application.onCreate: honours "load the last model on app start". */
     fun autoLoadLastModelIfEnabled() {
         appScope.launch {
             val s = settingsDataStore.settingsFlow.first()
             if (s.autoLoadLastModel && s.lastModelPath.isNotBlank() && File(s.lastModelPath).isFile) {
+                engineController.setCpuMask(s.cpuMask) // before the load, so the load's threads start on those cores
                 val projector = modelManager.mmprojForModel(s.lastModelPath)
                     ?: s.lastMmprojPath.takeIf { it.isNotBlank() && File(it).isFile }
                 val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP)

@@ -14,6 +14,12 @@ interface EngineBackend {
     /** Capabilities verified by the native runtime, not only build flags. */
     fun capabilities(): EngineCaps
 
+    /** CPU cores for the engine's threads (bit i = cpu i), 0 = Android decides. Fakes ignore it. */
+    fun setCpuMask(mask: Long) {}
+
+    /** CPU cores Android lets the app use (bit i = cpu i), 0 = unknown. */
+    fun allowedCpus(): Long = 0L
+
     /** Why HTP prefill is or is not currently available. Fakes remain source-compatible. */
     fun npuPrefillStatus(): String = if (capabilities().npuPrefill) {
         "Available: native HTP session probe succeeded. Actual prompt execution must be confirmed after a run."
@@ -80,6 +86,10 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
         )
         return if (err.isEmpty()) null else decodeUtf8(err)
     }
+
+    override fun setCpuMask(mask: Long) = bridge.nativeSetCpuMask(mask)
+
+    override fun allowedCpus(): Long = bridge.nativeAllowedCpus()
 
     override fun modelInfo(): Map<String, String> =
         decodeUtf8(bridge.nativeModelInfo()).lineSequence()

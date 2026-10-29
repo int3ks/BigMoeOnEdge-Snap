@@ -28,6 +28,9 @@
 #include <string>
 #include <vector>
 
+#include <sched.h>
+#include <unistd.h>
+
 #include "bmoe/session.h"
 #include "ggml-backend.h"
 #include "ggml-cpu.h" // ggml_cpu_has_* : one-time CPU feature line in the log (diagnostic only)
@@ -39,6 +42,52 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+// ---- CPU cores chosen in Settings ---------------------------------------------------------------------------
+// Bit i = cpu i. 0 = let Android place the threads. Applied to the engine's calling thread around load and every
+// generate call: ggml creates its compute threads from that thread (a disposable pool per graph, default empty
+// cpumask) and the streaming I/O threads at load, and all of them inherit the mask.
+static std::atomic<unsigned long long> g_cpu_mask{0};
+
+// The cores Android lets this process run on: the main thread's affinity (cpusets apply process-wide).
+static unsigned long long allowed_cpu_mask() {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (sched_getaffinity(getpid(), sizeof(set), &set) != 0) return 0;
+    unsigned long long m = 0;
+    for (int i = 0; i < 64 && i < CPU_SETSIZE; i++)
+        if (CPU_ISSET(i, &set)) m |= 1ULL << i;
+    return m;
+}
+
+class ScopedCpuMask {
+public:
+    ScopedCpuMask() {
+        const unsigned long long want = g_cpu_mask.load();
+        if (want == 0) return;
+        if (sched_getaffinity(0, sizeof(old_), &old_) != 0) return;
+        const unsigned long long use = want & allowed_cpu_mask();
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        for (int i = 0; i < 64 && i < CPU_SETSIZE; i++)
+            if ((use >> i) & 1ULL) CPU_SET(i, &set);
+        if (CPU_COUNT(&set) > 0 && sched_setaffinity(0, sizeof(set), &set) == 0) applied_ = true;
+        static std::atomic<unsigned long long> last_logged{~0ULL};
+        if (last_logged.exchange(want) != want) {
+            LOGI("CPU cores: chosen 0x%llx, allowed 0x%llx, used 0x%llx (%s)", want, allowed_cpu_mask(), use,
+                 applied_ ? "applied" : "not applied: none of the chosen cores is allowed");
+        }
+    }
+    ~ScopedCpuMask() {
+        if (applied_) sched_setaffinity(0, sizeof(old_), &old_);
+    }
+    ScopedCpuMask(const ScopedCpuMask &) = delete;
+    ScopedCpuMask & operator=(const ScopedCpuMask &) = delete;
+
+private:
+    cpu_set_t old_;
+    bool applied_ = false;
+};
 
 #ifdef BMOE_PIN_FAST_CORES
 // Compute thread count of the open session, so the fast-core set is never smaller than it.
@@ -274,6 +323,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     jbyteArray j_model_path, jintArray j_ints, jfloatArray j_floats, jbyteArray j_csv_path,
     jbyteArray j_mmproj_path, jbyteArray j_draft_path, jbyteArray j_lora_path, jfloat j_lora_scale)
 {
+    const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
     const std::string model_path = from_bytes(env, j_model_path);
     if (model_path.empty()) return to_bytes(env, "model path is empty");
     if (j_ints == nullptr || env->GetArrayLength(j_ints) < I_COUNT ||
@@ -534,6 +584,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
     jintArray j_image_dims, jobjectArray j_image_data,
     jobject callback)
 {
+    const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
     if (callback == nullptr) return JNI_FALSE;
 #ifdef BMOE_PIN_FAST_CORES
     const EnginePerfScope perf_scope;
@@ -671,6 +722,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerateChat(
     jboolean override_sampling, jfloat temperature, jfloat top_p, jint top_k, jint seed,
     jobject callback)
 {
+    const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
     if (callback == nullptr) return JNI_FALSE;
 #ifdef BMOE_PIN_FAST_CORES
     const EnginePerfScope perf_scope;
@@ -824,6 +876,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeDecide(
     JNIEnv * env, jobject /* thiz */,
     jbyteArray j_prefix, jbyteArray j_suffix, jobjectArray j_choices, jboolean reuse_prefix)
 {
+    const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
     std::shared_ptr<bmoe::Session> session = current_session();
     if (!session) return to_bytes(env, "{\"ok\":false,\"error\":\"No model is loaded\"}");
 
@@ -873,3 +926,13 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeDecide(
 }
 
 } // extern "C"
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCpuMask(JNIEnv *, jobject, jlong mask) {
+    g_cpu_mask.store(static_cast<unsigned long long>(mask));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeAllowedCpus(JNIEnv *, jobject) {
+    return static_cast<jlong>(allowed_cpu_mask());
+}

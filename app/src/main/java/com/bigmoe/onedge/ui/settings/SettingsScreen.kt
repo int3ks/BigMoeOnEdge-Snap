@@ -635,6 +635,11 @@ private fun SettingsContent(
                 viewModel.updateThreadCount(it)
             }
             Hint("CPU threads used for single-token decode. On Snapdragon 8 Gen 2, 4–5 is a sensible starting point; compare sustained speed and heat instead of assuming more threads are faster.")
+            CpuCoresSetting(
+                mask = settings.cpuMask,
+                allowed = remember { viewModel.allowedCpus },
+                threads = settings.threadCount
+            ) { viewModel.updateCpuMask(it) }
             ChoiceSetting(
                 "Prompt / batch threads",
                 Choices.THREADS.map { it to it.toString() },
