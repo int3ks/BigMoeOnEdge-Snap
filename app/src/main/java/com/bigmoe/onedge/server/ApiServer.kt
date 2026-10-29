@@ -298,7 +298,7 @@ class ApiServer(
 
     companion object {
         const val MAX_CONNECTIONS = 32
-        const val NO_MODEL = "No model is loaded. Open BigMoeOnEdge+ and load a model, then retry."
+        const val NO_MODEL = "No model is loaded. Open BigMoeOnEdge² and load a model, then retry."
         private const val PING_AFTER_MS = 3_000L
         private const val PING_CHECK_MS = 1_000L
     }

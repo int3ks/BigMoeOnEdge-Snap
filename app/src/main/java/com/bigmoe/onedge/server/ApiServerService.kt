@@ -139,7 +139,7 @@ class ApiServerService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_generation)
-            .setContentTitle("BigMoeOnEdge+ • API server")
+            .setContentTitle("BigMoeOnEdge² • API server")
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

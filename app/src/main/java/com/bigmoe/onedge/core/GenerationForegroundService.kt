@@ -54,7 +54,7 @@ class GenerationForegroundService : Service() {
 
     private fun notification(text: String, sessionId: String, title: String = "") = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_stat_generation)
-        .setContentTitle("BigMoeOnEdge+ • Generating")
+        .setContentTitle("BigMoeOnEdge² • Generating")
         .setContentText(text)
         .setSubText(if (title.isBlank()) sessionId else "Chat: $title")
         .setOngoing(true)
@@ -107,7 +107,7 @@ class GenerationForegroundService : Service() {
             if (Build.VERSION.SDK_INT < 26) return
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(NotificationChannel(CHANNEL_ID, "AI generation", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Shows active BigMoeOnEdge+ generations"
+                description = "Shows active BigMoeOnEdge² generations"
             })
         }
     }

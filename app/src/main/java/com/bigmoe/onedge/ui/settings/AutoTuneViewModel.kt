@@ -299,7 +299,7 @@ class AutoTuneViewModel(
             }
             val parsed = text?.let { AutoSaveCodec.parse(it) }
             if (parsed == null) {
-                say("That file isn't a BigMoeOnEdge+ auto save.")
+                say("That file isn't a BigMoeOnEdge² auto save.")
                 return@launch
             }
             // Always a new save: never overwrite one the user already has.
