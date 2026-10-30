@@ -45,6 +45,8 @@ data class ModelsUiState(
     val modelLoras: Map<String, com.bigmoe.onedge.core.LoraChoice> = emptyMap(),
     /** The vision projector (mmproj) attached to each model. */
     val modelMmprojs: Map<String, String> = emptyMap(),
+    /** KV cache type per model; models not in the map use F16. */
+    val modelKvTypes: Map<String, com.bigmoe.onedge.core.KvCacheType> = emptyMap(),
     val existingPathInput: String = "",
     val importProgress: ImportProgress? = null,
     val pendingLoad: PendingLoad? = null,
@@ -83,10 +85,11 @@ class ModelViewModel(
             val loras = modelManager.listLoras()
             val loraLinks = list.mapNotNull { model -> modelManager.loraForModel(model.path)?.let { model.path to it } }.toMap()
             val mmprojLinks = list.mapNotNull { model -> modelManager.mmprojForModel(model.path)?.let { model.path to it } }.toMap()
+            val kvTypes = list.associate { model -> model.path to modelManager.kvCacheTypeForModel(model.path) }
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
-                    modelLoras = loraLinks, modelMmprojs = mmprojLinks
+                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes
                 )
             }
         }
@@ -216,6 +219,13 @@ class ModelViewModel(
             } catch (e: Exception) {
                 _uiState.update { it.copy(message = e.message ?: "Could not attach the LoRA adapter") }
             }
+        }
+    }
+
+    fun setKvCacheType(modelPath: String, type: com.bigmoe.onedge.core.KvCacheType) {
+        viewModelScope.launch {
+            modelManager.setKvCacheType(modelPath, type)
+            refresh()
         }
     }
 

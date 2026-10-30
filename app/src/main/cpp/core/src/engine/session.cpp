@@ -961,6 +961,14 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     // snapshots the rewind is a cheap restore; without them llama.cpp has to fall back to replaying
     // the sequence, which would hand back exactly the decode the speculation just saved.
     if (cfg.spec.enabled()) cparams.n_rs_seq = (uint32_t) cfg.spec.draft_max;
+    // KV cache type (per model in the app). Flash attention stays on llama.cpp's "auto", which a quantized V
+    // cache requires; the draft context below copies these parameters, so it uses the same type.
+    if (cfg.kv_cache_type == 1 || cfg.kv_cache_type == 2) {
+        const ggml_type t = cfg.kv_cache_type == 1 ? GGML_TYPE_Q8_0 : GGML_TYPE_Q4_0;
+        cparams.type_k = t;
+        cparams.type_v = t;
+        std::fprintf(stderr, "bmoe: KV cache type %s\n", ggml_type_name(t));
+    }
 
     llama_context * ctx = llama_init_from_model(model, cparams);
     if (!ctx) return fail("failed to create context");

@@ -41,6 +41,10 @@ struct SessionConfig {
     // e.g. an uncensored fine-tune. It must have been trained for this base model. Empty = none.
     std::string lora_path;
     float lora_scale = 1.0f; // strength: 1.0 = as trained, higher = stronger
+    // KV cache data type for K and V (and the MTP draft context, which copies the target's parameters):
+    // 0 = F16 (llama.cpp's default), 1 = Q8_0, 2 = Q4_0. A quantized V cache needs flash attention, which
+    // llama.cpp enables on its own (auto) where the backend supports it; if it cannot, creating the context fails.
+    int kv_cache_type = 0;
     int n_threads = 4;
     int n_threads_batch = 4;
     int n_ctx = 2048;

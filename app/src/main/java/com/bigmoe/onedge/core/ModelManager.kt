@@ -354,6 +354,28 @@ class ModelManager(
         loraLinksFile.outputStream().use { props.store(it, "BigMoeOnEdge LoRA adapter links") }
     }
 
+    /** Per-model options that are not files (for now the KV cache type), keyed like the link files. */
+    private val modelOptionsFile: File get() = File(modelsDir, ".model-options.properties")
+    private fun modelOptions(): java.util.Properties = java.util.Properties().also { props ->
+        try { modelOptionsFile.inputStream().use(props::load) } catch (_: Exception) { }
+    }
+    private fun saveModelOptions(props: java.util.Properties) {
+        modelOptionsFile.outputStream().use { props.store(it, "BigMoeOnEdge per-model options") }
+    }
+
+    /** KV cache type used when [modelPath] loads (Models page); F16 unless set. */
+    suspend fun kvCacheTypeForModel(modelPath: String): KvCacheType = withContext(io) {
+        val v = modelOptions().getProperty(encodePath(canonicalPath(modelPath)) + KV_SUFFIX)
+        KvCacheType.values().firstOrNull { it.name == v } ?: KvCacheType.F16
+    }
+
+    suspend fun setKvCacheType(modelPath: String, type: KvCacheType) = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath)) + KV_SUFFIX
+        if (type == KvCacheType.F16) props.remove(key) else props.setProperty(key, type.name)
+        saveModelOptions(props)
+    }
+
     private val draftLinksFile: File get() = File(modelsDir, ".draft-links.properties")
     private fun draftLinks(): java.util.Properties = java.util.Properties().also { props ->
         try { draftLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
@@ -1309,6 +1331,7 @@ class ModelManager(
 
         const val DEFAULT_LORA_SCALE = 1.75f
         private const val SCALE_SUFFIX = ".scale"
+        private const val KV_SUFFIX = ".kv"
         private val LORA_MARK = "adapter.type".toByteArray(Charsets.US_ASCII)
 
         fun isLoraName(fileName: String): Boolean {

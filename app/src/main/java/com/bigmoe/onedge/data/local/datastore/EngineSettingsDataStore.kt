@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.bigmoe.onedge.core.CacheMode
 import com.bigmoe.onedge.core.DenseWeights
 import com.bigmoe.onedge.core.DecisionPrefixCache
+import com.bigmoe.onedge.core.KvCacheType
 import com.bigmoe.onedge.core.LoadConfig
 import com.bigmoe.onedge.core.SpecSource
 import com.bigmoe.onedge.core.TunedValues
@@ -222,7 +223,8 @@ const val DEFAULT_SERVER_QUEUE_SEC = 60
 /** True when a model loaded with [loaded] would behave differently after a reload with [settings]. */
 /** The streaming-or-ordinary mode is chosen automatically per model, so it never counts as a changed setting. */
 fun loadConfigDiffers(loaded: LoadConfig, settings: EngineSettings): Boolean =
-    loaded.copy(mmapBaseline = false) != settings.toLoadConfig().copy(mmapBaseline = false)
+    // The KV cache type is a per-model choice (Models page), not part of the settings; leave it out of the comparison.
+    loaded.copy(mmapBaseline = false, kvCacheType = KvCacheType.F16) != settings.toLoadConfig().copy(mmapBaseline = false)
 
 class EngineSettingsDataStore(private val context: Context) {
 

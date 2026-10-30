@@ -18,6 +18,13 @@ enum class DenseWeights(val code: Int) {
     PINNED(3)
 }
 
+/** KV cache data type, set per model on the Models page. Mirrors SessionConfig::kv_cache_type. */
+enum class KvCacheType(val code: Int, val label: String) {
+    F16(0, "F16"),
+    Q8_0(1, "Q8_0"),
+    Q4_0(2, "Q4_0")
+}
+
 /** Self-speculative decoding source. Mirrors bmoe::DraftSource. */
 enum class SpecSource(val code: Int) {
     OFF(0),
@@ -90,7 +97,9 @@ data class LoadConfig(
     /** `--decide-prefix-cache`: affects scored-choice requests only. */
     val decisionPrefixCache: DecisionPrefixCache = DecisionPrefixCache.AUTO,
     /** Retains BigMoeOnEdge+ legacy support for small, potentially thrashing cache budgets. */
-    val forceCache: Boolean = true
+    val forceCache: Boolean = true,
+    /** Per model (Models page), filled in by EngineController at load; not an app-wide setting. */
+    val kvCacheType: KvCacheType = KvCacheType.F16
 ) {
     /** One-batch prefill for any prompt that fits the context, like the engine's own session_config_from. */
     val nBatch: Int get() = nCtx
@@ -121,7 +130,8 @@ data class LoadConfig(
         ngramMinMatch.coerceIn(1, 64), ngramMaxMatch.coerceIn(1, 64),
         if (dropRenorm) 1 else 0, if (dropInPrefill) 1 else 0,
         if (predictionProbe) 1 else 0, if (loadAllExpertsForBenchmark) 1 else 0,
-        decisionPrefixCache.code, if (forceCache) 1 else 0
+        decisionPrefixCache.code, if (forceCache) 1 else 0,
+        kvCacheType.code
     )
 
     fun toFloatArray(): FloatArray = floatArrayOf(temperature, topP)
@@ -129,7 +139,7 @@ data class LoadConfig(
     companion object {
         const val UBATCH = 512
         /** Length of [toIntArray]; must equal I_COUNT in native-bridge.cpp. */
-        const val INT_COUNT = 44
+        const val INT_COUNT = 45
         const val FLOAT_COUNT = 2
     }
 }

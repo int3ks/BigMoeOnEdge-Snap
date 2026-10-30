@@ -17,11 +17,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -370,6 +374,9 @@ fun ModelScreen(
                         targetMmprojModelPath = model.path
                         mmprojPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     },
+                    kvType = ui.modelKvTypes[model.path] ?: com.bigmoe.onedge.core.KvCacheType.F16,
+                    loadedKvType = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }?.config?.kvCacheType,
+                    onKvType = { viewModel.setKvCacheType(model.path, it) },
                     settings = settings
                 )
             }
@@ -544,17 +551,41 @@ private fun ModelRow(
     attachedMmproj: String?,
     onAttachMmproj: (String?) -> Unit,
     onPickMmproj: () -> Unit,
+    kvType: com.bigmoe.onedge.core.KvCacheType,
+    loadedKvType: com.bigmoe.onedge.core.KvCacheType?,
+    onKvType: (com.bigmoe.onedge.core.KvCacheType) -> Unit,
     settings: EngineSettings
 ) {
+    // Collapsed by default so a long list stays short; the loaded model opens. Tap the name to toggle.
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(model.path) { mutableStateOf(isLoaded) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember(model.path, model.displayName) { mutableStateOf(model.displayName) }
     val attachedName = drafts.firstOrNull { it.path == attachedDraftPath }?.name
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(model.displayName, style = MaterialTheme.typography.titleSmall)
+                Column(Modifier.weight(1f).clickable { expanded = !expanded }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "Collapse" else "Expand",
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(model.displayName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
+                    }
                     Text("${ModelManager.formatBytes(model.sizeBytes)} • " + if (model.inAppStorage) "App storage" else "Registered path (no copy)", style = MaterialTheme.typography.labelSmall)
+                    if (!expanded) {
+                        // What is attached, in one line, so the collapsed card still says how the model will load.
+                        val parts = listOfNotNull(
+                            attachedName?.let { "MTP" },
+                            attachedMmproj?.let { "Vision" },
+                            attachedLora?.let { "LoRA" },
+                            kvType.takeIf { it != com.bigmoe.onedge.core.KvCacheType.F16 }?.let { "KV ${it.label}" }
+                        )
+                        if (parts.isNotEmpty()) {
+                            Text(parts.joinToString(" • "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
                 if (isLoaded) {
                     Text("Loaded", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
@@ -571,10 +602,13 @@ private fun ModelRow(
             }
             // Guess-ahead settings apply to every model (card above the list); only the drafter file is per model. It can
             // always be attached: with Guess ahead off it simply waits until MTP is switched on.
-            DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
-            MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
-            LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
-            if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
+            if (expanded) {
+                DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
+                MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
+                LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
+                KvCacheRow(kvType, loadedKvType, onKvType)
+                if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
     if (renameDialog) {

@@ -184,6 +184,7 @@ enum IntIdx {
     I_NGRAM_MIN_MATCH, I_NGRAM_MAX_MATCH,
     I_DROP_RENORM, I_DROP_IN_PREFILL, I_PREDICTION_PROBE, I_LOAD_ALL_EXPERTS,
     I_DECIDE_PREFIX_CACHE, I_FORCE_CACHE,
+    I_KV_CACHE_TYPE,   // 0 f16, 1 q8_0, 2 q4_0 (per model)
     I_COUNT
 };
 enum FloatIdx { F_TEMPERATURE = 0, F_TOP_P, F_COUNT };
@@ -391,6 +392,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     cfg.spec.draft_model_path = draft_path;
     cfg.lora_path = lora_path; // empty = no LoRA adapter
     cfg.lora_scale = std::clamp<float>((float) j_lora_scale, 0.0f, 4.0f);
+    cfg.kv_cache_type = std::clamp<int>(iv[I_KV_CACHE_TYPE], 0, 2);
 #ifdef BMOE_HAVE_HEXAGON
     if (npu_requested) {
         cfg.prefill.device = "HTP0";

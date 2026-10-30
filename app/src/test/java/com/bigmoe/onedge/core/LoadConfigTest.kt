@@ -87,6 +87,9 @@ class LoadConfigTest {
         assertEquals(1, v[41])                // I_LOAD_ALL_EXPERTS
         assertEquals(1, v[42])                // I_DECIDE_PREFIX_CACHE (On)
         assertEquals(0, v[43])                // I_FORCE_CACHE
+        assertEquals(0, v[44])                // I_KV_CACHE_TYPE (F16)
+        assertEquals(1, c.copy(kvCacheType = KvCacheType.Q8_0).toIntArray()[44])
+        assertEquals(2, c.copy(kvCacheType = KvCacheType.Q4_0).toIntArray()[44])
     }
 
     @Test

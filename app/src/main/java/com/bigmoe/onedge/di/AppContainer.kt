@@ -88,7 +88,8 @@ class AppContainer(private val context: Context) {
         EngineController(
             backendProvider = { NativeEngineBackend(EngineNativeBridge()) },
             csvPathProvider = { newMetricsCsvPath() },
-            loraProvider = { path -> modelManager.loraForModel(path) }
+            loraProvider = { path -> modelManager.loraForModel(path) },
+            kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) }
         )
     }
 

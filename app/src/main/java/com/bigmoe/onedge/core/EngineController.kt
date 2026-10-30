@@ -32,7 +32,9 @@ class EngineController(
     /** Where to write this session's metrics CSV (null = no CSV). Only asked when metrics CSV is enabled. */
     private val csvPathProvider: () -> String? = { null },
     /** The LoRA adapter attached to a model (Models page), applied whenever that model loads; null = none. */
-    private val loraProvider: suspend (modelPath: String) -> LoraChoice? = { null }
+    private val loraProvider: suspend (modelPath: String) -> LoraChoice? = { null },
+    /** The KV cache type chosen for a model on the Models page; F16 when none was chosen. */
+    private val kvCacheTypeProvider: suspend (modelPath: String) -> KvCacheType = { KvCacheType.F16 }
 ) {
     private val backend: EngineBackend by lazy(backendProvider)
 
@@ -104,7 +106,8 @@ class EngineController(
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar
             // uses mmap because its tensors belong to a different GGUF/offset map.
-            val config = applyAutoMode(requested, kind)
+            val kvType = runCatching { kvCacheTypeProvider(modelPath) }.getOrDefault(KvCacheType.F16)
+            val config = applyAutoMode(requested, kind).copy(kvCacheType = kvType)
             engineStateKey = null
             _state.value = EngineState.Loading(modelPath, System.currentTimeMillis())
             val csv = if (config.metricsCsv) csvPathProvider() else null
@@ -118,6 +121,22 @@ class EngineController(
                 "Native engine library failed to load: ${e.message}"
             } catch (e: Throwable) {
                 "Unexpected error while loading: ${e.message ?: e.javaClass.simpleName}"
+            }
+
+            // A quantized KV cache the backend cannot run (no flash attention for this model/device) must not brick the
+            // model: load it with the default F16 cache and say so.
+            if (error != null && activeConfig.kvCacheType != KvCacheType.F16) {
+                val f16 = activeConfig.copy(kvCacheType = KvCacheType.F16)
+                val withF16 = try {
+                    backend.load(modelPath, f16, csv, mmprojPath, activeDraftPath, activeLora)
+                } catch (e: Throwable) {
+                    "Unexpected error while retrying with an F16 KV cache: ${e.message ?: e.javaClass.simpleName}"
+                }
+                if (withF16 == null) {
+                    warning = "KV cache ${activeConfig.kvCacheType.label} could not be used ($error). Loaded with F16."
+                    activeConfig = f16
+                    error = null
+                }
             }
 
             // A LoRA adapter made for another model must not brick the model either: load it without the adapter
@@ -140,7 +159,7 @@ class EngineController(
             // surface the failure rather than claiming MTP is active.
             if (error != null && wantsSeparateDraft) {
                 val draftError = error
-                val plainConfig = config.copy(spec = SpecSource.OFF)
+                val plainConfig = activeConfig.copy(spec = SpecSource.OFF)
                 val plainError = try {
                     backend.load(modelPath, plainConfig, csv, mmprojPath, null, activeLora)
                 } catch (e: Throwable) {
