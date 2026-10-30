@@ -88,6 +88,12 @@ static const MoeRecipe k_recipes[] = {
     // (exp_probs_b, the lfm2moe pattern) and an always-on shared expert (ffn_*_shexp) stays
     // resident. Its sliding/full attention mix is dense-side machinery invisible to the seam.
     {"flint", {"ffn_gate_exps", "ffn_up_exps", "ffn_down_exps"}},
+    // mellum (JetBrains Mellum MoE) is a plain routed MoE: every block is attention + MoE with the standard split
+    // suffixes (llama.cpp src/models/mellum.cpp builds it with build_moe_ffn), no shared expert and no leading dense
+    // blocks, so the streamed fraction is as high as qwen3moe's. Its down projection takes the amax-rescaled input
+    // (the same path as flint) inside build_moe_ffn, which the seam does not see. The trailing MTP block is a regular
+    // Mellum block (it names expert tensors too) loaded only with load_mtp, like the other MTP-carrying recipes.
+    {"mellum", {"ffn_gate_exps", "ffn_up_exps", "ffn_down_exps"}},
 };
 
 static const int k_n_recipes = (int) (sizeof(k_recipes) / sizeof(k_recipes[0]));

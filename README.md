@@ -132,7 +132,7 @@ NPU prefill switch then simply stays unavailable.
 
 Load `.gguf` models from the Models screen. MoE models are detected automatically and stream their experts; dense
 models load the ordinary way. Architectures with an expert-streaming recipe include Qwen3/Qwen3.5/Qwen3.6 MoE, Qwen4Exp,
-Gemma 4 MoE, gpt-oss, LFM2 MoE, DeepSeek V4, Ling 3.0, Nemotron-H MoE and **Flint**. Add an MTP drafter, a LoRA
+Gemma 4 MoE, gpt-oss, LFM2 MoE (e.g. LFM2-24B-A2B), DeepSeek V4, Ling 3.0, Nemotron-H MoE, **Flint** and **Mellum**. Add an MTP drafter, a LoRA
 adapter or an mmproj to a model in its row on the Models screen.
 
 ## Performance notes
