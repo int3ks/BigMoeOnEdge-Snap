@@ -123,8 +123,8 @@ class ToolManager(
                     "get_datetime whenever the answer depends on today's date or the time, and convert_units for unit conversions."
             )
         }
-        if (selected.any { it.name == "run_shell" }) {
-            b.append(AGENT_SHELL_HINT)
+        selected.firstOrNull { it.name == "run_shell" }?.let { shell ->
+            b.append(agentShellHint(runCatching { shell.promptNote() }.getOrNull()))
         }
         return b.toString()
     }
@@ -133,31 +133,41 @@ class ToolManager(
         /** In the tool result when the user pressed Cancel; the model then decides how to go on. */
         const val CANCELLED_BY_USER = "Cancelled by the user"
 
-        /** Appended when run_shell is enabled: how to work as an agent in Termux. Kept short, it is part of every prompt. */
-        const val AGENT_SHELL_HINT =
-            "\n\nYou are an agent with a real Linux environment on this device: run_shell runs bash in Termux. Use it on " +
-                "your own, without asking first, whenever a task needs more than text: running Python or other code, " +
-                "creating or converting files (audio, images, documents, archives), installing and using programs, " +
-                "downloading, or checking a result. Do it yourself; never tell the user to run commands and never just " +
-                "show code they would have to run. The workspace is the current folder: files you create with create_file " +
-                "are there, and files a command writes appear in the workspace. Work in steps: one call, read its result, " +
-                "then the next, until the task is really done. Before installing anything, check whether it is already " +
-                "there and install only what is missing, in the same command, e.g. " +
-                "command -v ffmpeg >/dev/null || pkg install -y ffmpeg ; " +
-                "python3 -c 'import gtts' 2>/dev/null || pip install gtts ; " +
-                "if Python itself is missing: pkg install -y python. If pkg fails, run pkg update -y first. Never start " +
-                "interactive programs (input is closed, so a prompt fails at once). For long jobs, write the output to a " +
-                "file. Never claim a result before the tool call that produces it: write your answer to the user only after " +
-                "the last tool result, and only report success when the exit code and the output show it. Then name the " +
-                "file(s) by their path in the workspace (e.g. story.pdf), never as sandbox: or /mnt/data links. After a " +
-                "tool call, stop and wait: the app sends the result; never write <tool_response> yourself. This is Termux " +
-                "on Android, not a Linux server: there is no /root, /mnt/data or sudo, use paths inside the workspace. " +
-                "Python libraries with C code (Pillow, numpy, ...) are faster to get as Termux packages, e.g. " +
-                "pkg install -y python-pillow (pkg search python- lists them); pip would compile them for a long time. " +
-                "Keep output small, it costs context: use quiet options (pip install -q, pkg install -y), never print " +
-                "whole files or long listings, and end with a short check (e.g. && echo OK). You only get the last " +
-                "${RunShellTool.OUTPUT_BUDGET} characters of a command's output; for more, write it to a file and " +
-                "look at it with tail or grep."
+        /**
+         * Appended when run_shell is enabled: where the model runs and how to work as an agent there. The environment
+         * comes first and is spelled out, because models otherwise assume what they know from training (Windows and
+         * PowerShell, a Linux server with sudo, a built-in Python sandbox). [environment] is what the app found in
+         * Termux on this device (RunShellTool.promptNote), or null when it has not looked yet.
+         */
+        fun agentShellHint(environment: String?): String =
+            "\n\nENVIRONMENT (read this first): you run on an Android tablet. It is NOT Windows, macOS or a Linux server: " +
+                "there is no PowerShell or cmd, no sudo, no /root, /home/user or /mnt/data, and no built-in Python " +
+                "interpreter or code sandbox. Everything you run goes through ONE tool, run_shell, which runs a bash " +
+                "command in the Termux app (a Linux userland for Android with its own packages). Python, pip and every " +
+                "other program exist only there, so to run Python you call run_shell, for example:\n" +
+                "<tool_call>{\"name\": \"run_shell\", \"arguments\": {\"command\": \"python3 make_pdf.py\"}}</tool_call>\n" +
+                (if (environment != null) "Checked in Termux on this device: $environment. Do not install what is listed " +
+                    "here as present.\n"
+                else "If unsure whether Python is there, check with python3 --version; only if it is missing: " +
+                    "pkg install -y python.\n") +
+                "Every command starts in the user's workspace folder: files you make with create_file are there, files a " +
+                "command writes show up in the workspace. Use relative paths.\n\n" +
+                "HOW TO WORK: use run_shell on your own, without asking first, whenever a task needs more than text: " +
+                "running code, creating or converting files (audio, images, documents, archives), installing and using " +
+                "programs, downloading, checking a result. Never tell the user to run commands and never just show code " +
+                "they would have to run. Work in steps: one call, read its result, then the next, until the task is really " +
+                "done. Before installing anything, check whether it is already there and install only what is missing, in " +
+                "the same command, e.g. command -v ffmpeg >/dev/null || pkg install -y ffmpeg ; " +
+                "python3 -c 'import gtts' 2>/dev/null || pip install -q gtts . Programs come from pkg (Termux's apt); " +
+                "Python libraries with C code (Pillow, numpy, ...) too, e.g. pkg install -y python-pillow, because pip " +
+                "would compile them for a long time; other Python libraries from pip. If pkg fails, run pkg update -y " +
+                "first. Never start interactive programs (input is closed, so a prompt fails at once). " +
+                "Keep output small, it costs context: quiet options (pip install -q, pkg install -y), no whole files or " +
+                "long listings, end with a short check (e.g. && echo OK). You only get the last " +
+                "${RunShellTool.OUTPUT_BUDGET} characters of a command's output; for more, write it to a file and look at " +
+                "it with tail or grep. After a tool call, stop and wait: the app sends the result; never write " +
+                "<tool_response> yourself and never claim a result before the call that produces it. Report success only " +
+                "when the exit code and the output show it, and name the file(s) by their workspace path (e.g. story.pdf)."
     }
 
     /** Never throws (except coroutine cancellation): failures come back as "Error: ..." text for the model. */

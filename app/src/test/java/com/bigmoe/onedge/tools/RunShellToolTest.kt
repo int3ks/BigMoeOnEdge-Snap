@@ -19,11 +19,13 @@ class RunShellToolTest {
         val calls = ArrayList<Triple<String, String, Long>>()
         val stops = ArrayList<String>()
         val wakeCalls = ArrayList<String>()
+        var probes = 0
         override fun isInstalled() = installed
         override fun hasPermission() = permitted
         override suspend fun run(script: String, workdir: String, timeoutMs: Long, args: List<String>): TermuxResult? {
             if (script == RunShellTool.KILL_TREE) { stops.add(args[1]); return TermuxResult("", "", 0, -1, null) }
             if (script.startsWith("termux-wake")) { wakeCalls.add(script); return TermuxResult("", "", 0, -1, null) }
+            if (script == RunShellTool.ENVIRONMENT_PROBE) { probes++; return TermuxResult("arch aarch64, Python 3.14.0, pip 25.2, shell bash 5.2.37\n", "", 0, -1, null) }
             assertEquals(RunShellTool.WRAPPER, script)
             calls.add(Triple(args[1], workdir, timeoutMs))
             return result
@@ -71,6 +73,20 @@ class RunShellToolTest {
         tool.onRunFinished()
         tool.onRunFinished()
         assertEquals(listOf("termux-wake-lock", "termux-wake-unlock"), backend.wakeCalls)
+        // What Termux offers is looked up once (then at most daily) and goes into the system prompt.
+        assertEquals(1, backend.probes)
+        assertEquals("arch aarch64, Python 3.14.0, pip 25.2, shell bash 5.2.37", tool.promptNote())
+        val prompt = ToolManager().apply { registerTool(tool) }.getToolsDescriptionPrompt()
+        assertTrue(prompt.contains("NOT Windows") && prompt.contains("Checked in Termux on this device: arch aarch64, Python 3.14.0"))
+    }
+
+    @Test
+    fun environmentProbeRunsInBash() {
+        if (!hasBash()) return
+        val p = ProcessBuilder("bash", "-c", RunShellTool.ENVIRONMENT_PROBE).start()
+        val out = p.inputStream.bufferedReader().readText().trim()
+        assertEquals(0, p.waitFor())
+        assertTrue(out, Regex("^arch \\S+, (Python [0-9.]+|python3 not installed), (pip \\S+|pip not installed), shell bash [0-9.]+$").matches(out))
     }
 
     @Test

@@ -39,11 +39,15 @@ class AppViewModelFactory(
                 termuxTest = {
                     val tool = container.toolManager.getTool("run_shell")
                     if (tool == null) "run_shell is not registered." else try {
-                        tool.execute(
+                        val out = tool.execute(
                             org.json.JSONObject()
                                 .put("command", "echo \"Termux answers from: \$(pwd)\"; uname -m; command -v python >/dev/null && python --version || echo 'Python is not installed yet (the agent can run: pkg install -y python)'")
                                 .put("timeout_seconds", 30)
                         )
+                        // Also refreshes what the agent is told about Termux (system prompt).
+                        val root = container.workspace.rootDir.takeIf { container.workspaceLocation.isShared(it) }
+                        val env = if (root != null) (tool as? com.bigmoe.onedge.tools.RunShellTool)?.refreshEnvironment(root, force = true) else null
+                        if (env != null) "$out\n\nThe agent is told: $env" else out
                     } catch (e: com.bigmoe.onedge.tools.ToolInputException) {
                         "Error: ${e.message}"
                     }

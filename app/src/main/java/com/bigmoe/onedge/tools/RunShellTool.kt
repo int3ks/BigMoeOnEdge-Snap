@@ -96,11 +96,49 @@ class RunShellTool(
 
     override fun limitSeconds(arguments: JSONObject): Int = waitSeconds(arguments)
 
-    /** End of an agent run: lets Android put Termux to sleep again. */
+    /**
+     * End of an agent run: lets Android put Termux to sleep again, and looks once a day what Termux offers (the facts
+     * go into the system prompt, see [promptNote]).
+     */
     override suspend fun onRunFinished() {
-        if (!wakeLockHeld.compareAndSet(true, false)) return
         val root = sharedWorkspaceRoot() ?: return
-        try { backend.run("termux-wake-unlock", root.path, 10_000L) } catch (_: Exception) { }
+        if (wakeLockHeld.compareAndSet(true, false)) {
+            try { backend.run("termux-wake-unlock", root.path, 10_000L) } catch (_: Exception) { }
+        }
+        refreshEnvironment(root, force = false)
+    }
+
+    /** "arch aarch64, Python 3.14.0, pip 25.2" as last found in Termux, or null when not looked yet. */
+    override fun promptNote(): String? {
+        val root = sharedWorkspaceRoot() ?: return null
+        return try {
+            environmentFile(root)?.takeIf { it.isFile }?.readText()?.trim()?.take(300)?.ifEmpty { null }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun environmentFile(root: File): File? = File(root, Workspace.AGENT_DIR + "/" + ENVIRONMENT_FILE)
+
+    /**
+     * Asks Termux what is there (architecture, Python, pip) and keeps the answer. Skipped when the answer is younger
+     * than a day, unless [force]. The file is only rewritten when the answer changed, so the system prompt (and with
+     * it the engine's cached context) stays the same as long as nothing was installed or removed.
+     */
+    suspend fun refreshEnvironment(root: File, force: Boolean): String? {
+        if (!backend.isInstalled() || !backend.hasPermission()) return null
+        val file = environmentFile(root) ?: return null
+        if (!force && file.isFile && System.currentTimeMillis() - file.lastModified() < ENVIRONMENT_MAX_AGE_MS) return promptNote()
+        val r = try { backend.run(ENVIRONMENT_PROBE, root.path, 15_000L) } catch (_: Exception) { null } ?: return null
+        if (r.exitCode != 0) return null
+        val found = clean(r.stdout).lineSequence().firstOrNull()?.trim().orEmpty()
+        if (found.isEmpty()) return null
+        try {
+            file.parentFile?.mkdirs()
+            if (!file.isFile || file.readText().trim() != found) file.writeText(found) else file.setLastModified(System.currentTimeMillis())
+        } catch (_: Exception) {
+        }
+        return found
     }
 
     override fun confirmation(arguments: JSONObject): ConfirmationRequest {
@@ -303,6 +341,15 @@ class RunShellTool(
         /** How much of the running command's output the chat shows (the end of it). */
         private const val LIVE_OUTPUT_BYTES = 6_000
         const val HISTORY_DIR = "history"
+        const val ENVIRONMENT_FILE = "termux-env.txt"
+        private const val ENVIRONMENT_MAX_AGE_MS = 24 * 3600_000L
+
+        /** One line: what Termux offers for the system prompt. */
+        internal const val ENVIRONMENT_PROBE =
+            "a=\$(uname -m)\n" +
+                "p=\$(command -v python3 >/dev/null 2>&1 && python3 --version 2>&1 || echo 'python3 not installed')\n" +
+                "q=\$(command -v pip >/dev/null 2>&1 && echo \"pip \$(pip --version 2>/dev/null | cut -d' ' -f2)\" || echo 'pip not installed')\n" +
+                "echo \"arch \$a, \$p, \$q, shell bash \${BASH_VERSION%%(*}\"\n"
         private const val HISTORY_KEEP = 50
         private const val HISTORY_OUTPUT_BYTES = 200_000
         /** Same limit Termux has for its own answer. */

@@ -66,6 +66,9 @@ interface Tool {
     /** The time limit to show next to the elapsed time while the tool runs, in seconds; null = none shown. */
     fun limitSeconds(arguments: JSONObject): Int? = null
 
+    /** Facts for the system prompt that the tool found out itself (e.g. what is installed in Termux), or null. */
+    fun promptNote(): String? = null
+
     /** After the user cancelled a call: what the tool can still tell about it (e.g. the output so far), or null. */
     fun takeCancelDetails(): String? = null
 
