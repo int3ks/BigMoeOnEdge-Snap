@@ -53,10 +53,31 @@ jobs:
       - name: Publish
         run: |
           TAG="v$VERSION"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::Release $TAG already exists"
-            exit 1
+          # Errors also become annotations, so they show on the run page without opening the log.
+          fail() { echo "::error::$1"; [ -s "$RUNNER_TEMP/gh.err" ] && while IFS= read -r l; do echo "::error::$l"; done < "$RUNNER_TEMP/gh.err"; exit 1; }
+          # "published", "draft" or empty. A draft is left behind when an earlier run uploaded the APK but could
+          # not publish; this run then reuses it instead of stopping with "already exists".
+          STATE=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$TAG\") | if .draft then \"draft\" else \"published\" end" 2>"$RUNNER_TEMP/gh.err" | head -1) \
+            || fail "Could not list the releases"
+          [ "$STATE" != "published" ] || fail "Release $TAG already exists"
+          if [ "$STATE" = "draft" ]; then
+            echo "Reusing the draft of $TAG"
+            gh release upload "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --clobber 2>"$RUNNER_TEMP/gh.err" \
+              || fail "Could not upload the APK to the draft $TAG"
+          else
+            # Created as a draft first and published in a second call, so a failed publish can be retried.
+            gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$SHA" --draft \
+              --title "BigMoeOnEdge² $VERSION" \
+              --notes "NPU build of ${SHA::7} (Actions run $RUN_ID). Installs as an update over earlier Snap builds; in the app: Settings → App update." \
+              2>"$RUNNER_TEMP/gh.err" || fail "Could not create the draft $TAG"
           fi
-          gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$SHA" --latest \
-            --title "BigMoeOnEdge² $VERSION" \
-            --notes "NPU build of ${SHA::7} (Actions run $RUN_ID). Installs as an update over earlier Snap builds; in the app: Settings → App update."
+          for i in 1 2 3; do
+            if gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest 2>"$RUNNER_TEMP/gh.err"; then
+              echo "Published $TAG"
+              exit 0
+            fi
+            echo "::warning::Publishing $TAG failed (attempt $i): $(head -c 300 "$RUNNER_TEMP/gh.err")"
+            sleep 15
+          done
+          fail "Could not publish $TAG (the draft with the APK is kept; re-run this workflow to try again)"

@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- Release 0.6.30 bundles the agent work (Termux, grammar-checked tool calls, shared workspace, KV cache per model, collapsible model cards, wider model menu). The "Publish release" workflow now creates the release as a draft and publishes it in a second call (three tries); a draft left behind by a failed run is reused instead of stopping with "already exists", and errors show as annotations on the run page.
 - KV cache type per model (Models page → a model → "KV cache": F16 default, Q8_0 about half the memory, Q4_0 about a quarter). Stored in `models/.model-options.properties`, applied at load (`LoadConfig.kvCacheType`, JNI `I_KV_CACHE_TYPE`, `SessionConfig::kv_cache_type` → `type_k`/`type_v`; the MTP draft context uses the same type). If the device cannot run it for that model (a quantized V cache needs flash attention), the model loads with F16 and says so.
 - Models page: model cards collapse (tap the name); collapsed cards show what is attached (MTP, Vision, LoRA, KV type). The loaded model starts expanded.
 - Chat model menu: as wide as the screen allows and full model names (wrapped, not cut), so two quantisations of the same model can be told apart; a split model also shows its real file name.
