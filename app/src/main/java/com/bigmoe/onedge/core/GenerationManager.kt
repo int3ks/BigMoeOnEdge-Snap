@@ -79,10 +79,22 @@ class GenerationManager(
         toolManager.confirmationHandler = ConfirmationHandler { request ->
             val answer = CompletableDeferred<Boolean>()
             confirmation = answer
-            update { copy(pendingConfirmation = request) }
-            try { answer.await() } finally {
+            // The status row says that it waits for the user (with Accept / Reject right there), instead of looking
+            // like a running command; the tool's clock starts once it is approved.
+            val runningLabel = _state.value.liveStatus
+            update { copy(pendingConfirmation = request, liveStatus = "Waiting for your approval…", liveDetail = null) }
+            var approved = false
+            try { answer.await().also { approved = it } } finally {
                 confirmation = null
-                update { copy(pendingConfirmation = null) }
+                update {
+                    copy(
+                        pendingConfirmation = null,
+                        liveStatus = if (approved && !toolCancelling) runningLabel else liveStatus,
+                        toolStartedAt = if (approved) System.currentTimeMillis() else toolStartedAt,
+                        toolElapsedMs = if (approved) 0L else toolElapsedMs,
+                        lastOutputAt = if (approved) System.currentTimeMillis() else lastOutputAt
+                    )
+                }
             }
         }
         scope.launch(Dispatchers.IO) { repository.clearTransientGenerationStates() }

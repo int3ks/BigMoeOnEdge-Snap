@@ -244,6 +244,8 @@ class RunShellToolTest {
             val result = job.await()
             assertTrue(result, result.startsWith("Error: Cancelled by the user"))
             assertTrue(result, result.contains("did NOT complete") && result.contains("Output before it was stopped"))
+            val record = File(root, Workspace.AGENT_DIR + "/" + RunShellTool.HISTORY_DIR).listFiles()!!.single().readText()
+            assertTrue("a cancelled command is in the history too: " + record, record.contains("# end: cancelled, stopped"))
             Thread.sleep(6000)
             assertTrue("command kept running after cancel", !File(root, "late.txt").exists())
         } finally { root.deleteRecursively() }

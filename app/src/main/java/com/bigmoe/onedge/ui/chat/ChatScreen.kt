@@ -329,14 +329,16 @@ fun ChatScreen(
                                 if (uiState.liveText.isEmpty() && uiState.liveReasoning.isEmpty()) {
                                     LiveStatusRow(
                                         uiState.liveStatus ?: "Reading…",
-                                        if (uiState.toolRunning) formatToolTelemetry(uiState.toolElapsedMs, uiState.toolLimitMs, uiState.toolQuietMs) else formatStats(
+                                        if (uiState.pendingConfirmation != null) null else if (uiState.toolRunning) formatToolTelemetry(uiState.toolElapsedMs, uiState.toolLimitMs, uiState.toolQuietMs) else formatStats(
                                             uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
                                             uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                         ),
                                         detail = uiState.liveDetail,
                                         onCancel = if (uiState.toolRunning) viewModel::cancelTool else null,
                                         output = uiState.liveOutput,
-                                        cancelling = uiState.toolCancelling
+                                        cancelling = uiState.toolCancelling,
+                                        approval = uiState.pendingConfirmation,
+                                        onApprove = { viewModel.resolveConfirmation(it) }
                                     )
                                 } else {
                                     ChatMessageBubble(
@@ -354,14 +356,16 @@ fun ChatScreen(
                                     uiState.liveStatus?.let {
                                         LiveStatusRow(
                                             it,
-                                            if (uiState.toolRunning) formatToolTelemetry(uiState.toolElapsedMs, uiState.toolLimitMs, uiState.toolQuietMs) else formatStats(
+                                            if (uiState.pendingConfirmation != null) null else if (uiState.toolRunning) formatToolTelemetry(uiState.toolElapsedMs, uiState.toolLimitMs, uiState.toolQuietMs) else formatStats(
                                                 uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
                                                 uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                             ),
                                             detail = uiState.liveDetail,
                                             onCancel = if (uiState.toolRunning) viewModel::cancelTool else null,
                                             output = uiState.liveOutput,
-                                            cancelling = uiState.toolCancelling
+                                            cancelling = uiState.toolCancelling,
+                                            approval = uiState.pendingConfirmation,
+                                            onApprove = { viewModel.resolveConfirmation(it) }
                                         )
                                     }
                                 }
@@ -616,7 +620,10 @@ private fun LiveStatusRow(
     onCancel: (() -> Unit)? = null,
     /** A running command's output so far: folded to its last line ([detail]), unfolds to all of it. */
     output: String? = null,
-    cancelling: Boolean = false
+    cancelling: Boolean = false,
+    /** A tool waits for the user's approval: shown right here with Accept / Reject (the dialog may be out of sight). */
+    approval: com.bigmoe.onedge.tools.ConfirmationRequest? = null,
+    onApprove: (Boolean) -> Unit = {}
 ) {
     var expanded by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -633,7 +640,18 @@ private fun LiveStatusRow(
             if (!telemetry.isNullOrBlank()) {
                 Text("• $telemetry", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
             }
-            if (onCancel != null) {
+            if (approval != null) {
+                androidx.compose.material3.Button(
+                    onClick = { onApprove(true) },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(30.dp)
+                ) { Text(if (approval.destructive) "Delete" else "Accept", style = MaterialTheme.typography.labelMedium) }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { onApprove(false) },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(30.dp)
+                ) { Text("Reject", style = MaterialTheme.typography.labelMedium) }
+            } else if (onCancel != null) {
                 androidx.compose.material3.OutlinedButton(
                     onClick = onCancel,
                     enabled = !cancelling,
@@ -643,7 +661,16 @@ private fun LiveStatusRow(
             }
         }
         val mono = androidx.compose.ui.text.font.FontFamily.Monospace
-        if (!output.isNullOrBlank()) {
+        if (approval != null) {
+            // What is to be approved, e.g. "$ pip install -q fpdf2 / Folder: workspace".
+            Text(
+                approval.title + "\n" + approval.message,
+                style = MaterialTheme.typography.labelSmall, fontFamily = mono,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 6, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+            )
+        } else if (!output.isNullOrBlank()) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
