@@ -241,8 +241,8 @@ the commands with one tap.
   it goes quiet), then *Reading the result…*.
 * **▸ Output** under the status row shows the latest line; tap it to unfold the command's whole output so far, which
   follows the end like a terminal (Python output appears as it is printed).
-* **Cancel** next to the running command shows *Stopping…*, stops it with its whole process tree and ends the agent run;
-  you say how to go on. Stop does the same. A command that exceeds its time limit is stopped the same way and the model
+* **Cancel** next to the running command shows *Stopping…* and stops just that command with its whole process tree;
+  the model gets an error and decides how to go on. **Stop** ends the whole run. A command that exceeds its time limit is stopped the same way and the model
   gets the output so far.
 * Commands get no input, so a program that asks a question fails at once instead of hanging. If Termux does not start
   a command within 20 s (Android paused it), the agent gets a clear error; if Termux's answer gets lost, the app reads

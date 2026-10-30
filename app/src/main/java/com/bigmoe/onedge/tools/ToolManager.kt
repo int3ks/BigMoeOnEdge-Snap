@@ -130,7 +130,7 @@ class ToolManager(
     }
 
     companion object {
-        /** Start of a tool result when the user pressed Cancel; the agent run then ends after this round. */
+        /** In the tool result when the user pressed Cancel; the model then decides how to go on. */
         const val CANCELLED_BY_USER = "Cancelled by the user"
 
         /** Appended when run_shell is enabled: how to work as an agent in Termux. Kept short, it is part of every prompt. */
@@ -184,8 +184,8 @@ class ToolManager(
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     if (e !is TimeoutCancellationException && cancelledByUser.contains(job) && currentCoroutineContext().isActive) {
                         val s = (System.nanoTime() - startedNs) / 1_000_000_000L
-                        return@coroutineScope "$CANCELLED_BY_USER after ${s}s. The run was stopped there; wait for the " +
-                            "user's next message and do not simply run the same thing again."
+                        return@coroutineScope "Error: $CANCELLED_BY_USER after ${s}s; the command was stopped. Decide how to " +
+                            "go on: do not simply run the same thing again; try a different way, or ask the user."
                     }
                     throw e
                 } finally {

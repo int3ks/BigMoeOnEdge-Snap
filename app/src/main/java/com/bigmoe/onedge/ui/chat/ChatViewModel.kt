@@ -634,7 +634,7 @@ class ChatViewModel(
         generationManager.stop() // Also refuses any tool approval currently waiting.
     }
 
-    /** Cancel button next to a running tool (e.g. a hanging Termux command): ends the tool and the agent run. */
+    /** Cancel button next to a running tool (e.g. a hanging Termux command): ends the tool, the agent goes on. */
     fun cancelTool() {
         generationManager.cancelTool()
     }

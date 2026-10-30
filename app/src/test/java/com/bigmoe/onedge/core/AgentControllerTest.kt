@@ -180,19 +180,17 @@ class AgentControllerTest {
     }
 
     @Test
-    fun cancelledToolEndsTheRunWithoutAnotherModelTurn() = runTest {
+    fun cancelledToolGoesBackToTheModelWhichDecides() = runTest {
         // A tool whose result says the user cancelled it (what ToolManager returns after the Cancel button).
-        val e = env(this, reply = ToolManager.CANCELLED_BY_USER + " after 3s.")
+        val e = env(this, reply = "Error: " + ToolManager.CANCELLED_BY_USER + " after 3s; the command was stopped.")
         e.fake.script.add(ScriptedTurn(tokens = listOf(call)))
-        e.fake.script.add(ScriptedTurn(tokens = listOf("should never be generated")))
+        e.fake.script.add(ScriptedTurn(tokens = listOf("It was cancelled, so I will try another way.")))
         val events = e.agent.runAgentLoop(req(), e.sink).toList()
 
-        assertEquals(1, e.tool.calls.size)
-        assertEquals("only the turn with the call ran", 1, e.fake.calls.size)
-        assertEquals(listOf(MessageRole.ASSISTANT, MessageRole.TOOL), e.sink.saved.map { it.role })
-        assertTrue(e.sink.saved[1].content.contains(ToolManager.CANCELLED_BY_USER))
-        assertTrue(events.any { it is AgentEvent.Notice && it.text == AgentController.NOTE_CANCELLED })
-        assertTrue(events.last() is AgentEvent.Done)
+        assertEquals("the model gets the result and answers", 2, e.fake.calls.size)
+        assertTrue(e.fake.calls[1].prompt.contains(ToolManager.CANCELLED_BY_USER))
+        assertEquals(listOf(MessageRole.ASSISTANT, MessageRole.TOOL, MessageRole.ASSISTANT), e.sink.saved.map { it.role })
+        assertFalse(events.any { it is AgentEvent.Notice && it.text == AgentController.NOTE_STOPPED })
     }
 
     @Test

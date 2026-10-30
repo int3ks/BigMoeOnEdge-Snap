@@ -131,9 +131,9 @@ class AppContainer(private val context: Context) {
             registerCodeTools(this, workspace, javaScriptRunner)
             registerUtilityTools(this, AndroidDeviceInfo(context.applicationContext))
             registerTool(
-                com.bigmoe.onedge.tools.RunShellTool(termuxBridge, workspace) {
+                com.bigmoe.onedge.tools.RunShellTool(termuxBridge, workspace, {
                     workspace.rootDir.takeIf { workspaceLocation.isShared(it) }
-                }
+                })
             )
         }
     }

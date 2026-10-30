@@ -208,7 +208,7 @@ class RunShellToolTest {
             kotlinx.coroutines.delay(1500)
             assertTrue(manager.cancelRunningTools())
             val result = job.await()
-            assertTrue(result, result.startsWith("Cancelled by the user"))
+            assertTrue(result, result.startsWith("Error: Cancelled by the user"))
             Thread.sleep(6000)
             assertTrue("command kept running after cancel", !File(root, "late.txt").exists())
         } finally { root.deleteRecursively() }

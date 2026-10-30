@@ -105,19 +105,13 @@ class AgentController(
     }
 
     /**
-     * The cancel button next to a running tool: ends the tool(s) (the model gets "cancelled" as their result, so the
-     * chat history stays complete) and then the agent run, without another model turn. The user says how to go on.
+     * The cancel button next to a running tool: ends only the tool(s). The model gets "cancelled by the user" as their
+     * result and decides how to go on. Stop ([requestStop]) ends the whole run.
      */
-    @Volatile private var cancelRequested = false
-
-    fun cancelRunningTools(): Boolean {
-        cancelRequested = true
-        return toolManager.cancelRunningTools()
-    }
+    fun cancelRunningTools(): Boolean = toolManager.cancelRunningTools()
 
     fun runAgentLoop(request: AgentRequest, sink: MessageSink): Flow<AgentEvent> = flow {
         stopRequested = false
-        cancelRequested = false
         val settings = request.settings
         // Web search has two modes (docs/tool-calling.md):
         //  AUTO   - the model is told about the tool and decides to emit <tool_call> itself;
@@ -361,11 +355,6 @@ class AgentController(
                 emit(AgentEvent.Done)
                 return@flow
             }
-            if (cancelRequested || outputs.any { it.startsWith(ToolManager.CANCELLED_BY_USER) }) {
-                emit(AgentEvent.Notice(NOTE_CANCELLED))
-                emit(AgentEvent.Done)
-                return@flow
-            }
             // A long agent chain fills the context. Stop with a clear message before the engine would fail on the
             // next round (the tool result is saved, so "continue" in a new chat or after raising Context size works).
             contextFullNotice(fin.stats.nPast, prompt, engineController.loadedModel()?.nCtx ?: 0)?.let { text ->
@@ -434,7 +423,6 @@ ${request.prompt}""".trim()
     companion object {
         const val MAX_CALLS_PER_ROUND = 4
         const val NOTE_STOPPED = "Stopped"
-        const val NOTE_CANCELLED = "Cancelled. Tell the AI how to go on."
 
         /**
          * Non-null when the next round would not fit: [nPast] tokens already in the context, plus the tool result

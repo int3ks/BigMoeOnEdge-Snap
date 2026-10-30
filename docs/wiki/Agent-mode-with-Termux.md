@@ -92,8 +92,8 @@ tells you. Start a new chat, or raise the context size on the Models / Engine se
 * **Output, folded:** under the status row, `▸ Output` with the latest line. Tap it to unfold the command's whole output
   so far; it follows the end like a terminal. Python output appears as it is printed.
 * **Cancel** next to the running command shows *Stopping…* at once, stops the command **including all child processes**
-  (TERM, then KILL for the whole process tree) and **ends the agent run**: the model is not asked again, you say how to go
-  on. The normal Stop button also stops a running command.
+  (TERM, then KILL for the whole process tree). Only that call is cancelled: the model gets an error and decides how
+  to go on. The **Stop** button ends the whole run.
 * **Time limits:** if a command takes longer than its `timeout_seconds`, it is stopped the same way and the model gets
   the output so far with a note. The tool description tells the model to ask for a longer limit for installs (up to
   1800 s = 30 minutes).
@@ -188,7 +188,7 @@ reports `cover.png`.
 | *the workspace is in the app's private storage* | Turn on *Shared workspace folder* (step 3). |
 | `Permission denied` on files in the workspace | Run `termux-setup-storage` in Termux and allow storage access. |
 | `pkg install` fails / *unable to locate package* | Let it run `pkg update -y` first; on a slow mirror run `termux-change-repo` once in Termux. |
-| A command hangs | Tap **Cancel** next to it; the whole process tree is stopped and the run ends. Unfold *Output* to see where it stopped. |
+| A command hangs | Tap **Cancel** next to it; the whole process tree is stopped and the model tries another way. Unfold *Output* to see where it stopped. |
 | The agent explains commands instead of running them | Make sure the Termux switch is on for this chat (tool chips above the input). |
 | The agent stops with a context note | Start a new chat, or raise the context size and use a `Q8_0` KV cache. |
 | *Termux did not start the command within 20s* | Android paused Termux. Open Termux once and allow it to run in the background (battery settings: no restrictions / allow background activity). |

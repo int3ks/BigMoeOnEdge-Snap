@@ -167,7 +167,7 @@ class GenerationManager(
                                     }
                                     AgentEvent.ToolsFinished -> update {
                                         copy(
-                                            liveStatus = if (toolCancelling) "Stopped" else "Reading the result…",
+                                            liveStatus = "Reading the result…",
                                             liveDetail = null, liveOutput = null, toolRunning = false, toolStartedAt = null,
                                             toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false
                                         )
@@ -176,7 +176,6 @@ class GenerationManager(
                                     is AgentEvent.Notice -> {
                                         terminalState = when {
                                             event.text == AgentController.NOTE_STOPPED -> "CANCELLED"
-                                            event.text == AgentController.NOTE_CANCELLED -> "CANCELLED"
                                             Regex("(?i)\\b(error|failed|crashed|unexpected|could not)\\b").containsMatchIn(event.text) -> "ERROR"
                                             else -> "FINISHED"
                                         }
@@ -263,13 +262,13 @@ class GenerationManager(
     fun stop() { if (generationJob?.isActive == true) agentController.requestStop(); confirmation?.complete(false) }
 
     /**
-     * The cancel button next to a running tool: ends the tool and then the agent run (see AgentController). Shows
-     * "Stopping…" at once, since ending a Termux command can take a few seconds. Also refuses a pending approval.
+     * The cancel button next to a running tool: ends only that tool; the model gets an error and decides how to go on
+     * (Stop ends the whole run). Shows "Stopping…" at once, since ending a Termux command can take a few seconds.
      */
     fun cancelTool() {
         if (generationJob?.isActive != true) return
         update { copy(toolCancelling = true, liveStatus = "Stopping…") }
-        confirmation?.complete(false)
+        confirmation?.complete(false) // still waiting for approval: this call is declined, the model decides
         agentController.cancelRunningTools()
     }
     private inline fun update(crossinline transform: State.() -> State) { _state.value = transform(_state.value) }
