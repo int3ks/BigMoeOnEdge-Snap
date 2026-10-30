@@ -16,7 +16,7 @@ class AutoTunerTest {
     private val moe = ModelFacts("/m/moe.gguf", "moe", 17L * 1024 * 1024 * 1024, ModelKind.MOE, expertCount = 128, expertUsed = 8)
     private val dense = ModelFacts("/m/dense.gguf", "dense", 4L * 1024 * 1024 * 1024, ModelKind.DENSE, expertCount = 0, expertUsed = 0)
 
-    private val cacheChoices = setOf(500, 1000, 1250, 1500, 1750, 2000, 3000, 4000, 5000, 6000)
+    private val cacheChoices = setOf(500, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000)
     private val ctxChoices = setOf(1024, 2048, 4096, 8192, 16384)
 
     @Test

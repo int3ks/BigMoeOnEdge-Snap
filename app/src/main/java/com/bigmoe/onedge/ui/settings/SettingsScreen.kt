@@ -76,8 +76,9 @@ private const val DEBOUNCE_MS = 500L
 
 /** Same choice lists as the original BigMoeOnEdge Android app (AppSettings.*_CHOICES). */
 private object Choices {
-    val CACHE = listOf(CACHE_AUTO_MB, 0, 500, 1000, 1250, 1500, 1750, 2000, 3000, 4000, 5000, 6000)
-    val CACHE_CEIL = listOf(0, 2000, 3000, 4000, 5000, 6000)
+    // Finer where it matters: 250 MiB steps up to 2000, 500 up to 5000, then 1000 up to 8000.
+    val CACHE = listOf(CACHE_AUTO_MB, 0, 500, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000)
+    val CACHE_CEIL = listOf(0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
     val IO = listOf(1, 2, 4, 8)
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)

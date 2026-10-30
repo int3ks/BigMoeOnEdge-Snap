@@ -107,7 +107,7 @@ fun TunedValues.applyTo(s: EngineSettings): EngineSettings = s.copy(
 object AutoTuner {
 
     /** Same choice lists as the manual settings screen, so a save never holds a value the UI can't show. */
-    private val CACHE_CHOICES = listOf(500, 1000, 1250, 1500, 1750, 2000, 3000, 4000, 5000, 6000)
+    private val CACHE_CHOICES = listOf(500, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000)
     private val CTX_CHOICES = listOf(1024, 2048, 4096, 8192, 16384)
     private val TOPK_CHOICES = listOf(2, 3, 4, 6)
 
