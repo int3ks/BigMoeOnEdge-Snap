@@ -194,6 +194,24 @@ class AgentControllerTest {
     }
 
     @Test
+    fun inventedToolResponseIsCutAndTheRealToolRuns() = runTest {
+        val e = env(this)
+        // The model writes its call and then, instead of stopping, invents the result itself.
+        e.fake.script.add(ScriptedTurn(tokens = listOf("Running it. ", call, "\n<tool_", "response>\n/usr/bin/python3: can't open file '/root/x.pdf'", "</tool_response> Wait, ...")))
+        e.fake.script.add(ScriptedTurn(tokens = listOf("Done.")))
+        val events = e.agent.runAgentLoop(req(), e.sink).toList()
+
+        assertEquals("the real tool ran", 1, e.tool.calls.size)
+        val first = e.sink.saved[0].content
+        assertTrue(first.contains("<tool_call>"))
+        assertFalse(first, first.contains("tool_response") || first.contains("/root/") || first.contains("Wait"))
+        assertFalse(events.filterIsInstance<AgentEvent.Text>().joinToString("") { it.delta }.contains("/root/"))
+        assertTrue("the next round gets the real result", e.fake.calls[1].prompt.contains("RESULT-TEXT"))
+        assertTrue("history is re-sent after the cut", e.fake.calls[1].clearKv)
+        assertEquals("Done.", e.sink.saved.last().content)
+    }
+
+    @Test
     fun afterToolRoundNextUserTurnStillContinues() = runTest {
         val e = env(this)
         e.fake.script.add(ScriptedTurn(tokens = listOf(call)))

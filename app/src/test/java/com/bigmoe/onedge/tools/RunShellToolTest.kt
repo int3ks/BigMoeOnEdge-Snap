@@ -167,7 +167,12 @@ class RunShellToolTest {
             val out = tool.execute(args("echo hello; echo oops >&2; touch made.txt; exit 3", timeout = 20))
             assertEquals("exit code: 3\n--- stdout ---\nhello\n--- stderr ---\noops", out)
             assertTrue(File(root, "made.txt").isFile)
-            assertTrue("housekeeping removed", !File(root, Workspace.AGENT_DIR).exists())
+            val agentDir = File(root, Workspace.AGENT_DIR)
+            assertEquals("housekeeping removed, only the history stays", listOf(RunShellTool.HISTORY_DIR), agentDir.list()!!.toList())
+            val record = File(agentDir, RunShellTool.HISTORY_DIR).listFiles()!!.single().readText()
+            assertTrue(record, record.startsWith("# \$ echo hello; echo oops >&2; touch made.txt; exit 3\n# folder: .\n"))
+            assertTrue(record, record.contains("hello") && record.contains("oops"))
+            assertTrue(record, record.contains("# end: exit code 3, after "))
         } finally { root.deleteRecursively() }
     }
 
@@ -209,6 +214,7 @@ class RunShellToolTest {
             assertTrue(manager.cancelRunningTools())
             val result = job.await()
             assertTrue(result, result.startsWith("Error: Cancelled by the user"))
+            assertTrue(result, result.contains("did NOT complete") && result.contains("Output before it was stopped"))
             Thread.sleep(6000)
             assertTrue("command kept running after cancel", !File(root, "late.txt").exists())
         } finally { root.deleteRecursively() }
@@ -244,7 +250,7 @@ class RunShellToolTest {
             assertTrue(out, out.startsWith("exit code: 4"))
             assertTrue(out, out.contains("one") && out.contains("two"))
             assertTrue(out, out.contains("Termux's answer did not arrive"))
-            assertTrue("housekeeping removed", File(root, Workspace.AGENT_DIR).listFiles().isNullOrEmpty())
+            assertEquals("housekeeping removed", listOf(RunShellTool.HISTORY_DIR), File(root, Workspace.AGENT_DIR).list()!!.toList())
         } finally { root.deleteRecursively() }
     }
 

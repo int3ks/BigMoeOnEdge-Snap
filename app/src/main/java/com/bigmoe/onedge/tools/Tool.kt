@@ -66,6 +66,9 @@ interface Tool {
     /** The time limit to show next to the elapsed time while the tool runs, in seconds; null = none shown. */
     fun limitSeconds(arguments: JSONObject): Int? = null
 
+    /** After the user cancelled a call: what the tool can still tell about it (e.g. the output so far), or null. */
+    fun takeCancelDetails(): String? = null
+
     /** Called once when an agent run ends (finished, stopped or failed), e.g. to release what the tool held. */
     suspend fun onRunFinished() {}
 

@@ -149,7 +149,11 @@ class ToolManager(
                 "interactive programs (input is closed, so a prompt fails at once). For long jobs, write the output to a " +
                 "file. Never claim a result before the tool call that produces it: write your answer to the user only after " +
                 "the last tool result, and only report success when the exit code and the output show it. Then name the " +
-                "file(s) by their path in the workspace (e.g. story.pdf), never as sandbox: or /mnt/data links."
+                "file(s) by their path in the workspace (e.g. story.pdf), never as sandbox: or /mnt/data links. After a " +
+                "tool call, stop and wait: the app sends the result; never write <tool_response> yourself. This is Termux " +
+                "on Android, not a Linux server: there is no /root, /mnt/data or sudo, use paths inside the workspace. " +
+                "Python libraries with C code (Pillow, numpy, ...) are faster to get as Termux packages, e.g. " +
+                "pkg install -y python-pillow (pkg search python- lists them); pip would compile them for a long time."
     }
 
     /** Never throws (except coroutine cancellation): failures come back as "Error: ..." text for the model. */
@@ -184,8 +188,11 @@ class ToolManager(
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     if (e !is TimeoutCancellationException && cancelledByUser.contains(job) && currentCoroutineContext().isActive) {
                         val s = (System.nanoTime() - startedNs) / 1_000_000_000L
-                        return@coroutineScope "Error: $CANCELLED_BY_USER after ${s}s; the command was stopped. Decide how to " +
-                            "go on: do not simply run the same thing again; try a different way, or ask the user."
+                        return@coroutineScope "Error: $CANCELLED_BY_USER after ${s}s. It was stopped before it finished, so " +
+                            "it did NOT complete: whatever it was installing or writing is missing or incomplete. Do not " +
+                            "report success. Decide how to go on: look at the output below for why it took so long, try a " +
+                            "different way, or ask the user; do not simply run the same thing again." +
+                            (tool.takeCancelDetails()?.let { "\n$it" } ?: "")
                     }
                     throw e
                 } finally {

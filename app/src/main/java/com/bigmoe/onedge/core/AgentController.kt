@@ -179,6 +179,10 @@ class AgentController(
             val rawAnswer = StringBuilder()
             val reasoning = StringBuilder()
             var finished: EngineEvent.Finished? = null
+            // Set when the model started to write a tool result itself (`<tool_response>`): only the app writes
+            // those. Everything from there on is dropped and the generation is stopped, so an invented result
+            // (e.g. "/usr/bin/python3: can't open /root/x.pdf") never reaches the chat or the next round.
+            var cutFakeResponse = false
 
             suspend fun show(chunks: List<ParsedChunk>) {
                 for (c in chunks) when (c) {
@@ -215,7 +219,17 @@ class AgentController(
                         }
                     }
                     is EngineEvent.Answer -> {
+                        if (cutFakeResponse) return@collect
+                        val before = rawAnswer.length
                         rawAnswer.append(ev.delta)
+                        val fake = rawAnswer.indexOf(ToolProtocol.RESPONSE_OPEN, maxOf(0, before - ToolProtocol.RESPONSE_OPEN.length))
+                        if (fake >= 0) {
+                            cutFakeResponse = true
+                            rawAnswer.setLength(fake)
+                            engineController.stopGeneration()
+                            if (fake > before) show(parser.processToken(ev.delta.substring(0, fake - before)))
+                            return@collect
+                        }
                         show(parser.processToken(ev.delta))
                         // The call itself is hidden from the chat; say what is being written instead of "Reading…".
                         callWatch.update(rawAnswer)?.let { emit(AgentEvent.ToolWriting(it)) }
@@ -243,7 +257,7 @@ class AgentController(
                 emit(AgentEvent.Done)
                 return@flow
             }
-            if (fin.cancelled) {
+            if (fin.cancelled && (!cutFakeResponse || stopRequested)) {
                 // The engine rolled the whole turn back, so it does NOT hold this partial answer.
                 // The saved partial message makes the next request's expected key differ -> replay.
                 saveIfAny(sink, rawAnswer, reasoning, fin.stats, note = NOTE_STOPPED)?.let {
@@ -253,15 +267,17 @@ class AgentController(
                 return@flow
             }
 
-            val content = fin.answer.ifBlank { rawAnswer.toString() }
-            val reasoningText = fin.reasoning.ifBlank { reasoning.toString() }.ifBlank { null }
+            val content = if (cutFakeResponse) rawAnswer.toString().trimEnd() else fin.answer.ifBlank { rawAnswer.toString() }
+            val reasoningText = (if (cutFakeResponse) reasoning.toString() else fin.reasoning.ifBlank { reasoning.toString() }).ifBlank { null }
             val assistantId = sink.save(
                 NewMessage(MessageRole.ASSISTANT, content, reasoningText, fin.stats)
             )
             emit(AgentEvent.MessageSaved(assistantId, MessageRole.ASSISTANT))
             // The engine now holds exactly: ... + this prompt + this answer. After a turn with pictures it does
             // not (its KV holds image positions), so the next turn must re-send the history as text.
-            if (engineRound == 0 && request.images.isNotEmpty()) {
+            // After a cut the engine holds something else than the saved message (it rolled the turn back, or kept
+            // the dropped part), so the next round re-sends the history.
+            if (cutFakeResponse || (engineRound == 0 && request.images.isNotEmpty())) {
                 engineController.invalidateState()
             } else {
                 engineController.commitState(ContextPlanner.stateKey(request.sessionId, assistantId, system))

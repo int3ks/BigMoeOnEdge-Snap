@@ -1,9 +1,15 @@
 package com.bigmoe.onedge.ui.models
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material3.DropdownMenu
@@ -19,7 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.EngineState
@@ -52,7 +60,7 @@ fun ModelPickerButton(
             expanded = open,
             onDismissRequest = { open = false },
             // As wide as the screen allows, so a long file name (and the quantisation at its end) is always readable.
-            modifier = Modifier.widthIn(min = 280.dp, max = (LocalConfiguration.current.screenWidthDp - 24).coerceAtLeast(280).dp)
+            modifier = Modifier.widthIn(min = 280.dp, max = (LocalConfiguration.current.screenWidthDp - 16).coerceAtLeast(280).dp)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text("Models", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -71,34 +79,42 @@ fun ModelPickerButton(
             }
             models.forEach { model ->
                 val isLoaded = model.path == loadedPath
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            // Full name, wrapped instead of cut: two quantisations of one model differ only at the end.
-                            Text(model.displayName, style = MaterialTheme.typography.bodyMedium)
-                            if (model.displayName != model.name) {
-                                Text(model.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                val enabled = !loading && !(isLoaded && isGenerating)
+                // Own rows instead of DropdownMenuItem: Material3 caps those at 280 dp, which wrapped long file names
+                // however wide the menu was. These take the width of the longest name (the menu is at most the
+                // screen wide) and keep each name on one line; a name longer than the screen scrolls sideways.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = enabled) {
+                            open = false
+                            if (isLoaded) viewModel.unload() else viewModel.requestLoad(model.path)
+                        }
+                        .alpha(if (enabled) 1f else 0.38f)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Column(Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState())) {
+                        Text(model.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false)
+                        if (model.displayName != model.name) {
                             Text(
-                                ModelManager.formatBytes(model.sizeBytes) + if (isLoaded) " \u2022 Loaded" else "",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isLoaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                model.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    },
-                    trailingIcon = {
                         Text(
-                            if (isLoaded) "Unload" else "Load",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary
+                            ModelManager.formatBytes(model.sizeBytes) + if (isLoaded) " \u2022 Loaded" else "",
+                            style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false,
+                            color = if (isLoaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    },
-                    enabled = !loading && !(isLoaded && isGenerating),
-                    onClick = {
-                        open = false
-                        if (isLoaded) viewModel.unload() else viewModel.requestLoad(model.path)
                     }
-                )
+                    Text(
+                        if (isLoaded) "Unload" else "Load",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
             HorizontalDivider()
             DropdownMenuItem(

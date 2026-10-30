@@ -64,6 +64,11 @@ class RunShellTool(
     /** termux-wake-lock is held from the first command of an agent run until [onRunFinished]. */
     private val wakeLockHeld = AtomicBoolean(false)
 
+    /** Output of the command the user just cancelled, for [takeCancelDetails] (one run_shell runs at a time). */
+    @Volatile private var cancelledOutput: String? = null
+
+    override fun takeCancelDetails(): String? = cancelledOutput?.also { cancelledOutput = null }
+
     override val name = "run_shell"
     override val category = ToolCategory.TERMUX
     override val description =
@@ -143,6 +148,8 @@ class RunShellTool(
         val rcFile = File(runDir, "$id.rc")
         val abandonFile = File(runDir, "$id.abandon")
         val label = describe(arguments)
+        val startedWall = System.currentTimeMillis()
+        var endNote = "app closed or crashed" // replaced on every normal way out
 
         // Keeps Termux awake for the rest of the agent run (released in onRunFinished). Best effort: when Termux does
         // not answer, the start check below reports it.
@@ -188,6 +195,13 @@ class RunShellTool(
                 }
                 run.await()?.let { Outcome.Answered(it) } ?: Outcome.TimedOut
             }
+            endNote = when (outcome) {
+                is Outcome.Answered -> "exit code ${outcome.result.exitCode ?: "unknown"}" +
+                    (if (outcome.result.err != -1) ", Termux err ${outcome.result.err}: ${outcome.result.errmsg.orEmpty()}" else "")
+                is Outcome.FromFiles -> "exit code ${outcome.result.exitCode ?: "unknown"} (Termux's answer lost, read from the files)"
+                Outcome.NotStarted -> "Termux did not start the command"
+                Outcome.TimedOut -> "time limit of ${seconds}s reached, stopped"
+            }
             return when (outcome) {
                 is Outcome.Answered -> format(outcome.result)
                 is Outcome.FromFiles -> format(outcome.result) +
@@ -210,11 +224,16 @@ class RunShellTool(
             // The cancel button or Stop: end the command in Termux too, so nothing keeps running unseen; a command
             // Termux has not started yet is marked so it never starts.
             withContext(NonCancellable) {
-                if (!pidFile.isFile && !rcFile.isFile) runCatching { abandonFile.createNewFile() }
+                val notStarted = !pidFile.isFile && !rcFile.isFile
+                if (notStarted) runCatching { abandonFile.createNewFile() }
                 stop(pidFile, dir)
+                endNote = if (notStarted) "cancelled before Termux started it" else "cancelled, stopped"
+                cancelledOutput = if (notStarted) "Termux had not started the command yet, so it did not run."
+                else "Output before it was stopped:\n" + tail(logFile, 1500).ifBlank { "(none)" }
             }
             throw e
         } finally {
+            archive(runDir, id, logFile, command, dir, startedWall, endNote)
             pidFile.delete()
             logFile.delete()
             rcFile.delete()
@@ -234,6 +253,28 @@ class RunShellTool(
         val rc = runCatching { rcFile.readText().trim().toInt() }.getOrNull()
         val len = logFile.length().toInt()
         return TermuxResult(tail(logFile, FALLBACK_OUTPUT_BYTES), "", rc, -1, null, stdoutOriginalLength = len)
+    }
+
+    /**
+     * Keeps a record of every command in `.bigmoe/history/` (newest [HISTORY_KEEP]): the command, folder, start time,
+     * its whole output and how it ended. That is where to look when something went wrong, e.g. from Termux:
+     * `ls -t ~/storage/shared/BigMoe/workspace/.bigmoe/history | head`. Never throws.
+     */
+    private fun archive(runDir: File, id: String, logFile: File, command: String, dir: File, startedAt: Long, endNote: String) {
+        try {
+            val history = File(runDir, HISTORY_DIR).apply { mkdirs() }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date(startedAt))
+            val started = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(startedAt))
+            val seconds = (System.currentTimeMillis() - startedAt) / 1000
+            val output = tail(logFile, HISTORY_OUTPUT_BYTES)
+            File(history, "$stamp-$id.log").writeText(
+                "# $ $command\n# folder: ${workspace.relative(dir).ifEmpty { "." }}\n# started: $started\n\n" +
+                    output.ifEmpty { "(no output)\n" }.let { if (it.endsWith("\n")) it else it + "\n" } +
+                    "\n# end: $endNote, after ${seconds}s\n"
+            )
+            history.listFiles { f -> f.name.endsWith(".log") }?.sortedByDescending { it.name }?.drop(HISTORY_KEEP)?.forEach { it.delete() }
+        } catch (_: Exception) {
+        }
     }
 
     /** Markers of commands that never started are removed after a day; nothing else is left in the folder. */
@@ -259,6 +300,9 @@ class RunShellTool(
         private const val STOP_TIMEOUT_MS = 8_000L
         /** How much of the running command's output the chat shows (the end of it). */
         private const val LIVE_OUTPUT_BYTES = 6_000
+        const val HISTORY_DIR = "history"
+        private const val HISTORY_KEEP = 50
+        private const val HISTORY_OUTPUT_BYTES = 200_000
         /** Same limit Termux has for its own answer. */
         private const val FALLBACK_OUTPUT_BYTES = 100_000
         private val nextRun = AtomicInteger(0)
