@@ -69,6 +69,11 @@ data class ChatUiState(
     val liveReasoning: String = "",
     /** e.g. "Running web_search…" while a tool executes. */
     val liveStatus: String? = null,
+    /** Second status line from a running tool (last output line of a Termux command). */
+    val liveDetail: String? = null,
+    /** A tool is running right now: show its elapsed time and a cancel button. */
+    val toolRunning: Boolean = false,
+    val toolElapsedMs: Long = 0L,
     val inputDraft: String = "",
     val chooseFromOptions: Boolean = false,
     val choiceOptions: String = "",
@@ -156,6 +161,9 @@ class ChatViewModel(
                         liveText = if (sameChat && g.active) g.liveText else if (sameChat) it.liveText else "",
                         liveReasoning = if (sameChat && g.active) g.liveReasoning else if (sameChat) it.liveReasoning else "",
                         liveStatus = if (sameChat && g.active) g.liveStatus else if (sameChat) it.liveStatus else null,
+                        liveDetail = if (sameChat && g.active) g.liveDetail else null,
+                        toolRunning = sameChat && g.active && g.toolRunning,
+                        toolElapsedMs = if (sameChat && g.active) g.toolElapsedMs else 0L,
                         notice = if (sameChat) g.notice ?: it.notice else it.notice,
                         pendingConfirmation = if (sameChat) g.pendingConfirmation else null
                     )
@@ -216,6 +224,9 @@ class ChatViewModel(
                     liveText = if (same && g.active) g.liveText else it.liveText,
                     liveReasoning = if (same && g.active) g.liveReasoning else it.liveReasoning,
                     liveStatus = if (same && g.active) g.liveStatus else it.liveStatus,
+                    liveDetail = if (same && g.active) g.liveDetail else null,
+                    toolRunning = same && g.active && g.toolRunning,
+                    toolElapsedMs = if (same && g.active) g.toolElapsedMs else 0L,
                     pendingConfirmation = if (same) g.pendingConfirmation else null
                 ) }
             }
@@ -594,6 +605,9 @@ class ChatViewModel(
                 it.copy(liveStatus = if (ev.name == "web_search") statusForTool(ev.name, ev.arguments) else toolManager.describeCall(ev.name, ev.arguments) + "…")
             }
             is AgentEvent.Notice -> _uiState.update { it.copy(notice = ev.text) }
+            is AgentEvent.ToolProgress -> _uiState.update { it.copy(liveStatus = ev.text.substringBefore('\n')) }
+            is AgentEvent.ToolWriting -> _uiState.update { it.copy(liveStatus = ev.label) }
+            AgentEvent.ToolsFinished -> Unit
             AgentEvent.GenerationStarted, is AgentEvent.GenerationProgress -> Unit
             // The saved message is now in the list below; start a clean live bubble for the next round.
             is AgentEvent.MessageSaved -> _uiState.update { it.copy(liveText = "", liveReasoning = "") }
@@ -604,6 +618,11 @@ class ChatViewModel(
 
     fun stopGeneration() {
         generationManager.stop() // Also refuses any tool approval currently waiting.
+    }
+
+    /** Cancel button next to a running tool (e.g. a hanging Termux command): ends the tool, the agent goes on. */
+    fun cancelTool() {
+        generationManager.cancelTool()
     }
 
     /** Context text and pictures for a turn's attachments (files read, media decoded). Throws when one cannot be read. */

@@ -1,6 +1,7 @@
 package com.bigmoe.onedge.tools
 
 import com.bigmoe.onedge.workspace.Workspace
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -14,11 +15,15 @@ class RunShellToolTest {
         var permitted: Boolean = true,
         var result: TermuxResult? = TermuxResult("hello\n", "", 0, -1, null)
     ) : ShellBackend {
+        /** (the user's command, workdir, timeout) of each run_shell call; stop-script calls are in [stops]. */
         val calls = ArrayList<Triple<String, String, Long>>()
+        val stops = ArrayList<String>()
         override fun isInstalled() = installed
         override fun hasPermission() = permitted
-        override suspend fun run(command: String, workdir: String, timeoutMs: Long): TermuxResult? {
-            calls.add(Triple(command, workdir, timeoutMs))
+        override suspend fun run(script: String, workdir: String, timeoutMs: Long, args: List<String>): TermuxResult? {
+            if (script == RunShellTool.KILL_TREE) { stops.add(args[1]); return TermuxResult("", "", 0, -1, null) }
+            assertEquals(RunShellTool.WRAPPER, script)
+            calls.add(Triple(args[1], workdir, timeoutMs))
             return result
         }
     }
@@ -76,6 +81,7 @@ class RunShellToolTest {
         val (tool, backend, _) = setup()
         backend.result = null
         assertTrue(tool.execute(args("sleep 999", timeout = 10)).startsWith("No result after 10s"))
+        assertTrue(backend.stops.isEmpty()) // the fake never wrote a pid file, so there was nothing to stop
     }
 
     @Test
@@ -101,5 +107,87 @@ class RunShellToolTest {
         val c = tool.confirmation(args("rm -rf build", cwd = "proj"))
         assertTrue(c.message.startsWith("$ rm -rf build"))
         assertTrue(c.message.contains("Folder: proj"))
+    }
+
+    /** Runs the real wrapper and stop scripts with the host's bash, the way Termux does (`bash -c script args`). */
+    private class LocalBash : ShellBackend {
+        override fun isInstalled() = true
+        override fun hasPermission() = true
+        override suspend fun run(script: String, workdir: String, timeoutMs: Long, args: List<String>): TermuxResult? =
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val p = ProcessBuilder(listOf("bash", "-c", script) + args).directory(File(workdir)).start()
+                val out = StringBuilder()
+                val err = StringBuilder()
+                val t1 = Thread { out.append(p.inputStream.bufferedReader().readText()) }.apply { start() }
+                val t2 = Thread { err.append(p.errorStream.bufferedReader().readText()) }.apply { start() }
+                try {
+                    var waited = 0L
+                    while (p.isAlive && waited < timeoutMs) { kotlinx.coroutines.delay(50); waited += 50 }
+                    if (p.isAlive) return@withContext null
+                    t1.join(); t2.join()
+                    TermuxResult(out.toString(), err.toString(), p.exitValue(), -1, null)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                }
+            }
+    }
+
+    private fun hasBash(): Boolean = try { ProcessBuilder("bash", "-c", "command -v ps").start().waitFor() == 0 } catch (_: Exception) { false }
+
+    @Test
+    fun realBashWrapperKeepsStreamsExitCodeAndCleansUp() = runBlocking {
+        if (!hasBash()) return@runBlocking
+        val root = File.createTempFile("bmoe-real", "").apply { delete(); mkdirs() }
+        try {
+            val ws = Workspace(root)
+            val tool = RunShellTool(LocalBash(), ws) { ws.rootDir }
+            val out = tool.execute(args("echo hello; echo oops >&2; touch made.txt; exit 3", timeout = 20))
+            assertEquals("exit code: 3\n--- stdout ---\nhello\n--- stderr ---\noops", out)
+            assertTrue(File(root, "made.txt").isFile)
+            assertTrue("housekeeping removed", !File(root, Workspace.AGENT_DIR).exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun realBashTimeoutStopsTheWholeProcessTree() = runBlocking {
+        if (!hasBash()) return@runBlocking
+        val root = File.createTempFile("bmoe-real", "").apply { delete(); mkdirs() }
+        try {
+            val ws = Workspace(root)
+            val progress = ArrayList<String>()
+            val tool = RunShellTool(LocalBash(), ws) { ws.rootDir }
+            // A child process that would write a file after 8 s; the 5 s limit must stop it before that.
+            val out = tool.execute(
+                args("echo started; (sleep 8; touch late.txt) & wait", timeout = 5),
+                ToolContext("s", "m") { synchronized(progress) { progress.add(it) } }
+            )
+            assertTrue(out, out.startsWith("No result after 5s, so the command was stopped"))
+            assertTrue(out, out.contains("started"))
+            synchronized(progress) { assertTrue(progress.toString(), progress.any { it.contains("› started") }) }
+            Thread.sleep(4500)
+            assertTrue("child process was not stopped", !File(root, "late.txt").exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun cancellingStopsTheCommand() = runBlocking {
+        if (!hasBash()) return@runBlocking
+        val root = File.createTempFile("bmoe-real", "").apply { delete(); mkdirs() }
+        try {
+            val ws = Workspace(root)
+            val manager = ToolManager().apply { autoApprove = true; registerTool(RunShellTool(LocalBash(), ws) { ws.rootDir }) }
+            val job = kotlinx.coroutines.GlobalScope.async {
+                manager.executeToolCall("run_shell", """{"command":"(sleep 6; touch late.txt) & wait","timeout_seconds":60}""")
+            }
+            var waited = 0
+            while (!manager.hasRunningTool() && waited++ < 250) kotlinx.coroutines.delay(20)
+            assertTrue("tool never started", manager.hasRunningTool())
+            kotlinx.coroutines.delay(1500)
+            assertTrue(manager.cancelRunningTools())
+            val result = job.await()
+            assertTrue(result, result.startsWith("Cancelled by the user"))
+            Thread.sleep(6000)
+            assertTrue("command kept running after cancel", !File(root, "late.txt").exists())
+        } finally { root.deleteRecursively() }
     }
 }

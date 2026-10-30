@@ -329,10 +329,12 @@ fun ChatScreen(
                                 if (uiState.liveText.isEmpty() && uiState.liveReasoning.isEmpty()) {
                                     LiveStatusRow(
                                         uiState.liveStatus ?: "Reading…",
-                                        formatStats(
+                                        if (uiState.toolRunning) formatToolElapsed(uiState.toolElapsedMs) else formatStats(
                                             uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
                                             uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
-                                        )
+                                        ),
+                                        detail = uiState.liveDetail,
+                                        onCancel = if (uiState.toolRunning) viewModel::cancelTool else null
                                     )
                                 } else {
                                     ChatMessageBubble(
@@ -350,10 +352,12 @@ fun ChatScreen(
                                     uiState.liveStatus?.let {
                                         LiveStatusRow(
                                             it,
-                                            formatStats(
+                                            if (uiState.toolRunning) formatToolElapsed(uiState.toolElapsedMs) else formatStats(
                                                 uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
                                                 uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
-                                            )
+                                            ),
+                                            detail = uiState.liveDetail,
+                                            onCancel = if (uiState.toolRunning) viewModel::cancelTool else null
                                         )
                                     }
                                 }
@@ -601,16 +605,49 @@ private fun NoticeBar(text: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun LiveStatusRow(text: String, telemetry: String? = null) {
-    Row(
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        SlowBlinkDot()
-        Text(text = text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
-        if (!telemetry.isNullOrBlank()) {
-            Text("• $telemetry", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+private fun LiveStatusRow(
+    text: String,
+    telemetry: String? = null,
+    detail: String? = null,
+    onCancel: (() -> Unit)? = null
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SlowBlinkDot()
+            Text(
+                text = text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary,
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            if (!telemetry.isNullOrBlank()) {
+                Text("• $telemetry", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            }
+            if (onCancel != null) {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onCancel,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(30.dp)
+                ) { Text("Cancel", style = MaterialTheme.typography.labelMedium) }
+            }
+        }
+        if (!detail.isNullOrBlank()) {
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp)
+            )
         }
     }
+}
+
+/** "12 s" / "3 min 05 s" for a running tool. */
+private fun formatToolElapsed(ms: Long): String {
+    val s = ms / 1000
+    return if (s < 60) "$s s" else "${s / 60} min ${(s % 60).toString().padStart(2, '0')} s"
 }

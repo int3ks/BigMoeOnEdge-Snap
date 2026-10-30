@@ -342,6 +342,7 @@ private fun sourceLabel(url: String): String = runCatching {
 @Composable
 fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
+    val title = remember(body) { toolResultTitle(body) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -370,7 +371,7 @@ fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Tool result",
+                        text = title,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -393,6 +394,22 @@ fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+/** Card title from a stored result ("[run_shell]\nexit code: 0 ..."): "Termux · exit 0 ✓", "Result: read_file". */
+internal fun toolResultTitle(body: String): String {
+    val name = Regex("^\\[([A-Za-z0-9_.-]+)\\]").find(body.trimStart())?.groupValues?.get(1) ?: return "Tool result"
+    if (name == "run_shell") {
+        val code = Regex("(?m)^exit code: (-?\\d+)").find(body)?.groupValues?.get(1)
+        return when {
+            body.contains("Cancelled by the user") -> "Termux · cancelled"
+            body.contains("No result after") -> "Termux · stopped (time limit)"
+            code == "0" -> "Termux · exit 0 ✓"
+            code != null -> "Termux · exit $code ✗"
+            else -> "Termux · error"
+        }
+    }
+    return "Result: $name"
 }
 
 @Composable

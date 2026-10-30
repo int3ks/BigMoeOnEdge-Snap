@@ -173,7 +173,10 @@ class Workspace(root: File) {
         /** Keeps the media scanner out of a workspace in shared storage (written by WorkspaceSwitcher). */
         const val NO_MEDIA = ".nomedia"
 
+        /** run_shell's working files (pid and live log of a running command), next to the user's files. */
+        const val AGENT_DIR = ".bigmoe"
+
         /** Housekeeping files that listings, searches and the AI's file tools never show. */
-        val HIDDEN_NAMES: Set<String> = setOf(NO_MEDIA)
+        val HIDDEN_NAMES: Set<String> = setOf(NO_MEDIA, AGENT_DIR)
     }
 }

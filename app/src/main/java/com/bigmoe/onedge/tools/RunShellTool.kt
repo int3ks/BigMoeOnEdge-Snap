@@ -2,8 +2,16 @@ package com.bigmoe.onedge.tools
 
 import com.bigmoe.onedge.workspace.Workspace
 import com.bigmoe.onedge.workspace.WorkspaceException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicInteger
 
 /** What a shell command returned. Plain data, so [RunShellTool] can be tested on the JVM. */
 data class TermuxResult(
@@ -24,8 +32,11 @@ interface ShellBackend {
     fun isInstalled(): Boolean
     fun hasPermission(): Boolean
 
-    /** null = no result within [timeoutMs] (the command may still be running). */
-    suspend fun run(command: String, workdir: String, timeoutMs: Long): TermuxResult?
+    /**
+     * Runs `bash -c [script] [args...]` (so args[0] is $0, args[1] is $1, ...). null = no result within [timeoutMs]
+     * (the command may still be running).
+     */
+    suspend fun run(script: String, workdir: String, timeoutMs: Long, args: List<String> = emptyList()): TermuxResult?
 
     /** The command could not be handed over at all; the message is for the model and the user. */
     class Unavailable(message: String) : Exception(message)
@@ -45,8 +56,8 @@ class RunShellTool(
     override val category = ToolCategory.TERMUX
     override val description =
         "Run one bash command in Termux, a Linux environment on this device, with the workspace as the current folder. " +
-            "Returns exit code, stdout and stderr. Use it to run Python or other scripts, install what is missing " +
-            "(pkg install -y python; pip install <package>), convert files (ffmpeg) and check results. " +
+            "Returns exit code, stdout and stderr. Use it on your own for anything that needs running code: Python " +
+            "scripts, converting or creating files (audio, images, archives), installing what is missing, checking results. " +
             "Non-interactive only: no editors, prompts or programs that wait for input."
     override val parametersSchema: JSONObject = JSONObject()
         .put("type", "object")
@@ -75,7 +86,9 @@ class RunShellTool(
         )
     }
 
-    override suspend fun execute(arguments: JSONObject): String {
+    override suspend fun execute(arguments: JSONObject): String = execute(arguments, ToolContext.NONE)
+
+    override suspend fun execute(arguments: JSONObject, ctx: ToolContext): String {
         val command = arguments.optString("command").trim()
         if (command.isEmpty()) throw ToolInputException("command is empty")
         val root = sharedWorkspaceRoot() ?: throw ToolInputException(
@@ -98,19 +111,112 @@ class RunShellTool(
         if (!dir.path.startsWith(root.path)) throw ToolInputException("the workspace changed while the command was prepared; try again")
 
         val seconds = waitSeconds(arguments)
-        val result = try {
-            backend.run(command, dir.path, seconds * 1000L)
+        // Housekeeping next to the files: the command's pid (to stop it) and a copy of its output (shown live).
+        val runDir = File(root, Workspace.AGENT_DIR).apply { mkdirs() }
+        val id = "run-" + nextRun.incrementAndGet() + "-" + (System.currentTimeMillis() % 100_000)
+        val pidFile = File(runDir, "$id.pid")
+        val logFile = File(runDir, "$id.log")
+        val label = describe(arguments)
+        try {
+            val result = coroutineScope {
+                val poll = launch {
+                    var shown = ""
+                    while (true) {
+                        delay(PROGRESS_INTERVAL_MS)
+                        val last = lastLine(logFile)
+                        if (last.isNotEmpty() && last != shown) {
+                            shown = last
+                            ctx.onProgress("$label…\n› $last") // the chat shows the elapsed time itself
+                        }
+                    }
+                }
+                try {
+                    backend.run(WRAPPER, dir.path, seconds * 1000L, listOf("bmoe-run", command, runDir.path, id))
+                } finally {
+                    poll.cancel()
+                }
+            }
+            if (result == null) {
+                val stopped = stop(pidFile, dir)
+                return "No result after ${seconds}s, so the command was " + (if (stopped) "stopped" else "abandoned (it could not be confirmed stopped)") +
+                    ". Output so far:\n" + tail(logFile, 1500).ifBlank { "(none)" } +
+                    "\nFor long jobs, raise timeout_seconds (up to $MAX_TIMEOUT_S) or run it in steps."
+            }
+            return format(result)
         } catch (e: ShellBackend.Unavailable) {
             throw ToolInputException(e.message ?: "Termux is not reachable")
-        } ?: return "No result after ${seconds}s. The command may still be running in Termux; it cannot be stopped from " +
-            "here. For long jobs, run them so that they write their output to a file, then check the file."
-        return format(result)
+        } catch (e: CancellationException) {
+            // The cancel button or Stop: end the command in Termux too, so nothing keeps running unseen.
+            withContext(NonCancellable) { stop(pidFile, dir) }
+            throw e
+        } finally {
+            pidFile.delete()
+            logFile.delete()
+            runDir.delete() // only when empty
+        }
+    }
+
+    /** Ends the wrapper and every process below it. True when Termux confirmed the stop script ran. */
+    private suspend fun stop(pidFile: File, dir: File): Boolean {
+        if (!pidFile.isFile) return false
+        return try {
+            backend.run(KILL_TREE, dir.path, STOP_TIMEOUT_MS, listOf("bmoe-stop", pidFile.path)) != null
+        } catch (_: Exception) {
+            false
+        }
     }
 
     companion object {
         const val DEFAULT_TIMEOUT_S = 120
         const val MAX_TIMEOUT_S = 1800
         private const val GRACE_MS = 15_000L
+        private const val STOP_TIMEOUT_MS = 8_000L
+        private const val PROGRESS_INTERVAL_MS = 1_000L
+        private val nextRun = AtomicInteger(0)
+
+        /**
+         * Runs the user's command ($1) in its own bash, records the wrapper's pid in $2/$3.pid so it can be stopped,
+         * and copies stdout and stderr into $2/$3.log as they come (for the live status line) while Termux still gets
+         * both streams separately. The command's exit code is the wrapper's.
+         */
+        internal const val WRAPPER =
+            "echo \$\$ > \"\$2/\$3.pid\"\n" +
+                "bash -c \"\$1\" > >(tee -a \"\$2/\$3.log\") 2> >(tee -a \"\$2/\$3.log\" >&2)\n" +
+                "rc=\$?\n" +
+                "rm -f \"\$2/\$3.pid\"\n" +
+                "exit \$rc\n"
+
+        /** Stops the process tree whose root pid is in the file $1: TERM, then KILL a second later. */
+        internal const val KILL_TREE =
+            "p=\$(cat \"\$1\" 2>/dev/null) || exit 0\n" +
+                "kids() { ps -A -o pid,ppid 2>/dev/null | while read a b; do [ \"\$b\" = \"\$1\" ] && echo \"\$a\"; done; }\n" +
+                "tree() { local c; for c in \$(kids \"\$1\"); do tree \"\$c\"; done; echo \"\$1\"; }\n" +
+                "all=\$(tree \"\$p\")\n" +
+                "kill -TERM \$all 2>/dev/null; sleep 1; kill -KILL \$all 2>/dev/null\n" +
+                "rm -f \"\$1\"; exit 0\n"
+
+        private val ANSI = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
+
+        /** The last non-empty line of [f] (progress bars rewrite a line with \r, so that counts as a break too). */
+        internal fun lastLine(f: File, max: Int = 100): String {
+            val t = tail(f, 2048)
+            val line = t.split('\n', '\r').map { ANSI.replace(it, "").trim() }.lastOrNull { it.isNotEmpty() }.orEmpty()
+            return if (line.length > max) line.take(max - 1) + "…" else line
+        }
+
+        /** The last [maxBytes] of [f] as text, "" when it does not exist. */
+        internal fun tail(f: File, maxBytes: Int): String = try {
+            if (!f.isFile) "" else RandomAccessFile(f, "r").use { r ->
+                val len = r.length()
+                val n = minOf(len, maxBytes.toLong()).toInt()
+                r.seek(len - n)
+                val b = ByteArray(n)
+                r.readFully(b)
+                String(b, Charsets.UTF_8)
+            }
+        } catch (_: Exception) {
+            ""
+        }
 
         fun waitSeconds(arguments: JSONObject): Int =
             arguments.optInt("timeout_seconds", DEFAULT_TIMEOUT_S).let { if (it <= 0) DEFAULT_TIMEOUT_S else it }

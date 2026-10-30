@@ -73,11 +73,11 @@ class TermuxBridge(context: Context) : ShellBackend {
         ContextCompat.checkSelfPermission(appContext, TermuxApi.PERMISSION_RUN_COMMAND) == PackageManager.PERMISSION_GRANTED
 
     /**
-     * Runs `bash -c [command]` in the background in [workdir] (an absolute path Termux can reach). Returns null when
+     * Runs `bash -c [script] [args...]` in the background in [workdir] (an absolute path Termux can reach). Returns null when
      * no result arrived within [timeoutMs]; the command then keeps running inside Termux, which cannot be stopped from here.
      * Throws [ShellBackend.Unavailable] when the intent could not be delivered.
      */
-    override suspend fun run(command: String, workdir: String, timeoutMs: Long): TermuxResult? {
+    override suspend fun run(script: String, workdir: String, timeoutMs: Long, args: List<String>): TermuxResult? {
         val label = "BigMoeOnEdge² agent"
         val id = nextId.incrementAndGet()
         val waiter = CompletableDeferred<Bundle>()
@@ -94,7 +94,7 @@ class TermuxBridge(context: Context) : ShellBackend {
             val intent = Intent(TermuxApi.ACTION_RUN_COMMAND)
                 .setClassName(TermuxApi.PACKAGE, TermuxApi.SERVICE)
                 .putExtra(TermuxApi.EXTRA_COMMAND_PATH, TermuxApi.BASH)
-                .putExtra(TermuxApi.EXTRA_ARGUMENTS, arrayOf("-c", command))
+                .putExtra(TermuxApi.EXTRA_ARGUMENTS, (listOf("-c", script) + args).toTypedArray())
                 .putExtra(TermuxApi.EXTRA_WORKDIR, workdir)
                 .putExtra(TermuxApi.EXTRA_BACKGROUND, true)
                 .putExtra(TermuxApi.EXTRA_COMMAND_LABEL, label)

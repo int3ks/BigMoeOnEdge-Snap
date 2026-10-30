@@ -35,7 +35,13 @@ class GenerationManager(
         val decodeStartAt: Long? = null,
         val decodeStartTokens: Int = 0,
         /** Live decode rate while generating, null until a second token has arrived. */
-        val liveTokensPerSecond: Double? = null
+        val liveTokensPerSecond: Double? = null,
+        /** A tool is running: the chat shows a cancel button and [toolElapsedMs]. */
+        val toolRunning: Boolean = false,
+        val toolStartedAt: Long? = null,
+        val toolElapsedMs: Long = 0L,
+        /** Second status line from the running tool, e.g. the last line a Termux command printed. */
+        val liveDetail: String? = null
     ) {
         /** The new token count, with the live rate measured from the first generated token. */
         fun withTokens(tokens: Int, now: Long = System.currentTimeMillis()): State {
@@ -131,7 +137,21 @@ class GenerationManager(
                                 flushPending()
                                 when (event) {
                                     AgentEvent.GenerationStarted -> update { copy(startedAt = startedAt ?: System.currentTimeMillis()) }
-                                    is AgentEvent.ToolStarted -> update { copy(liveStatus = event.name + "…") }
+                                    is AgentEvent.ToolStarted -> update {
+                                        copy(
+                                            liveStatus = toolManager.describeCall(event.name, event.arguments) + "…",
+                                            liveDetail = null, toolRunning = true,
+                                            toolStartedAt = System.currentTimeMillis(), toolElapsedMs = 0L
+                                        )
+                                    }
+                                    is AgentEvent.ToolProgress -> update {
+                                        val lines = event.text.split('\n', limit = 2)
+                                        copy(liveStatus = lines[0], liveDetail = lines.getOrNull(1))
+                                    }
+                                    AgentEvent.ToolsFinished -> update {
+                                        copy(liveStatus = "Reading the result…", liveDetail = null, toolRunning = false, toolStartedAt = null)
+                                    }
+                                    is AgentEvent.ToolWriting -> update { copy(liveStatus = event.label, liveDetail = null) }
                                     is AgentEvent.Notice -> {
                                         terminalState = when {
                                             event.text == AgentController.NOTE_STOPPED -> "CANCELLED"
@@ -175,7 +195,7 @@ class GenerationManager(
                         )
                     }
                     repository.finishGeneration(session.id, elapsed, final.generatedTokens, final.contextUsed, final.contextTotal, final.notice, terminalState)
-                    _state.value = final.copy(active = false, elapsedMs = elapsed)
+                    _state.value = final.copy(active = false, elapsedMs = elapsed, toolRunning = false, toolStartedAt = null, liveDetail = null)
                     clockJob?.cancel()
                     persistenceJob?.cancel()
                     GenerationForegroundService.stop(context)
@@ -188,7 +208,10 @@ class GenerationManager(
                 delay(250)
                 val s = _state.value
                 val st = s.startedAt
-                if (s.active && st != null) update { copy(elapsedMs = System.currentTimeMillis() - st) }
+                val now = System.currentTimeMillis()
+                if (s.active && st != null) update {
+                    copy(elapsedMs = now - st, toolElapsedMs = toolStartedAt?.let { now - it } ?: 0L)
+                }
             }
         }
         persistenceJob?.cancel()
@@ -208,5 +231,8 @@ class GenerationManager(
 
     fun resolveConfirmation(approved: Boolean) { confirmation?.complete(approved) }
     fun stop() { if (generationJob?.isActive == true) agentController.requestStop(); confirmation?.complete(false) }
+
+    /** The cancel button next to a running tool: ends only that tool; the agent goes on with "cancelled" as result. */
+    fun cancelTool() { if (generationJob?.isActive == true) agentController.cancelRunningTools() }
     private inline fun update(crossinline transform: State.() -> State) { _state.value = transform(_state.value) }
 }

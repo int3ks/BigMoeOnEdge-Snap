@@ -8,6 +8,7 @@ import com.bigmoe.onedge.parser.ArtifactModel
 import com.bigmoe.onedge.parser.ParsedChunk
 import com.bigmoe.onedge.parser.StreamOutputParser
 import com.bigmoe.onedge.parser.ToolCallParseResult
+import com.bigmoe.onedge.parser.ToolCallWatcher
 import com.bigmoe.onedge.parser.ToolProtocol
 import com.bigmoe.onedge.tools.CODE_TOOL_NAMES
 import com.bigmoe.onedge.tools.FILE_TOOL_NAMES
@@ -19,6 +20,8 @@ import com.bigmoe.onedge.tools.WEB_PAGE_TOOL_NAMES
 import com.bigmoe.onedge.tools.WebSearchTool
 import com.bigmoe.onedge.tools.ImageSearchTool
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -61,6 +64,12 @@ sealed interface AgentEvent {
     data class GenerationProgress(val generatedTokens: Int, val contextUsed: Int? = null) : AgentEvent
     data class Artifact(val artifact: ArtifactModel) : AgentEvent
     data class ToolStarted(val name: String, val arguments: String) : AgentEvent
+    /** Live status of the running tool, e.g. elapsed time and the last line a Termux command printed. */
+    data class ToolProgress(val text: String) : AgentEvent
+    /** All tools of this round have finished (or were cancelled); the cancel button can go. */
+    data object ToolsFinished : AgentEvent
+    /** The model is writing a tool call right now (the call itself is hidden from the chat), e.g. "Writing create_file: a.py". */
+    data class ToolWriting(val label: String) : AgentEvent
     /** A visible, non-fatal problem (malformed call, limit reached, engine error). */
     data class Notice(val text: String) : AgentEvent
     /** The live buffers of the message that was just persisted can be cleared. */
@@ -90,7 +99,11 @@ class AgentController(
     fun requestStop() {
         stopRequested = true
         engineController.stopGeneration()
+        toolManager.cancelRunningTools()
     }
+
+    /** The cancel button next to a running tool: ends only the tool(s); the model gets "cancelled" and goes on. */
+    fun cancelRunningTools(): Boolean = toolManager.cancelRunningTools()
 
     fun runAgentLoop(request: AgentRequest, sink: MessageSink): Flow<AgentEvent> = flow {
         stopRequested = false
@@ -157,6 +170,7 @@ class AgentController(
         while (true) {
             val expectedKey = ContextPlanner.stateKey(request.sessionId, lastEngineMsgId, system)
             val parser = StreamOutputParser()
+            val callWatch = ToolCallWatcher()
             val rawAnswer = StringBuilder()
             val reasoning = StringBuilder()
             var finished: EngineEvent.Finished? = null
@@ -198,6 +212,8 @@ class AgentController(
                     is EngineEvent.Answer -> {
                         rawAnswer.append(ev.delta)
                         show(parser.processToken(ev.delta))
+                        // The call itself is hidden from the chat; say what is being written instead of "Reading…".
+                        callWatch.update(rawAnswer)?.let { emit(AgentEvent.ToolWriting(it)) }
                     }
                     is EngineEvent.Reasoning -> {
                         reasoning.append(ev.delta)
@@ -276,22 +292,40 @@ class AgentController(
                     is ToolCallParseResult.Ok -> calls.add(parsed.call.name to parsed.call.arguments)
                 }
             }
-            for ((name, args) in calls) emit(AgentEvent.ToolStarted(name, args))
-
-            val toolCtx = ToolContext(request.sessionId, assistantId)
-            suspend fun runOne(name: String, args: String): String = when {
-                name in enabledNames -> toolManager.executeToolCall(name, args, toolCtx)
-                !toolsEnabled -> "Error: tools are disabled. Answer without them."
-                else -> "Error: tool '$name' is not enabled. Enabled tools: ${enabledNames.sorted().joinToString(", ")}."
+            // Status events from the tools (which call starts, live progress) arrive on this channel and are emitted by
+            // the loop below while the tools run, so the chat shows what is happening instead of a frozen line.
+            val live = Channel<AgentEvent>(Channel.UNLIMITED)
+            val toolCtx = ToolContext(request.sessionId, assistantId) { text -> live.trySend(AgentEvent.ToolProgress(text)) }
+            suspend fun runOne(name: String, args: String): String {
+                live.trySend(AgentEvent.ToolStarted(name, args))
+                return when {
+                    name in enabledNames -> toolManager.executeToolCall(name, args, toolCtx)
+                    !toolsEnabled -> "Error: tools are disabled. Answer without them."
+                    else -> "Error: tool '$name' is not enabled. Enabled tools: ${enabledNames.sorted().joinToString(", ")}."
+                }
             }
             // Calls that only read from the network do not depend on each other: run them side by side, so a round
             // with three page reads costs the slowest one, not the sum. Anything else keeps its order.
-            val outputs: List<String> =
-                if (calls.size > 1 && calls.all { it.first in enabledNames && toolManager.isParallelSafe(it.first) }) {
-                    coroutineScope { calls.map { c -> async { runOne(c.first, c.second) } }.awaitAll() }
-                } else {
-                    calls.map { c -> runOne(c.first, c.second) }
+            val outputs: List<String> = coroutineScope {
+                val work = async {
+                    if (calls.size > 1 && calls.all { it.first in enabledNames && toolManager.isParallelSafe(it.first) }) {
+                        coroutineScope { calls.map { c -> async { runOne(c.first, c.second) } }.awaitAll() }
+                    } else {
+                        calls.map { c -> runOne(c.first, c.second) }
+                    }
                 }
+                while (true) {
+                    val done = select<Boolean> {
+                        live.onReceive { emit(it); false }
+                        work.onAwait { true }
+                    }
+                    if (done) break
+                }
+                while (true) emit(live.tryReceive().getOrNull() ?: break)
+                work.await()
+            }
+            live.close()
+            if (calls.isNotEmpty()) emit(AgentEvent.ToolsFinished)
             for (i in calls.indices) results.add(calls[i].first to outputs[i])
 
             prompt = when {

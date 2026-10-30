@@ -1,10 +1,16 @@
 package com.bigmoe.onedge.tools
 
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONObject
 
 class ToolManager(
@@ -31,6 +37,23 @@ class ToolManager(
      */
     @Volatile
     var autoApprove: Boolean = false
+
+    /** Tool executions in flight (more than one when parallel-safe calls run side by side). */
+    private val running = ConcurrentHashMap.newKeySet<Deferred<String>>()
+    private val cancelledByUser = ConcurrentHashMap.newKeySet<Deferred<String>>()
+
+    /**
+     * The chat's cancel button (and Stop): ends every tool that is running right now. Each one returns
+     * "Cancelled by the user" to the model; the tool cleans up after itself (run_shell stops the Termux command).
+     * Returns false when nothing was running.
+     */
+    fun cancelRunningTools(): Boolean {
+        val now = running.toList()
+        now.forEach { cancelledByUser.add(it); it.cancel() }
+        return now.isNotEmpty()
+    }
+
+    fun hasRunningTool(): Boolean = running.isNotEmpty()
 
     fun registerTool(tool: Tool) {
         registeredTools[tool.name] = tool
@@ -109,12 +132,19 @@ class ToolManager(
     companion object {
         /** Appended when run_shell is enabled: how to work as an agent in Termux. Kept short, it is part of every prompt. */
         const val AGENT_SHELL_HINT =
-            " run_shell runs bash in Termux with the workspace as current folder: files you create with create_file are " +
-                "there, and files a command writes show up in the workspace. Work in steps: one call, read its result, " +
-                "then the next, until the task is done. Before using a program, check it with command -v; install what " +
-                "is missing yourself (pkg install -y <package>, for Python libraries pip install <package>; if pkg fails, " +
-                "run pkg update -y first). Never start interactive programs. For long jobs write the output to a file. " +
-                "Only report success when the exit code and the output show it."
+            "\n\nYou are an agent with a real Linux environment on this device: run_shell runs bash in Termux. Use it on " +
+                "your own, without asking first, whenever a task needs more than text: running Python or other code, " +
+                "creating or converting files (audio, images, documents, archives), installing and using programs, " +
+                "downloading, or checking a result. Do it yourself; never tell the user to run commands and never just " +
+                "show code they would have to run. The workspace is the current folder: files you create with create_file " +
+                "are there, and files a command writes appear in the workspace. Work in steps: one call, read its result, " +
+                "then the next, until the task is really done. Before installing anything, check whether it is already " +
+                "there and install only what is missing, in the same command, e.g. " +
+                "command -v ffmpeg >/dev/null || pkg install -y ffmpeg ; " +
+                "python3 -c 'import gtts' 2>/dev/null || pip install gtts ; " +
+                "if Python itself is missing: pkg install -y python. If pkg fails, run pkg update -y first. Never start " +
+                "interactive programs. For long jobs, write the output to a file. Only report success when the exit code " +
+                "and the output show it, and then tell the user which file(s) you made."
     }
 
     /** Never throws (except coroutine cancellation): failures come back as "Error: ..." text for the model. */
@@ -126,6 +156,7 @@ class ToolManager(
         val tool = registeredTools[toolName] ?: return "Error: Tool '$toolName' not found. " +
             "Available tools: ${registeredTools.keys.joinToString(", ")}."
         var timeoutMs = toolTimeoutMs
+        var startedNs = System.nanoTime()
         return try {
             val args = if (argumentsJson.isBlank()) JSONObject() else JSONObject(argumentsJson)
 
@@ -137,9 +168,26 @@ class ToolManager(
                 if (!handler.confirm(request)) return "The user declined this action. Nothing was changed."
             }
 
-            // 2. run
+            // 2. run, as its own child job so the cancel button can end just this tool and not the whole turn
             timeoutMs = tool.timeoutMs(args) ?: toolTimeoutMs
-            val result = withContext(ioDispatcher) { withTimeout(timeoutMs) { tool.execute(args, ctx) } }
+            startedNs = System.nanoTime()
+            val result = coroutineScope {
+                val job = async(ioDispatcher) { withTimeout(timeoutMs) { tool.execute(args, ctx) } }
+                running.add(job)
+                try {
+                    job.await()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    if (e !is TimeoutCancellationException && cancelledByUser.contains(job) && currentCoroutineContext().isActive) {
+                        val s = (System.nanoTime() - startedNs) / 1_000_000_000L
+                        return@coroutineScope "Cancelled by the user after ${s}s. Do not simply run the same thing " +
+                            "again; if it is still needed, try a different way or ask the user."
+                    }
+                    throw e
+                } finally {
+                    running.remove(job)
+                    cancelledByUser.remove(job)
+                }
+            }
             clip(result, maxResultChars)
         } catch (e: TimeoutCancellationException) {
             "Error: tool '$toolName' timed out after ${timeoutMs / 1000}s."

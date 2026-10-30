@@ -4,8 +4,11 @@ import org.json.JSONObject
 
 enum class ToolCategory { FILES, CODE, WEB, UTILITIES, TERMUX }
 
-/** Which chat message a tool call belongs to (so created files can be linked to it). */
-data class ToolContext(val sessionId: String, val messageId: String) {
+/**
+ * Which chat message a tool call belongs to (so created files can be linked to it). [onProgress] takes a short
+ * live status line while a long-running tool works (e.g. the last line a Termux command printed); thread-safe.
+ */
+data class ToolContext(val sessionId: String, val messageId: String, val onProgress: (String) -> Unit = {}) {
     companion object {
         val NONE = ToolContext("", "")
     }
