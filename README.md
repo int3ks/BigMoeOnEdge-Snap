@@ -169,7 +169,9 @@ NPU build needs the Snapdragon toolchain; see `scripts/build-hexagon-onedge-engi
 ## Using the app
 
 ### Loading models
-Open **Models**, import a `.gguf` (it is copied into app storage) or register a path, then tap **Load**. Attach an MTP
+Easiest: put your `.gguf` files into **Internal storage/Models** (or pick another folder at the top of the Models page).
+Everything in it is listed automatically and used in place, nothing is copied. Otherwise open **Models**, import a
+`.gguf` (it is copied into app storage) or register a path, then tap **Load**. Attach an MTP
 drafter, LoRA adapter or vision projector in the model's row; they load together with the model.
 
 ### Multimodal models

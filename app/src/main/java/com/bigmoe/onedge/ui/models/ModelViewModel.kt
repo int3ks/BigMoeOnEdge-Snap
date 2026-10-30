@@ -51,7 +51,11 @@ data class ModelsUiState(
     val importProgress: ImportProgress? = null,
     val pendingLoad: PendingLoad? = null,
     val message: String? = null,
-    val modelsDir: String = ""
+    val modelsDir: String = "",
+    /** The folder whose GGUFs are listed automatically (null = off), and how many it holds. */
+    val modelFolder: String? = null,
+    val modelFolderFiles: Int = 0,
+    val modelFolderReadable: Boolean = false
 )
 
 class ModelViewModel(
@@ -86,10 +90,14 @@ class ModelViewModel(
             val loraLinks = list.mapNotNull { model -> modelManager.loraForModel(model.path)?.let { model.path to it } }.toMap()
             val mmprojLinks = list.mapNotNull { model -> modelManager.mmprojForModel(model.path)?.let { model.path to it } }.toMap()
             val kvTypes = list.associate { model -> model.path to modelManager.kvCacheTypeForModel(model.path) }
+            val folder = modelManager.modelFolder()
+            val folderReadable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { folder?.let { it.isDirectory && it.canRead() } == true }
+            val folderFiles = if (folderReadable) modelManager.modelFolderFileCount() else 0
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
-                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes
+                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes,
+                    modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable
                 )
             }
         }
@@ -376,8 +384,24 @@ class ModelViewModel(
         viewModelScope.launch { engineController.unload() }
     }
 
+    /** Models page → Model folder: a new folder (null/blank = off). */
+    fun setModelFolder(path: String?) {
+        viewModelScope.launch { modelManager.setModelFolder(path); refresh() }
+    }
+
+    fun resetModelFolder() {
+        viewModelScope.launch { modelManager.resetModelFolder(); refresh() }
+    }
+
     fun delete(path: String) {
         viewModelScope.launch {
+            // A file listed from the model folder is the user's own file: never deleted from here.
+            if (modelManager.isInModelFolderOnly(path)) {
+                _uiState.update {
+                    it.copy(message = "This file is in your model folder (${java.io.File(path).parent}). Delete or move it there to remove it from the list.")
+                }
+                return@launch
+            }
             val loaded = (engineController.state.value as? EngineState.Ready)?.info?.path
             if (loaded == path) engineController.unload()
             val ok = modelManager.delete(path)

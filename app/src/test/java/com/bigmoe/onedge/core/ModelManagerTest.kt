@@ -20,6 +20,41 @@ class ModelManagerTest {
         }
 
     @Test
+    fun modelFolderListsItsGgufsInPlaceByKind() = kotlinx.coroutines.runBlocking {
+        val appDir = File.createTempFile("bmoe-app", "").apply { delete(); mkdirs() }
+        val folder = File.createTempFile("bmoe-folder", "").apply { delete(); mkdirs() }
+        try {
+            fun gguf(rel: String, body: String = "") = File(folder, rel).apply { parentFile!!.mkdirs(); writeBytes("GGUF".toByteArray() + body.toByteArray() + ByteArray(64)) }
+            gguf("Qwen3.6-35B-A3B-Q4_K_P.gguf")
+            gguf("mellum/Mellum-MoE-Q4_K_M.gguf")                        // one level down
+            gguf("a/b/deep-Q8_0.gguf")                                    // two levels down: still found
+            gguf("a/b/c/too-deep.gguf")                                   // three levels down: not scanned
+            gguf("mtp-qwen3.6.gguf")                                      // drafter by name
+            gguf("uncensored.gguf", "general.type adapter.type lora")      // LoRA by header, not by name
+            gguf(".hidden/secret.gguf")
+            gguf("big-00001-of-00002.gguf"); gguf("big-00002-of-00002.gguf")
+            File(folder, "download.gguf.part").writeText("x")
+            val m = ModelManager(appDir, defaultModelFolder = folder)
+
+            val names = m.listModels().map { it.name }.toSet()
+            assertEquals(setOf("Qwen3.6-35B-A3B-Q4_K_P.gguf", "Mellum-MoE-Q4_K_M.gguf", "deep-Q8_0.gguf", "big-00001-of-00002.gguf"), names)
+            assertTrue(m.listModels().none { it.inAppStorage })
+            assertEquals(listOf("mtp-qwen3.6.gguf"), m.listDrafts().map { it.name })
+            assertEquals(listOf("uncensored.gguf"), m.listLoras().map { it.name })
+            assertTrue(m.isInModelFolderOnly(File(folder, "Qwen3.6-35B-A3B-Q4_K_P.gguf").path))
+
+            // Switched off: nothing from the folder; back to the default: listed again.
+            m.setModelFolder(null)
+            assertEquals(null, m.modelFolder())
+            assertTrue(m.listModels().isEmpty())
+            m.resetModelFolder()
+            assertEquals(4, m.listModels().size)
+        } finally {
+            appDir.deleteRecursively(); folder.deleteRecursively()
+        }
+    }
+
+    @Test
     fun sanitizeFileName() {
         assertEquals("model.gguf", ModelManager.sanitizeFileName("../../etc/model.gguf"))
         assertEquals("a_b.gguf", ModelManager.sanitizeFileName("a/b\\a_b.gguf".substringAfterLast('\\')))

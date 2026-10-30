@@ -161,6 +161,21 @@ fun ModelScreen(
         }
     }
 
+    // Model folder: pick a folder in Android's picker; its real path is stored and every GGUF in it is listed.
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val path = runCatching { pathForExternalStorageDocumentId(context, DocumentsContract.getTreeDocumentId(uri)) }.getOrNull()
+            if (path == null) viewModel.showMessage("This location has no direct file path. Pick a folder on Internal storage or an SD card.")
+            else viewModel.setModelFolder(path)
+        }
+    }
+    val folderAccessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        sharedPathAccessGranted = hasSharedPathAccess(context)
+        viewModel.refresh()
+    }
+    // New files in the model folder show up whenever the page is opened.
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refresh() }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -176,6 +191,32 @@ fun ModelScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { StatusCard(engine, settings, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent) }
+
+            item(key = "model_folder") {
+                ModelFolderCard(
+                    folder = ui.modelFolder,
+                    files = ui.modelFolderFiles,
+                    readable = ui.modelFolderReadable,
+                    needsAccess = ui.modelFolder?.let { isSharedAbsolutePath(it) } == true && !sharedPathAccessGranted,
+                    onChoose = { folderPicker.launch(null) },
+                    onOff = { viewModel.setModelFolder(null) },
+                    onDefault = viewModel::resetModelFolder,
+                    onRefresh = viewModel::refresh,
+                    onGrantAccess = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            try {
+                                folderAccessLauncher.launch(
+                                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                )
+                            } catch (_: Exception) {
+                                folderAccessLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                            }
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            legacyStoragePermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                        }
+                    }
+                )
+            }
 
             item { SupportedModelsCard() }
 
@@ -637,10 +678,16 @@ private fun ModelRow(
 private fun resolveSharedStorageDocumentPath(context: android.content.Context, uri: Uri): String? = runCatching {
     if (!DocumentsContract.isDocumentUri(context, uri) ||
         uri.authority != "com.android.externalstorage.documents") return@runCatching null
+    pathForExternalStorageDocumentId(context, DocumentsContract.getDocumentId(uri))
+}.getOrNull()
 
-    val documentId = DocumentsContract.getDocumentId(uri)
+/**
+ * "primary:Models/qwen" (a document or tree id of the external-storage provider) -> /storage/emulated/0/Models/qwen.
+ * An id for the volume root ("primary:") gives the volume itself. null when there is no direct path.
+ */
+private fun pathForExternalStorageDocumentId(context: android.content.Context, documentId: String): String? = runCatching {
     val colon = documentId.indexOf(':')
-    if (colon <= 0 || colon == documentId.lastIndex) return@runCatching null
+    if (colon <= 0) return@runCatching null
 
     val volumeId = documentId.substring(0, colon)
     val relativePath = documentId.substring(colon + 1).replace('\\', '/')
@@ -660,10 +707,49 @@ private fun resolveSharedStorageDocumentPath(context: android.content.Context, u
         } ?: return@runCatching null
     }.canonicalFile
 
-    val selected = File(base, relativePath).canonicalFile
+    val selected = (if (relativePath.isEmpty()) base else File(base, relativePath)).canonicalFile
     if (selected.path != base.path && !selected.path.startsWith(base.path + File.separator)) return@runCatching null
     selected.path
 }.getOrNull()
+
+/** Models page, top: the folder whose GGUFs are listed automatically, in place (no copy, no registering). */
+@Composable
+private fun ModelFolderCard(
+    folder: String?,
+    files: Int,
+    readable: Boolean,
+    needsAccess: Boolean,
+    onChoose: () -> Unit,
+    onOff: () -> Unit,
+    onDefault: () -> Unit,
+    onRefresh: () -> Unit,
+    onGrantAccess: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Model folder", style = MaterialTheme.typography.titleMedium)
+            val status = when {
+                folder == null -> "Off. Pick a folder and every GGUF in it (and two levels of subfolders) shows up below, " +
+                    "used in place: nothing is copied."
+                needsAccess -> "$folder\nNeeds access to all files to read the folder."
+                !readable -> "$folder\nThe folder does not exist or cannot be read. Create it, or pick another one."
+                else -> "$folder\n$files GGUF file${if (files == 1) "" else "s"} found. New files show up when this page is opened. " +
+                    "To remove one from the list, delete or move it in the folder."
+            }
+            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (needsAccess) Button(onClick = onGrantAccess) { Text("Grant access") }
+                OutlinedButton(onClick = onChoose) { Text(if (folder == null) "Choose folder" else "Change") }
+                if (folder != null) {
+                    TextButton(onClick = onRefresh) { Text("Refresh") }
+                    TextButton(onClick = onOff) { Text("Turn off") }
+                } else {
+                    TextButton(onClick = onDefault) { Text("Use Internal storage/Models") }
+                }
+            }
+        }
+    }
+}
 
 private fun hasSharedPathAccess(context: android.content.Context): Boolean = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()

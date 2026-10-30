@@ -74,7 +74,9 @@ data class LoadAdvice(val errors: List<String>, val warnings: List<String>) {
  */
 class ModelManager(
     private val modelsDir: File,
-    private val io: CoroutineDispatcher = Dispatchers.IO
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** The model folder used until the user picks another or switches it off (Internal storage/Models). */
+    private val defaultModelFolder: File? = null
 ) {
     init {
         modelsDir.mkdirs()
@@ -97,6 +99,67 @@ class ModelManager(
         target.deleteRecursively()
     }
 
+    // ---- Model folder: every GGUF in it (and up to FOLDER_SCAN_DEPTH folders below) is listed in place, without
+    // registering or copying it. Delete or move a file there to remove it from the list. ----
+
+    private val modelFolderFile: File get() = File(modelsDir, ".model-folder")
+
+    /** The folder whose GGUFs are listed automatically, or null when switched off. */
+    fun modelFolder(): File? {
+        val f = modelFolderFile
+        if (!f.isFile) return defaultModelFolder
+        val p = runCatching { f.readText().trim() }.getOrDefault("")
+        return if (p.isEmpty()) null else File(p)
+    }
+
+    /** null or blank switches the folder off; the default comes back with [resetModelFolder]. */
+    suspend fun setModelFolder(path: String?) = withContext(io) {
+        modelsDir.mkdirs()
+        modelFolderFile.writeText(path?.trim().orEmpty())
+    }
+
+    suspend fun resetModelFolder() = withContext(io) { modelFolderFile.delete(); Unit }
+
+    /** True when [path] is listed only because it lies in the model folder (not registered, not in app storage). */
+    suspend fun isInModelFolderOnly(path: String): Boolean = withContext(io) {
+        val canonical = canonicalPath(path)
+        canonical !in registeredPaths() && !isInsideModelsDir(File(canonical)) && folderGgufs().any { it.path == canonical }
+    }
+
+    /** GGUFs in the model folder (canonical); hidden files and folders and unfinished downloads are skipped. */
+    private fun folderGgufs(): List<File> {
+        val root = modelFolder()?.takeIf { it.isDirectory && it.canRead() } ?: return emptyList()
+        return try {
+            root.walkTopDown().maxDepth(FOLDER_SCAN_DEPTH)
+                .onEnter { it == root || !it.name.startsWith(".") }
+                .filter { it.isFile && it.name.endsWith(".gguf", true) && !it.name.startsWith(".") }
+                .map { runCatching { it.canonicalFile }.getOrDefault(it) }
+                .toList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Number of GGUF files the model folder holds right now (for the Models page). */
+    suspend fun modelFolderFileCount(): Int = withContext(io) { folderGgufs().size }
+
+    /** LoRA check by GGUF header, remembered per file version so a refresh does not reread every header. */
+    private val loraHeaderCache = ConcurrentHashMap<String, Pair<Long, Boolean>>()
+    private fun isFolderLora(f: File): Boolean {
+        if (isLoraName(f.name)) return true
+        val stamp = f.length() * 1_000_003L + f.lastModified()
+        loraHeaderCache[f.path]?.let { (s, lora) -> if (s == stamp) return lora }
+        val lora = isLoraFile(f)
+        loraHeaderCache[f.path] = stamp to lora
+        return lora
+    }
+
+    /** Registered paths plus the model folder's files (LoRA adapters only when [loras], otherwise without them). */
+    private fun externalPaths(loras: Boolean = false): Set<String> {
+        val folder = folderGgufs().filter { isFolderLora(it) == loras }.map { it.path }
+        return if (loras) folder.toSet() else registeredPaths() + folder
+    }
+
     suspend fun listModels(): List<ModelFile> = withContext(io) {
         cleanupStaleSingleFileImportTemps()
         val displayNames = completedDisplayNames()
@@ -104,7 +167,7 @@ class ModelManager(
             f.isFile && f.name.endsWith(".gguf", ignoreCase = true) && !isLaterShard(f.name) && !isDraftName(f.name) &&
                 !isLoraName(f.name) && hasCompleteShardFiles(f)
         }.orEmpty().map { f -> ModelFile(f.canonicalPath, f.name, logicalModelSize(f), true, displayNames[f.canonicalPath]) }
-        val external = registeredPaths().mapNotNull { path ->
+        val external = externalPaths().mapNotNull { path ->
             val f = File(path)
             if (f.isFile && f.name.endsWith(".gguf", true) && !isLaterShard(f.name) && !isDraftName(f.name) &&
                 !isLoraName(f.name) && hasCompleteShardFiles(f)) {
@@ -118,7 +181,7 @@ class ModelManager(
     suspend fun listDrafts(): List<ModelFile> = withContext(io) {
         val internal = modelsDir.listFiles { f -> f.isFile && f.name.endsWith(".gguf", true) && isDraftName(f.name) }
             .orEmpty().map { ModelFile(it.canonicalPath, it.name, it.length(), true) }
-        val external = registeredPaths().mapNotNull { path ->
+        val external = externalPaths().mapNotNull { path ->
             val f = File(path)
             if (f.isFile && f.name.endsWith(".gguf", true) && isDraftName(f.name))
                 ModelFile(runCatching { f.canonicalPath }.getOrDefault(path), f.name, f.length(), false) else null
@@ -536,9 +599,10 @@ class ModelManager(
 
     /** LoRA adapters imported into app storage (named lora-*.gguf on import, so they never show up as models). */
     suspend fun listLoras(): List<ModelFile> = withContext(io) {
-        modelsDir.listFiles { f -> f.isFile && f.name.endsWith(".gguf", true) && isLoraName(f.name) }
+        val internal = modelsDir.listFiles { f -> f.isFile && f.name.endsWith(".gguf", true) && isLoraName(f.name) }
             .orEmpty().map { ModelFile(it.canonicalPath, it.name, it.length(), true) }
-            .sortedBy { it.name.lowercase() }
+        val folder = externalPaths(loras = true).map { File(it) }.map { ModelFile(it.path, it.name, it.length(), false) }
+        (internal + folder).distinctBy { it.path }.sortedBy { it.name.lowercase() }
     }
 
     /** Attaches [loraPath] to [modelPath] (null detaches). The strength stays as set, default [DEFAULT_LORA_SCALE]. */
@@ -1315,6 +1379,8 @@ class ModelManager(
     }
 
     companion object {
+        /** The model folder itself plus two levels of subfolders (e.g. Models/<publisher>/<model>/x.gguf). */
+        const val FOLDER_SCAN_DEPTH = 3
         private val ACTIVE_IMPORT_PATHS = ConcurrentHashMap.newKeySet<String>()
         private const val SPACE_MARGIN = 256L * 1024 * 1024
         private val GGUF_MAGIC = byteArrayOf('G'.code.toByte(), 'G'.code.toByte(), 'U'.code.toByte(), 'F'.code.toByte())

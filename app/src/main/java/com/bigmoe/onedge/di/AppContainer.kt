@@ -94,7 +94,10 @@ class AppContainer(private val context: Context) {
     }
 
     val modelManager: ModelManager by lazy {
-        ModelManager(File(context.applicationContext.filesDir, "models"))
+        ModelManager(
+            File(context.applicationContext.filesDir, "models"),
+            defaultModelFolder = File(android.os.Environment.getExternalStorageDirectory(), "Models")
+        )
     }
 
     /** Private (`<app files>/workspace`) or shared (`<internal storage>/BigMoe/workspace`), see [workspaceSwitcher]. */
