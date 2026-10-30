@@ -115,7 +115,12 @@ jobs:
           BMOE_KEY_PASSWORD: ${{ secrets.BMOE_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleDebug -PbmoePrebuiltNative=true -PbmoeRequireStableSigning=true -PbmoeBuildNumber="$BMOE_BUILD_NUMBER"
+          set -o pipefail
+          # Compiler errors also become annotations, so they show on the run page without opening the log.
+          ./gradlew --no-daemon :app:assembleDebug -PbmoePrebuiltNative=true -PbmoeRequireStableSigning=true -PbmoeBuildNumber="$BMOE_BUILD_NUMBER" 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+            grep -E '^e: |error:|What went wrong' -A2 "$RUNNER_TEMP/gradle.log" | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
 
       - name: Verify APK contents and signing certificate
         run: |
