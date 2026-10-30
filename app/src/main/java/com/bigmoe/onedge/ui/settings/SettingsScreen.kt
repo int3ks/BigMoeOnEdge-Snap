@@ -719,7 +719,7 @@ private fun SettingsContent(
         androidx.compose.animation.AnimatedVisibility(visible = toolsExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             // ------------------------------------------------------------ tool access
-            Hint("What the AI may use on its own when it needs it. Anything that changes or deletes a file still asks you first. The same switches are in the chat, under the wrench button.")
+            Hint("What the AI may use on its own when it needs it. Anything that changes or deletes a file, and every Termux command, asks you first unless Approval below is set to allow everything. The same switches are in the chat, under the wrench button.")
             SwitchRow(
                 "Files",
                 "Create folders and files, read, search, edit, rename, delete, zip. Everything stays in this chat's files.",
@@ -757,6 +757,8 @@ private fun SettingsContent(
                 settings.thinkAfterTools
             ) { viewModel.updateThinkAfterTools(it) }
             Hint("Web search, image search, and web-page reading are controlled by the globe button in the chat. These tools are off by default.")
+            Spacer(Modifier.height(12.dp))
+            AgentAndTermuxSection(settings = settings, viewModel = viewModel)
             Divider()
 
             }

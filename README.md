@@ -164,6 +164,23 @@ Web search and tools run inside the normal chat workflow.
 
 * Large local models make these operations considerably slower.
 
+### Agent mode with Termux
+
+The AI can chain tool rounds on its own (Settings → Tools → Agent: up to 6–50 steps per answer, default 20) and, with
+the **Termux** switch, run bash commands in the separately installed [Termux](https://github.com/termux/termux-app)
+app through the `run_shell` tool: Python scripts, `pkg`/`pip` installs it does itself, ffmpeg and so on. The commands
+run in the workspace, so files the AI writes and files the commands produce are the same files.
+
+One-time setup (Settings → Tools → Termux shows the status and copies these lines):
+
+1. Install Termux from F-Droid or GitHub (not Google Play), open it once and run `termux-setup-storage`.
+2. In Termux: `mkdir -p ~/.termux && echo 'allow-external-apps = true' >> ~/.termux/termux.properties && termux-reload-settings`.
+3. In BigMoeOnEdge²: turn on Settings → Diagnostics & workspace → *Shared workspace folder*, then grant *Run commands in Termux environment* in Settings → Tools → Termux, and tap *Test Termux*.
+
+Every Termux command asks for approval unless Settings → Tools → Agent → Approval is set to *Allow everything*. A
+command runs with all of Termux's rights; text the AI reads (web pages, files) can contain instructions it follows.
+When the context is almost full the agent stops before the next step and says so.
+
 ### Artifacts and workspace
 
 Generated files and code are handled as artifacts instead of plain chat text:

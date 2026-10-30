@@ -509,6 +509,11 @@ class ChatViewModel(
         viewModelScope.launch { settingsDataStore.updateToolsUtilitiesEnabled(v) }
     }
 
+    fun toggleToolTermux() {
+        val v = !_uiState.value.settings.toolsTermuxEnabled
+        viewModelScope.launch { settingsDataStore.updateToolsTermuxEnabled(v) }
+    }
+
     /** Files already made from a given text in this run (key = chat + text), so a second tap reuses the same file. */
     private val savedArtifactPaths = HashMap<String, String>()
 

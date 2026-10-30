@@ -1,5 +1,6 @@
 package com.bigmoe.onedge.core
 
+import com.bigmoe.onedge.data.local.datastore.AgentApproval
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import com.bigmoe.onedge.data.local.datastore.WebSearchMode
 import com.bigmoe.onedge.data.local.entity.MessageRole
@@ -10,6 +11,7 @@ import com.bigmoe.onedge.parser.ToolCallParseResult
 import com.bigmoe.onedge.parser.ToolProtocol
 import com.bigmoe.onedge.tools.CODE_TOOL_NAMES
 import com.bigmoe.onedge.tools.FILE_TOOL_NAMES
+import com.bigmoe.onedge.tools.TERMUX_TOOL_NAMES
 import com.bigmoe.onedge.tools.ToolContext
 import com.bigmoe.onedge.tools.ToolManager
 import com.bigmoe.onedge.tools.UTILITY_TOOL_NAMES
@@ -67,7 +69,7 @@ sealed interface AgentEvent {
 }
 
 /**
- * One user turn = 1..(1+MAX_TOOL_ROUNDS) engine generations. Talks to the engine ONLY through
+ * One user turn = 1..(1+EngineSettings.agentMaxSteps) engine generations. Talks to the engine ONLY through
  * [EngineController.generate]; never builds a prompt string. See docs/prompt-and-kv-design.md and
  * docs/tool-calling.md.
  */
@@ -111,6 +113,8 @@ class AgentController(
             it.searxngInstanceUrl = settings.searxngUrl
         }
         toolManager.maxResultChars = settings.toolResultChars
+        toolManager.autoApprove = settings.agentApproval == AgentApproval.ALLOW_ALL
+        val maxToolRounds = settings.agentMaxSteps.coerceAtLeast(1)
         val system = buildSystemPrompt(
             settings, toolsEnabled, toolManager.getToolsDescriptionPrompt(enabledNames), alwaysSearch
         )
@@ -245,8 +249,9 @@ class AgentController(
                 return@flow
             }
 
-            if (toolRounds >= MAX_TOOL_ROUNDS) {
-                val text = "Tool call limit reached ($MAX_TOOL_ROUNDS rounds). No further tools were run."
+            if (toolRounds >= maxToolRounds) {
+                val text = "Tool call limit reached ($maxToolRounds rounds, Settings → Tools → Agent steps). " +
+                    "No further tools were run; say \"continue\" to let the agent go on."
                 emit(AgentEvent.Notice(text))
                 val id = sink.save(NewMessage(MessageRole.TOOL, text))
                 emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
@@ -297,6 +302,13 @@ class AgentController(
             emit(AgentEvent.MessageSaved(toolId, MessageRole.TOOL))
             if (stopRequested) {
                 emit(AgentEvent.Notice(NOTE_STOPPED))
+                emit(AgentEvent.Done)
+                return@flow
+            }
+            // A long agent chain fills the context. Stop with a clear message before the engine would fail on the
+            // next round (the tool result is saved, so "continue" in a new chat or after raising Context size works).
+            contextFullNotice(fin.stats.nPast, prompt, engineController.loadedModel()?.nCtx ?: 0)?.let { text ->
+                emit(AgentEvent.Notice(text))
                 emit(AgentEvent.Done)
                 return@flow
             }
@@ -359,9 +371,23 @@ ${request.prompt}""".trim()
     }
 
     companion object {
-        const val MAX_TOOL_ROUNDS = 6
         const val MAX_CALLS_PER_ROUND = 4
         const val NOTE_STOPPED = "Stopped"
+
+        /**
+         * Non-null when the next round would not fit: [nPast] tokens already in the context, plus the tool result
+         * (estimated at 3 characters per token, on the safe side) and room for an answer, against [nCtx].
+         */
+        fun contextFullNotice(nPast: Int, nextPrompt: String, nCtx: Int): String? {
+            if (nPast <= 0 || nCtx <= 0) return null
+            val needed = nPast + nextPrompt.length / 3 + CONTEXT_ANSWER_RESERVE
+            if (needed < nCtx) return null
+            return "The context is almost full ($nPast of $nCtx tokens used), so the agent stopped before the next step. " +
+                "Raise Context size in Settings and reload the model, or start a new chat with a short summary of the task."
+        }
+
+        /** Tokens kept free for the model's next answer when checking [contextFullNotice]. */
+        const val CONTEXT_ANSWER_RESERVE = 512
 
         fun buildSystemPrompt(
             settings: EngineSettings,
@@ -401,6 +427,7 @@ ${request.prompt}""".trim()
             if (settings.toolsFilesEnabled) names.addAll(FILE_TOOL_NAMES)
             if (settings.toolsCodeEnabled) names.addAll(CODE_TOOL_NAMES)
             if (settings.toolsUtilitiesEnabled) names.addAll(UTILITY_TOOL_NAMES)
+            if (settings.toolsTermuxEnabled) names.addAll(TERMUX_TOOL_NAMES)
             if (settings.isWebSearchEnabled) {
                 names.addAll(WEB_PAGE_TOOL_NAMES)
                 // Image search shares the explicit Web Search switch and stays unavailable by default.

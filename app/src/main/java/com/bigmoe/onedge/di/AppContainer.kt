@@ -129,7 +129,17 @@ class AppContainer(private val context: Context) {
             registerFileTools(this, workspace, artifactRepository)
             registerCodeTools(this, workspace, javaScriptRunner)
             registerUtilityTools(this, AndroidDeviceInfo(context.applicationContext))
+            registerTool(
+                com.bigmoe.onedge.tools.RunShellTool(termuxBridge, workspace) {
+                    workspace.rootDir.takeIf { workspaceLocation.isShared(it) }
+                }
+            )
         }
+    }
+
+    /** run_shell's way into the separately installed Termux app (RUN_COMMAND intent). */
+    val termuxBridge: com.bigmoe.onedge.termux.TermuxBridge by lazy {
+        com.bigmoe.onedge.termux.TermuxBridge(context.applicationContext)
     }
 
     val agentController: AgentController by lazy {

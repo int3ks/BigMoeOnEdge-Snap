@@ -25,6 +25,9 @@ const val DEFAULT_SYSTEM_PROMPT = ""
 /** When web search is switched on: the model decides (tool call) or the app searches for every message. */
 enum class WebSearchMode { AUTO, ALWAYS }
 
+/** Tool calls that need approval (edits, deletes, Termux commands): ask every time, or run them without asking. */
+enum class AgentApproval { ASK, ALLOW_ALL }
+
 /** Cache budget sentinel values (same convention as the original app's CACHE_AUTO / 0 / N MiB). */
 const val CACHE_AUTO_MB = -1
 const val CACHE_OFF_MB = 0
@@ -113,6 +116,11 @@ data class EngineSettings(
     val toolResultChars: Int = DEFAULT_TOOL_RESULT_CHARS,
     /** Reason again after a tool result. Off by default: reasoning tokens are generated at the model's (slow) decode speed. */
     val thinkAfterTools: Boolean = false,
+    /** run_shell: commands in Termux (installed separately), working in the shared workspace folder. */
+    val toolsTermuxEnabled: Boolean = false,
+    /** Most tool rounds in one answer before the agent has to stop and report. */
+    val agentMaxSteps: Int = DEFAULT_AGENT_MAX_STEPS,
+    val agentApproval: AgentApproval = AgentApproval.ASK,
     /** Longest side of pictures sent to the model, in pixels (more = sharper, but many more tokens). */
     val imageMaxDim: Int = 512,
     /** Frames sampled evenly from an attached video. */
@@ -202,6 +210,10 @@ data class EngineSettings(
 }
 
 const val DEFAULT_TOOL_RESULT_CHARS = 3500
+
+/** Tool rounds per answer. The old fixed limit was 6; an agent that installs a package, writes and runs a script needs more. */
+const val DEFAULT_AGENT_MAX_STEPS = 20
+const val MAX_AGENT_MAX_STEPS = 100
 const val DEFAULT_SERVER_PORT = 8080
 const val DEFAULT_SERVER_QUEUE_SEC = 60
 
@@ -269,6 +281,9 @@ class EngineSettingsDataStore(private val context: Context) {
         val TOOLS_UTILITIES = booleanPreferencesKey("tools_utilities")
         val TOOL_RESULT_CHARS = intPreferencesKey("tool_result_chars")
         val THINK_AFTER_TOOLS = booleanPreferencesKey("think_after_tools")
+        val TOOLS_TERMUX = booleanPreferencesKey("tools_termux")
+        val AGENT_MAX_STEPS = intPreferencesKey("agent_max_steps")
+        val AGENT_APPROVAL = stringPreferencesKey("agent_approval")
         val IMAGE_MAX_DIM = intPreferencesKey("image_max_dim")
         val VIDEO_FRAMES = intPreferencesKey("video_frames")
         val LAST_MMPROJ = stringPreferencesKey("last_mmproj_path")
@@ -346,6 +361,9 @@ class EngineSettingsDataStore(private val context: Context) {
             toolsUtilitiesEnabled = p[Keys.TOOLS_UTILITIES] ?: d.toolsUtilitiesEnabled,
             toolResultChars = p[Keys.TOOL_RESULT_CHARS] ?: d.toolResultChars,
             thinkAfterTools = p[Keys.THINK_AFTER_TOOLS] ?: d.thinkAfterTools,
+            toolsTermuxEnabled = p[Keys.TOOLS_TERMUX] ?: d.toolsTermuxEnabled,
+            agentMaxSteps = (p[Keys.AGENT_MAX_STEPS] ?: d.agentMaxSteps).coerceIn(1, MAX_AGENT_MAX_STEPS),
+            agentApproval = enumOrDefault(p[Keys.AGENT_APPROVAL], d.agentApproval),
             imageMaxDim = p[Keys.IMAGE_MAX_DIM] ?: d.imageMaxDim,
             videoFrames = p[Keys.VIDEO_FRAMES] ?: d.videoFrames,
             lastMmprojPath = p[Keys.LAST_MMPROJ] ?: d.lastMmprojPath,
@@ -454,6 +472,9 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateToolsUtilitiesEnabled(v: Boolean) = set(Keys.TOOLS_UTILITIES, v)
     suspend fun updateToolResultChars(v: Int) = set(Keys.TOOL_RESULT_CHARS, v.coerceIn(500, 20_000))
     suspend fun updateThinkAfterTools(v: Boolean) = set(Keys.THINK_AFTER_TOOLS, v)
+    suspend fun updateToolsTermuxEnabled(v: Boolean) = set(Keys.TOOLS_TERMUX, v)
+    suspend fun updateAgentMaxSteps(v: Int) = set(Keys.AGENT_MAX_STEPS, v.coerceIn(1, MAX_AGENT_MAX_STEPS))
+    suspend fun updateAgentApproval(v: AgentApproval) = set(Keys.AGENT_APPROVAL, v.name)
     suspend fun updateImageMaxDim(v: Int) = set(Keys.IMAGE_MAX_DIM, v.coerceIn(224, 1344))
     suspend fun updateVideoFrames(v: Int) = set(Keys.VIDEO_FRAMES, v.coerceIn(1, 16))
     suspend fun updateLastMmprojPath(v: String) = set(Keys.LAST_MMPROJ, v)

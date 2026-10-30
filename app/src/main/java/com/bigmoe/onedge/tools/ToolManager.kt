@@ -25,6 +25,13 @@ class ToolManager(
     @Volatile
     var confirmationHandler: ConfirmationHandler? = null
 
+    /**
+     * Settings → Agent → Approval "Allow everything": calls that would ask (edits, deletes, Termux commands) run
+     * without the dialog. Set per run from the settings; off by default.
+     */
+    @Volatile
+    var autoApprove: Boolean = false
+
     fun registerTool(tool: Tool) {
         registeredTools[tool.name] = tool
     }
@@ -93,7 +100,21 @@ class ToolManager(
                     "get_datetime whenever the answer depends on today's date or the time, and convert_units for unit conversions."
             )
         }
+        if (selected.any { it.name == "run_shell" }) {
+            b.append(AGENT_SHELL_HINT)
+        }
         return b.toString()
+    }
+
+    companion object {
+        /** Appended when run_shell is enabled: how to work as an agent in Termux. Kept short, it is part of every prompt. */
+        const val AGENT_SHELL_HINT =
+            " run_shell runs bash in Termux with the workspace as current folder: files you create with create_file are " +
+                "there, and files a command writes show up in the workspace. Work in steps: one call, read its result, " +
+                "then the next, until the task is done. Before using a program, check it with command -v; install what " +
+                "is missing yourself (pkg install -y <package>, for Python libraries pip install <package>; if pkg fails, " +
+                "run pkg update -y first). Never start interactive programs. For long jobs write the output to a file. " +
+                "Only report success when the exit code and the output show it."
     }
 
     /** Never throws (except coroutine cancellation): failures come back as "Error: ..." text for the model. */
@@ -104,11 +125,12 @@ class ToolManager(
     ): String {
         val tool = registeredTools[toolName] ?: return "Error: Tool '$toolName' not found. " +
             "Available tools: ${registeredTools.keys.joinToString(", ")}."
+        var timeoutMs = toolTimeoutMs
         return try {
             val args = if (argumentsJson.isBlank()) JSONObject() else JSONObject(argumentsJson)
 
             // 1. approval (outside the timeout: the user may take as long as they like)
-            val request = withContext(ioDispatcher) { tool.confirmation(args) }
+            val request = if (autoApprove) null else withContext(ioDispatcher) { tool.confirmation(args) }
             if (request != null) {
                 val handler = confirmationHandler
                     ?: return "Error: this action needs the user's approval, but no approval screen is available."
@@ -116,10 +138,11 @@ class ToolManager(
             }
 
             // 2. run
-            val result = withContext(ioDispatcher) { withTimeout(toolTimeoutMs) { tool.execute(args, ctx) } }
+            timeoutMs = tool.timeoutMs(args) ?: toolTimeoutMs
+            val result = withContext(ioDispatcher) { withTimeout(timeoutMs) { tool.execute(args, ctx) } }
             clip(result, maxResultChars)
         } catch (e: TimeoutCancellationException) {
-            "Error: tool '$toolName' timed out after ${toolTimeoutMs / 1000}s."
+            "Error: tool '$toolName' timed out after ${timeoutMs / 1000}s."
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: ToolInputException) {

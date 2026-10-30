@@ -226,10 +226,11 @@ class AgentControllerTest {
     @Test
     fun toolLoopStopsAfterMaxRounds() = runTest {
         val e = env(this)
-        repeat(AgentController.MAX_TOOL_ROUNDS + 1) { e.fake.script.add(ScriptedTurn(tokens = listOf(call))) }
-        val events = e.agent.runAgentLoop(req(), e.sink).toList()
-        assertEquals(AgentController.MAX_TOOL_ROUNDS, e.tool.calls.size)
-        assertEquals(AgentController.MAX_TOOL_ROUNDS + 1, e.fake.calls.size)
+        val maxSteps = 3
+        repeat(maxSteps + 1) { e.fake.script.add(ScriptedTurn(tokens = listOf(call))) }
+        val events = e.agent.runAgentLoop(req(s = withSearch.copy(agentMaxSteps = maxSteps)), e.sink).toList()
+        assertEquals(maxSteps, e.tool.calls.size)
+        assertEquals(maxSteps + 1, e.fake.calls.size)
         assertTrue(events.filterIsInstance<AgentEvent.Notice>().any { it.text.contains("limit") })
         assertTrue(events.last() is AgentEvent.Done)
     }
@@ -344,5 +345,21 @@ class AgentControllerTest {
     fun searchQueryIsOneLineAndCapped() {
         assertEquals("a b c", AgentController.searchQueryFrom("a\n  b \n\nc"))
         assertEquals(200, AgentController.searchQueryFrom("x".repeat(500)).length)
+    }
+
+    @Test
+    fun contextFullNoticeOnlyWhenTheNextRoundWouldNotFit() {
+        assertEquals(null, AgentController.contextFullNotice(0, "x".repeat(9000), 4096)) // unknown context use
+        assertEquals(null, AgentController.contextFullNotice(1000, "x".repeat(3000), 4096))
+        val full = AgentController.contextFullNotice(3000, "x".repeat(3000), 4096)
+        assertTrue(full!!.contains("3000 of 4096"))
+    }
+
+    @Test
+    fun termuxSwitchEnablesRunShell() {
+        val base = EngineSettings(toolsFilesEnabled = false, toolsCodeEnabled = false, toolsUtilitiesEnabled = false, isWebSearchEnabled = false)
+        val registered = setOf("run_shell", "read_file")
+        assertTrue(AgentController.enabledToolNames(base, registered).isEmpty())
+        assertEquals(setOf("run_shell"), AgentController.enabledToolNames(base.copy(toolsTermuxEnabled = true), registered))
     }
 }

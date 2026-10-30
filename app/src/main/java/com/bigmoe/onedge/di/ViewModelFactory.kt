@@ -34,7 +34,20 @@ class AppViewModelFactory(
                 engineController = container.engineController,
                 modelManager = container.modelManager,
                 apiServer = container.apiServerController,
-                workspaceSwitcher = container.workspaceSwitcher
+                workspaceSwitcher = container.workspaceSwitcher,
+                termuxStatus = { container.termuxBridge.isInstalled() to container.termuxBridge.hasPermission() },
+                termuxTest = {
+                    val tool = container.toolManager.getTool("run_shell")
+                    if (tool == null) "run_shell is not registered." else try {
+                        tool.execute(
+                            org.json.JSONObject()
+                                .put("command", "echo \"Termux answers from: \$(pwd)\"; uname -m; command -v python >/dev/null && python --version || echo 'Python is not installed yet (the agent can run: pkg install -y python)'")
+                                .put("timeout_seconds", 30)
+                        )
+                    } catch (e: com.bigmoe.onedge.tools.ToolInputException) {
+                        "Error: ${e.message}"
+                    }
+                }
             ) as T
             modelClass.isAssignableFrom(AutoTuneViewModel::class.java) -> AutoTuneViewModel(
                 dataStore = container.settingsDataStore,

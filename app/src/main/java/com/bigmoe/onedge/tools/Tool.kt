@@ -2,7 +2,7 @@ package com.bigmoe.onedge.tools
 
 import org.json.JSONObject
 
-enum class ToolCategory { FILES, CODE, WEB, UTILITIES }
+enum class ToolCategory { FILES, CODE, WEB, UTILITIES, TERMUX }
 
 /** Which chat message a tool call belongs to (so created files can be linked to it). */
 data class ToolContext(val sessionId: String, val messageId: String) {
@@ -46,6 +46,12 @@ interface Tool {
 
     /** Short text for the UI while the tool runs, e.g. "Reading notes.md". */
     fun describe(arguments: JSONObject): String = name
+
+    /**
+     * How long [execute] may take for these [arguments], or null for the ToolManager's default (20 s). Tools that
+     * legitimately run for minutes (a package install in Termux) say so here.
+     */
+    fun timeoutMs(arguments: JSONObject): Long? = null
 
     /** Non-null = the user must approve first. May read files (called off the main thread). */
     fun confirmation(arguments: JSONObject): ConfirmationRequest? = null

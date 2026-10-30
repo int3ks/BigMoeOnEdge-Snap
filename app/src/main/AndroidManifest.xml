@@ -17,6 +17,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- In-app update (Settings → App update): hands a downloaded release APK to the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- run_shell (Settings → Tools → Termux): hands commands to the separately installed Termux app through its
+         RUN_COMMAND intent. A runtime permission that Termux defines; the user grants it in the Termux section. -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Android 11+ package visibility: lets the app see whether Termux is installed. -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
 
 
     <!-- appCategory is a performance hint, not a claim about what the app is. The reference app
@@ -83,6 +91,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Receives Termux's result for a run_shell command (through the PendingIntent this app hands over). -->
+        <receiver
+            android:name=".termux.TermuxResultReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

@@ -35,6 +35,12 @@ class WorkspaceLocation(context: Context) {
 
     fun accessGranted(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
 
+    /** True when [root] (a workspace root) is the shared folder, i.e. other apps such as Termux can reach it. */
+    fun isShared(root: File): Boolean {
+        val shared = try { sharedRoot.canonicalFile } catch (_: java.io.IOException) { sharedRoot.absoluteFile }
+        return root.path == shared.path
+    }
+
     var sharedWanted: Boolean
         get() = prefs.getBoolean(KEY_SHARED, false)
         set(value) { prefs.edit().putBoolean(KEY_SHARED, value).commit() }

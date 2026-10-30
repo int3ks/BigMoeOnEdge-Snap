@@ -25,7 +25,11 @@ class SettingsViewModel(
     private val engineController: EngineController,
     private val modelManager: ModelManager,
     private val apiServer: com.bigmoe.onedge.server.ApiServerController,
-    private val workspaceSwitcher: com.bigmoe.onedge.core.WorkspaceSwitcher
+    private val workspaceSwitcher: com.bigmoe.onedge.core.WorkspaceSwitcher,
+    /** (Termux installed, RUN_COMMAND permission granted); cheap, read when the Termux section is shown. */
+    private val termuxStatus: () -> Pair<Boolean, Boolean> = { false to false },
+    /** Runs a harmless command through run_shell and returns what the model would see. */
+    private val termuxTest: suspend () -> String = { "Termux is not available in this build." }
 ) : ViewModel() {
 
     /** null until the first DataStore read finished, so the screen never seeds text fields with defaults. */
@@ -53,6 +57,9 @@ class SettingsViewModel(
     fun updateToolsUtilitiesEnabled(v: Boolean) = launch { dataStore.updateToolsUtilitiesEnabled(v) }
     fun updateToolResultChars(v: Int) = launch { dataStore.updateToolResultChars(v) }
     fun updateThinkAfterTools(v: Boolean) = launch { dataStore.updateThinkAfterTools(v) }
+    fun updateToolsTermuxEnabled(v: Boolean) = launch { dataStore.updateToolsTermuxEnabled(v) }
+    fun updateAgentMaxSteps(v: Int) = launch { dataStore.updateAgentMaxSteps(v) }
+    fun updateAgentApproval(v: com.bigmoe.onedge.data.local.datastore.AgentApproval) = launch { dataStore.updateAgentApproval(v) }
     fun updateImageMaxDim(v: Int) = launch { dataStore.updateImageMaxDim(v) }
     fun updateVideoFrames(v: Int) = launch { dataStore.updateVideoFrames(v) }
 
@@ -120,6 +127,15 @@ class SettingsViewModel(
     fun refreshWorkspace() = workspaceSwitcher.refresh()
     fun setSharedWorkspace(v: Boolean) = workspaceSwitcher.requestShared(v)
     fun showWorkspaceMessage(text: String) = workspaceSwitcher.showMessage(text)
+
+    // ---- Termux ----
+    fun termuxInstalledAndPermitted(): Pair<Boolean, Boolean> = termuxStatus()
+    private val _termuxTestResult = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val termuxTestResult: StateFlow<String?> = _termuxTestResult
+    fun testTermux() = launch {
+        _termuxTestResult.value = "Running…"
+        _termuxTestResult.value = try { termuxTest() } catch (e: Exception) { "Error: ${e.message ?: e.javaClass.simpleName}" }
+    }
 
     // ---- appearance ----
     fun selectTheme(id: String) = launch { dataStore.updateThemeId(id) }
