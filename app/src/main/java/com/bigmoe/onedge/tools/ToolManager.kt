@@ -192,10 +192,11 @@ class ToolManager(
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     if (e !is TimeoutCancellationException && cancelledByUser.contains(job) && currentCoroutineContext().isActive) {
                         val s = (System.nanoTime() - startedNs) / 1_000_000_000L
-                        return@coroutineScope "Error: $CANCELLED_BY_USER after ${s}s. It was stopped before it finished, so " +
-                            "it did NOT complete: whatever it was installing or writing is missing or incomplete. Do not " +
-                            "report success. Decide how to go on: look at the output below for why it took so long, try a " +
-                            "different way, or ask the user; do not simply run the same thing again." +
+                        return@coroutineScope "Error: $CANCELLED_BY_USER after ${s}s because it seemed stuck. This is NOT a " +
+                            "refusal: the user still wants the task done. The command did NOT complete, so whatever it was " +
+                            "installing or writing is missing or incomplete; do not report success. Find out from the output " +
+                            "below where it hung (a prompt waiting for input, a slow download or compile, a server that never " +
+                            "exits) and fix that cause, then go on with the same task. Ask the user only if the cause is unclear." +
                             (tool.takeCancelDetails()?.let { "\n$it" } ?: "")
                     }
                     throw e
