@@ -20,7 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.EngineState
 import com.bigmoe.onedge.core.ModelManager
@@ -51,7 +51,8 @@ fun ModelPickerButton(
         DropdownMenu(
             expanded = open,
             onDismissRequest = { open = false },
-            modifier = Modifier.widthIn(min = 280.dp, max = 360.dp)
+            // As wide as the screen allows, so a long file name (and the quantisation at its end) is always readable.
+            modifier = Modifier.widthIn(min = 280.dp, max = (LocalConfiguration.current.screenWidthDp - 24).coerceAtLeast(280).dp)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text("Models", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -73,7 +74,11 @@ fun ModelPickerButton(
                 DropdownMenuItem(
                     text = {
                         Column {
-                            Text(model.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                            // Full name, wrapped instead of cut: two quantisations of one model differ only at the end.
+                            Text(model.displayName, style = MaterialTheme.typography.bodyMedium)
+                            if (model.displayName != model.name) {
+                                Text(model.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             Text(
                                 ModelManager.formatBytes(model.sizeBytes) + if (isLoaded) " \u2022 Loaded" else "",
                                 style = MaterialTheme.typography.labelSmall,

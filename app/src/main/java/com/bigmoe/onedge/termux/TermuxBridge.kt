@@ -73,7 +73,7 @@ class TermuxBridge(context: Context) : ShellBackend {
         ContextCompat.checkSelfPermission(appContext, TermuxApi.PERMISSION_RUN_COMMAND) == PackageManager.PERMISSION_GRANTED
 
     /**
-     * Runs `bash -c [script] [args...]` in the background in [workdir] (an absolute path Termux can reach). Returns null when
+     * Runs `bash -c script args...` in the background in [workdir] (an absolute path Termux can reach). Returns null when
      * no result arrived within [timeoutMs]; the command then keeps running inside Termux, which cannot be stopped from here.
      * Throws [ShellBackend.Unavailable] when the intent could not be delivered.
      */

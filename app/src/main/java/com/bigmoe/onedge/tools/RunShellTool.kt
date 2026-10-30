@@ -33,7 +33,7 @@ interface ShellBackend {
     fun hasPermission(): Boolean
 
     /**
-     * Runs `bash -c [script] [args...]` (so args[0] is $0, args[1] is $1, ...). null = no result within [timeoutMs]
+     * Runs `bash -c script args...` (so the first arg is $0, the second $1, and so on). null = no result within [timeoutMs]
      * (the command may still be running).
      */
     suspend fun run(script: String, workdir: String, timeoutMs: Long, args: List<String> = emptyList()): TermuxResult?
