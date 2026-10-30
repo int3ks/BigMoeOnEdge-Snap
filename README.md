@@ -39,6 +39,22 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 
 ## What's new compared to BigMoeOnEdge+ 0.6.0
 
+### Agent with Termux (new)
+* **The model runs real commands:** with the separately installed [Termux](https://github.com/termux/termux-app) app,
+  the new `run_shell` tool executes bash in the workspace – Python scripts, `pkg`/`pip` installs, ffmpeg, Pillow and so
+  on. The agent decides on its own when to use it, checks whether a program or module is already there before
+  installing it, and keeps going step by step (up to 20 tool rounds per answer by default) until the result is
+  verified. Example: "make an audiobook from story.txt" → it installs a TTS package, writes and runs the script and
+  names the MP3 files. Details below in [Agent mode with Termux](#agent-mode-with-termux) and in the
+  [full guide](docs/wiki/Agent-mode-with-Termux.md).
+* **Live status and cancel:** the chat shows what the agent is doing (writing a call, running `pip install …`, the
+  latest output line, elapsed time) and a **Cancel** button that stops a hanging command with all its child processes.
+* **Grammar-checked tool calls:** once the model starts a tool call, the engine only lets it write a valid call to an
+  enabled tool, so small or low-bit models no longer break on malformed JSON.
+* **Shared workspace folder:** the workspace can live in `Internal storage/BigMoe/workspace` (with `.nomedia`), where
+  Termux and other apps can read and write it; the files are moved along in both directions.
+* **Approval setting:** ask before every command and change (default) or allow everything for watched tasks.
+
 ### Engine and models
 * **Newer llama.cpp:** the vendored tree moved from 965f897 (2026-09-26) to Helldez/llama.cpp
   `bmoe/expert-ready-hook-2810` (upstream of 2026-10-28), the revision BigMoeOnEdge uses. It brings faster Hexagon
@@ -54,6 +70,9 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 * **CPU core table:** pick the cores for decode (writing the answer) and for prefill (reading the prompt) separately,
   one thread per ticked core. Default: the first two and the last two cores. Implemented with a small llama.cpp hook
   that places each graph's threads before it runs.
+* **KV cache type per model:** F16 (default), Q8_0 (about half the memory, nearly lossless) or Q4_0 (a quarter, costs
+  quality) – the easiest way to afford a bigger context for agent work. A type the device cannot use falls back to F16
+  with a note.
 
 ### Models page
 * **Everything attached to the model:** the MTP drafter, the LoRA adapter and the vision projector (mmproj) are
@@ -63,12 +82,16 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
   floor and the n-gram match lengths. With MTP, a model uses its attached drafter, otherwise its own head.
 * **Clear order:** autoload switch, Guess ahead card, then the MTP drafters, LoRA adapters and vision projectors in
   their own lists, then the models.
+* **Collapsible model cards:** only the loaded model is open; the others fold into one line with a summary
+  (`MTP • Vision • LoRA • KV Q8_0`), so a long list stays short.
 
 ### Chat
 * **Live statistics:** tokens/second and context use count up while the answer is written.
 * **Context menus where you click:** right-click (or long-press) opens the menu at the pointer, with a new
   **Regenerate** entry that answers a turn again without editing it.
 * **One model under the chat title:** the loaded model, else the last one this chat used.
+* **Wider model menu:** the model picker in the chat uses almost the full screen width and shows the complete file
+  name, wrapped if needed.
 * **Settings button** in the chat's top bar, and the Chats tab returns to the chat you came from.
 
 ### App
@@ -94,12 +117,13 @@ NPU prefill switch then simply stays unavailable.
 | Local inference | GGUF models through the native BigMoeOnEdge streaming engine |
 | Model support | Mixture-of-Experts and dense models; multi-shard GGUF import with validation |
 | Speed-ups | Snapdragon NPU prefill, MTP and n-gram guess ahead, expert cache, I/O-compute overlap, CPU core pinning |
-| Add-ons per model | MTP drafter, LoRA adapter, vision projector (mmproj) |
+| Add-ons per model | MTP drafter, LoRA adapter, vision projector (mmproj), KV cache type |
 | Conversations | Persistent chats with drafts, live token streaming, stop, regenerate, edit |
 | Reasoning | Streaming "Thinking" display |
 | Web and tools | Web search with model-written queries, Wikimedia image search, file/code/web/utility tools behind approval |
+| Agent | Multi-step tool use, bash/Python in Termux (`run_shell`), grammar-checked tool calls, live status with cancel |
 | Attachments and vision | Text, code, archives, documents, images and video (sampled frames) |
-| Artifacts and workspace | HTML, SVG and Mermaid previews, highlighted code, a workspace to browse and edit generated files |
+| Artifacts and workspace | HTML, SVG and Mermaid previews, highlighted code, a workspace to browse and edit generated files (private or shared folder) |
 | Telemetry | Live and final tokens/s, prefill time, cache hit rate, context use |
 | Local API server | Anthropic Messages and OpenAI chat APIs for other apps (experimental) |
 | Updates | In-app update from GitHub releases |
@@ -166,20 +190,86 @@ Web search and tools run inside the normal chat workflow.
 
 ### Agent mode with Termux
 
-The AI can chain tool rounds on its own (Settings → Tools → Agent: up to 6–50 steps per answer, default 20) and, with
-the **Termux** switch, run bash commands in the separately installed [Termux](https://github.com/termux/termux-app)
-app through the `run_shell` tool: Python scripts, `pkg`/`pip` installs it does itself, ffmpeg and so on. The commands
-run in the workspace, so files the AI writes and files the commands produce are the same files.
+BigMoeOnEdge² can work as an **agent**: the model does not just answer in text, it runs commands on the device, reads
+their results and keeps going until the task is really done – install what is missing, write a script, run it, check
+the output, fix errors, run again. Typical jobs: turn a text into an audiobook, convert audio/video with ffmpeg, draw a
+small cover picture with Pillow, unpack and sort files, write and test a Python script.
 
-One-time setup (Settings → Tools → Termux shows the status and copies these lines):
+The commands run in the separately installed [Termux](https://github.com/termux/termux-app) app. Android 10+ does not
+let an app execute programs from its own data folder, so BigMoeOnEdge² hands each command to Termux through Termux's
+official `RUN_COMMAND` interface and waits for the answer. Without Termux nothing changes; the Termux switch simply has
+nothing to use. **Full guide with examples and troubleshooting: [docs/wiki/Agent-mode-with-Termux.md](docs/wiki/Agent-mode-with-Termux.md).**
 
-1. Install Termux from F-Droid or GitHub (not Google Play), open it once and run `termux-setup-storage`.
-2. In Termux: `mkdir -p ~/.termux && echo 'allow-external-apps = true' >> ~/.termux/termux.properties && termux-reload-settings`.
-3. In BigMoeOnEdge²: turn on Settings → Diagnostics & workspace → *Shared workspace folder*, then grant *Run commands in Termux environment* in Settings → Tools → Termux, and tap *Test Termux*.
+#### Setup (once)
 
-Every Termux command asks for approval unless Settings → Tools → Agent → Approval is set to *Allow everything*. A
-command runs with all of Termux's rights; text the AI reads (web pages, files) can contain instructions it follows.
-When the context is almost full the agent stops before the next step and says so.
+Settings → *Tools, web search, pictures & videos* → **Tools → Termux** shows a status line for each step and copies
+the commands with one tap.
+
+1. **Install Termux** from [F-Droid](https://f-droid.org/packages/com.termux/) or
+   [GitHub](https://github.com/termux/termux-app/releases) – not from Google Play – and open it once.
+2. **In Termux:**
+   ```bash
+   termux-setup-storage
+   mkdir -p ~/.termux && echo 'allow-external-apps = true' >> ~/.termux/termux.properties && termux-reload-settings
+   ```
+   Optional: `ln -s ~/storage/shared/BigMoe/workspace ~/bigmoe` to reach the workspace as `~/bigmoe` yourself.
+3. **Shared workspace:** Settings → **Diagnostics & workspace → Shared workspace folder** → on (allow *All files
+   access*). The workspace moves to `Internal storage/BigMoe/workspace`, which Termux can see; a `.nomedia` file keeps
+   generated media out of the gallery.
+4. **Permission:** Settings → Tools → Termux → **Grant permission** (*Run commands in Termux environment*).
+5. **Test Termux** – it should answer with the workspace path. Then turn on the **Termux** switch (in Settings or with
+   the tool chips above the chat input).
+
+#### How it works
+
+* With Termux on, the model gets the tool **`run_shell`** (`command`, optional `cwd` inside the workspace, optional
+  `timeout_seconds` 5–1800, default 120) and a short instruction: use the shell **on its own** instead of telling you
+  to run commands, work step by step, **check before installing** (`command -v ffmpeg >/dev/null || pkg install -y
+  ffmpeg`, `python3 -c 'import gtts' 2>/dev/null || pip install gtts`), never start interactive programs, and only
+  report success when exit code and output show it.
+* Commands run **in the workspace**: files the model writes with `create_file` and files a script produces are the
+  same files, visible in the Workspace screen.
+* A small wrapper script records each command's process id and copies its output to `.bigmoe/` in the workspace
+  (hidden in the app, removed afterwards). That gives the chat the live output line and lets a command be stopped.
+* The model gets `exit code`, stdout and stderr back (Termux keeps the last ~100 KB of each) and reacts to errors in
+  the next step.
+
+#### In the chat
+
+* A **live status row** shows what is going on: `Writing run_shell: python3 make_audio.py…` while the call is written,
+  then `Termux: pip install gtts…` with the elapsed time and the latest output line (`› Successfully installed …`),
+  then *Reading the result…*.
+* **Cancel** next to the running command stops it with its whole process tree and tells the model it was cancelled;
+  Stop does the same. A command that exceeds its time limit is stopped the same way and the model gets the output so
+  far.
+* Each result is a collapsible card: `Termux · exit 0 ✓`, `Termux · exit 1 ✗`, `Termux · cancelled`,
+  `Termux · stopped (time limit)`.
+
+#### Settings (Settings → Tools → Agent)
+
+| Setting | What it does |
+| --- | --- |
+| Agent steps per answer | How many tool rounds one answer may chain: 6, 12, **20** (default), 30 or 50. At the limit the agent stops; write "continue" to go on. |
+| Approval | **Ask before changes and commands** (default: a dialog shows each command and folder) or **Allow everything without asking** (for tasks you watch). |
+| Grammar-checked tool calls | On by default: after `<tool_call>` the engine only accepts a valid call to an enabled tool (name and JSON). Not applied while the model reasons first (Thinking on); Guess ahead drafts are checked against it too. |
+| Termux | The `run_shell` switch, status lines, permission button, setup commands and *Test Termux*. |
+
+When the context is almost full, the agent stops before the next step and says so instead of producing a cut-off
+answer.
+
+#### Tips
+
+* Models trained for tool use work best (Qwen3.5/3.6, Gemma 4); very small models lose track over many steps.
+* Thinking off is faster for routine agent work and lets the tool grammar apply.
+* Each round adds command and output to the context: 24–32k is more comfortable than 16k. A **Q8_0 KV cache**
+  (Models page → model card) roughly halves its memory with almost no quality loss.
+* With large MoE models, a slightly smaller expert cache leaves RAM for the KV cache and for Termux's own processes.
+
+#### Safety
+
+A command runs with **all of Termux's rights**: it can change or delete files in Termux and shared storage and use
+the network. Text the model reads (web pages, files, attachments) can contain instructions it might follow. Keep
+*Approval* on *Ask* unless you are watching the task.
 
 ### Artifacts and workspace
 
@@ -196,11 +286,11 @@ Generated files and code are handled as artifacts instead of plain chat text:
 * JavaScript execution only through an explicit, approved tool flow; code artifacts themselves are not implicitly executed
 
 * Workspace browsing and file management
-* Optional shared workspace folder (`Internal storage/BigMoe/workspace`, Settings → Workspace) that Termux and other apps can read and write; needs all-files access, and turning it off moves the files back to private storage
+* Optional shared workspace folder (`Internal storage/BigMoe/workspace`, Settings → Diagnostics & workspace) that Termux and other apps can read and write; needs all-files access, and turning it off moves the files back to private storage
 
 * Saving, editing, sharing, and downloading files
 
-Common source formats such as Kotlin, Java, Python, C/C++, JavaScript/TypeScript, JSON, YAML, shell, Dockerfile, and SQL can be shown as code. Languages that need an external interpreter, such as Python, are highlighted, copyable code blocks only; Python fences are not turned into artifact chips and are not executed by the app. HTML/SVG and Mermaid artifacts have dedicated previews. HTTP(S) links from the chat open in the system browser; links clicked inside a sandboxed artifact preview also leave the preview and open externally.
+Common source formats such as Kotlin, Java, Python, C/C++, JavaScript/TypeScript, JSON, YAML, shell, Dockerfile, and SQL can be shown as code. Languages that need an external interpreter, such as Python, are highlighted, copyable code blocks only; Python fences are not turned into artifact chips and are not executed by the app itself – running code is what the agent does through Termux (see above). HTML/SVG and Mermaid artifacts have dedicated previews. HTTP(S) links from the chat open in the system browser; links clicked inside a sandboxed artifact preview also leave the preview and open externally.
 
 ### Chat and attachments
 
@@ -268,7 +358,10 @@ Full details, every curl command, and what was and was not verified: [`docs/API_
   real devices; an adapter or drafter that does not fit the model is dropped with a warning.
 * Multimodal behaviour depends on the exact model and `mmproj` combination; video uses sampled frames.
 * Web search needs a network connection and is slow with large local models.
-* Tool calls are parsed from the model's text (no grammar constraint), so a small model can write a malformed call.
+* Grammar-checked tool calls are not applied on turns where the model reasons first (Thinking on); there a small
+  model can still write a malformed call.
+* The Termux agent is new: it depends on Termux being set up (see above), and how well it works depends strongly on
+  the model. Commands run with Termux's rights; keep *Approval* on *Ask* for anything you do not watch.
 * The local API server is experimental: one request at a time, no images through the API, `count_tokens` is an estimate.
 
 ## Credits
