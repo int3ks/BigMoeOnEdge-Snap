@@ -123,7 +123,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                     }
                     Hint("Minimum controls how exact a repeated suffix must be before drafting. Maximum bounds the lookup work; long matches are not always more useful.")
                 }
-                if (mode != SpecSource.OFF) Hint("Guess ahead forces greedy decoding (temperature 0). More tokens per pass only pay off when most of them are accepted.")
+                if (mode != SpecSource.OFF) Hint("Works with any temperature: guesses are checked by drawing with your sampling settings, so the answer is the same kind of text as without guessing. At higher temperatures fewer guesses are kept. More tokens per pass only pay off when most of them are accepted.")
             }
         }
     }

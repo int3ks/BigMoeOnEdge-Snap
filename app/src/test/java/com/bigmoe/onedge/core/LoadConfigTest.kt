@@ -12,10 +12,10 @@ class LoadConfigTest {
     private val d = EngineSettings().toLoadConfig()
 
     @Test
-    fun guessAheadForcesGreedyDecoding() {
+    fun guessAheadKeepsTheTemperature() {
         assertEquals(0.7f, EngineSettings().toLoadConfig().temperature)
-        val ngram = EngineSettings(spec = SpecSource.NGRAM, temperature = 0.7f).toLoadConfig()
-        assertEquals(0f, ngram.temperature)
+        val ngram = EngineSettings(spec = SpecSource.NGRAM, temperature = 0.8f).toLoadConfig()
+        assertEquals(0.8f, ngram.temperature)
     }
 
     @Test

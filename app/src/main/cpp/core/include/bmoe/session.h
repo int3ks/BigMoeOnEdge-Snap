@@ -156,6 +156,8 @@ struct GenerateRequest {
     // the model can be stopped from reasoning), since a trigger mentioned inside a reasoning span would otherwise fire.
     // A grammar that fails to parse is dropped with a log line; the turn then runs unconstrained.
     std::string tool_grammar;
+    // Also used on its own (with or without a grammar): once this word is in the output, the rest of the turn is drawn
+    // greedily, so a tool call is written with the model's most likely tokens whatever the turn's temperature.
     std::string tool_grammar_trigger;
 };
 

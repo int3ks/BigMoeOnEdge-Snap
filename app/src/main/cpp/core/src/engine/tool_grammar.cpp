@@ -34,8 +34,8 @@ void ToolGrammarSampler::fill(const float * logits) {
     for (int v = 0; v < n_vocab_; ++v) cur_[(size_t) v] = llama_token_data{(llama_token) v, logits[v], 0.0f};
 }
 
-llama_token ToolGrammarSampler::pick_without_grammar(const float * logits) {
-    if (base_) {
+llama_token ToolGrammarSampler::pick_without_grammar(const float * logits, bool greedy) {
+    if (base_ && !greedy) {
         fill(logits);
         llama_token_data_array arr{cur_.data(), cur_.size(), -1, false};
         llama_sampler_apply(base_, &arr);
@@ -47,8 +47,8 @@ llama_token ToolGrammarSampler::pick_without_grammar(const float * logits) {
     return best;
 }
 
-llama_token ToolGrammarSampler::sample(const float * logits) {
-    llama_token id = pick_without_grammar(logits);
+llama_token ToolGrammarSampler::sample(const float * logits, bool greedy) {
+    llama_token id = pick_without_grammar(logits, greedy);
 
     // Cheap check of that one token (a lazy grammar that has not fired yet lets everything through).
     llama_token_data one{id, 1.0f, 0.0f};
@@ -70,7 +70,7 @@ llama_token ToolGrammarSampler::sample(const float * logits) {
             dead_end_ = true;
             return llama_vocab_eos(vocab_);
         }
-        if (base_) {
+        if (base_ && !greedy) {
             llama_sampler_apply(base_, &arr);
             id = (arr.selected >= 0 && (size_t) arr.selected < arr.size) ? arr.data[arr.selected].id : -1;
         } else {

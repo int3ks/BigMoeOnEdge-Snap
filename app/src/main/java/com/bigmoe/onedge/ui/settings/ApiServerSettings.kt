@@ -191,8 +191,8 @@ internal fun ApiServerSection(
     SwitchRow(
         "Force server settings",
         "Ignore the temperature / top_p / top_k, thinking and max_tokens that clients send and use this app's own settings instead. " +
-            "Off: client values are used where the engine supports them (stop sequences and stream are always honoured; " +
-            "with MTP / guess-ahead on, sampling is greedy whatever the client asks). " +
+            "Off: client values are used where the engine supports them (stop sequences and stream are always honoured, " +
+            "also with MTP / guess-ahead on). " +
             "Every response lists what was ignored in an X-BigMoe-Ignored header.",
         settings.serverForceSettings
     ) { viewModel.updateServerForceSettings(it) }

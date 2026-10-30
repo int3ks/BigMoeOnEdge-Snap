@@ -166,9 +166,9 @@ data class EngineSettings(
         nThreadsBatch = java.lang.Long.bitCount(com.bigmoe.onedge.core.CpuTopology.effective(cpuMaskPrefill)).coerceIn(1, 32),
         batchWidth = batchWidth,
         seed = seed,
-        // The engine refuses to open a model when "guess ahead" (speculation) is on together with sampling:
-        // verification is exact only under greedy decoding. So guess ahead means temperature 0.
-        temperature = if (spec != SpecSource.OFF) 0f else temperature,
+        // Guess ahead works with any temperature: the engine verifies drafts by drawing with the same sampler
+        // (session.cpp, accept loop), so the output follows the chosen temperature exactly.
+        temperature = temperature,
         topP = topP,
         topK = topK,
         // The streaming/ordinary-load choice is made per model when it is opened (EngineController.loadModel).

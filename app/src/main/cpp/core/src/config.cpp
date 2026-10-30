@@ -82,14 +82,11 @@ ValidationResult validate(const RunConfig & cfg) {
         }
     }
 
-    // Verification is exact only because greedy acceptance compares argmax against argmax. Under a
-    // sampling chain the accepted prefix would depend on which draws happened to agree, which is a
-    // different distribution from the one the caller asked for. Rejected rather than silently
-    // ignored: a caller who asked for both was promised something the engine cannot give.
-    if (cfg.spec.enabled() && cfg.sampling.temp > 0.0f) {
-        return fail("speculative decoding requires greedy decoding (sampling.temp <= 0): verification is "
-                    "token-identical to single-token decode only under argmax.");
-    }
+    // Speculation works with sampling too: each draft position is verified by DRAWING the target's token
+    // there with the turn's own sampler (session.cpp, accept loop). The draft is kept while the draw equals
+    // it; the first draw that differs is emitted as the next token. Every emitted token is therefore a
+    // sample from the target's distribution given the tokens before it, exactly as without speculation;
+    // only the share of accepted drafts drops as the temperature rises.
     // The floor is 1 (draft one token, verify two positions); at 0 there is nothing to verify and
     // the loop degenerates into plain decode with the speculative scaffolding attached. The ceiling
     // is an evidence boundary, not a physical one — see SpecConfig::draft_max.

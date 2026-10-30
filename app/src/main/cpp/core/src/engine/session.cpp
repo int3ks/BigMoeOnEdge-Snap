@@ -1536,11 +1536,19 @@ RunResult Session::generate(const GenerateRequest & req,
             if (!tool_gs->active()) tool_gs.reset();
         }
     }
+    // Once the model has started a tool call (the trigger word, e.g. "<tool_call>", is in the output), the rest of the
+    // turn is drawn greedily: the call's name and JSON are taken as the model's most likely tokens instead of being
+    // sampled at the chat's temperature. Text before the call keeps the user's sampling. Set where tokens are emitted.
+    const std::string & call_word = req.tool_grammar_trigger;
+    bool in_call = false;
     // The next token after logits row `row` (-1 = last), by whichever sampler this turn uses.
     auto draw = [&](int32_t row) -> llama_token {
-        if (tool_gs) return tool_gs->sample(llama_get_logits_ith(ctx, row));
-        return smpl_use ? llama_sampler_sample(smpl_use, ctx, row) : argmax(llama_get_logits_ith(ctx, row), im.n_vocab);
+        if (tool_gs) return tool_gs->sample(llama_get_logits_ith(ctx, row), /*greedy*/ in_call);
+        return (smpl_use && !in_call) ? llama_sampler_sample(smpl_use, ctx, row) : argmax(llama_get_logits_ith(ctx, row), im.n_vocab);
     };
+    // Drafts are verified by drawing the target's token (rather than comparing argmax) whenever the turn does not
+    // draw greedily: a sampling chain (temperature > 0) or the tool grammar. See the accept loop.
+    const bool verify_by_draw = tool_gs != nullptr || smpl_use != nullptr;
 
     const bool image_turn = !req.images.empty();
     if (image_turn) {
@@ -2183,9 +2191,12 @@ RunResult Session::generate(const GenerateRequest & req,
         int n_acc = 0;
         bool eog_hit = false;
         for (int i = 0; i < n_draft; ++i) {
-            const llama_token want = tool_gs ? draw(i) : argmax(llama_get_logits_ith(ctx, i), im.n_vocab);
+            // Greedy: the target's argmax. Sampling (or the tool grammar): the target's own DRAW at this position;
+            // the draft stays while the draw equals it, and the first draw that differs is the next token, so each
+            // emitted token is a sample from the target given the tokens before it (see config.cpp).
+            const llama_token want = verify_by_draw ? draw(i) : argmax(llama_get_logits_ith(ctx, i), im.n_vocab);
             if (want != im.draft_buf[i]) {
-                if (tool_gs) {
+                if (verify_by_draw) {
                     have_next = true;
                     next_tok = want;
                 }
@@ -2267,6 +2278,9 @@ RunResult Session::generate(const GenerateRequest & req,
             int np = llama_token_to_piece(im.vocab, out, piece, sizeof(piece), 0, true);
             std::string delta = np > 0 ? std::string(piece, np) : std::string();
             gen += delta;
+            if (!in_call && !call_word.empty() &&
+                gen.find(call_word, gen.size() > delta.size() + call_word.size() ? gen.size() - delta.size() - call_word.size() : 0) != std::string::npos)
+                in_call = true;
             if (chat_on) im.kv_tokens.push_back(out); // this token is now in the KV
             if (spec_on) mtp_ctx.push_back(out);
             ++n_gen;

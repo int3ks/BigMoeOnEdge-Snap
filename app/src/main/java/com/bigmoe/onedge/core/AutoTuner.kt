@@ -276,7 +276,7 @@ object AutoTuner {
             predictPrefetch = false,
             predictSpecMax = 0,
             routeAhead = 0,
-            // Repeated-text guessing is exact (it only keeps what the model would have written) but forces greedy decoding.
+            // Repeated-text guessing is exact: it only keeps what the model itself would have written, at any temperature.
             spec = if (tier == AutoTier.FASTEST) SpecSource.NGRAM else SpecSource.OFF,
             draftMax = 4,
             npuPrefill = false
@@ -338,7 +338,7 @@ object AutoTuner {
             if (v.predictPrefetch || v.prefetchLayers > 0) out += "Reads the next experts ahead of time"
             if (v.npuPrefill) out += "Prompt prefill on the NPU"
         } else if (v.spec == SpecSource.NGRAM) {
-            out += "Guesses repeated text ahead (uses greedy decoding)"
+            out += "Guesses repeated text ahead"
         }
         return out
     }

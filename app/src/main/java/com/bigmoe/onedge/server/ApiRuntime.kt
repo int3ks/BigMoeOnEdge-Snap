@@ -3,7 +3,6 @@ package com.bigmoe.onedge.server
 import com.bigmoe.onedge.core.ChatGenRequest
 import com.bigmoe.onedge.core.LoadConfig
 import com.bigmoe.onedge.core.SamplingOverride
-import com.bigmoe.onedge.core.SpecSource
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 
 /**
@@ -91,10 +90,6 @@ object RequestResolver {
                     if (p.topP != null) ignored.add("top_p (forced by app settings)")
                     if (p.topK != null) ignored.add("top_k (forced by app settings)")
                     if (p.seed != null) ignored.add("seed (forced by app settings)")
-                }
-                loaded != null && loaded.spec != SpecSource.OFF -> {
-                    // Guess-ahead verification is only exact under greedy decoding.
-                    ignored.add("temperature/top_p/top_k/seed (guess-ahead is on: the model decodes greedily)")
                 }
                 else -> {
                     sampling = SamplingOverride(

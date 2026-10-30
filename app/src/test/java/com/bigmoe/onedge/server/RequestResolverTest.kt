@@ -67,11 +67,11 @@ class RequestResolverTest {
     }
 
     @Test
-    fun samplingIsIgnoredWhileGuessAheadIsOn() {
+    fun samplingIsHonouredWhileGuessAheadIsOn() {
         val spec = loaded.copy(spec = SpecSource.NGRAM)
         val r = RequestResolver.resolve(parsed(temperature = 0.9), rt(), spec)
-        assertNull(r.request.sampling)
-        assertTrue(r.ignored.any { it.contains("guess-ahead") })
+        assertEquals(0.9f, r.request.sampling!!.temperature, 0.0001f)
+        assertTrue(r.ignored.none { it.contains("guess-ahead") })
     }
 
     @Test

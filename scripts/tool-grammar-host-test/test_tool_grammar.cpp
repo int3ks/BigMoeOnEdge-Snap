@@ -91,6 +91,26 @@ int main(int argc, char ** argv) {
         CHECK(out.size() > 6 && out.substr(out.size() - 5) == "<EOS>", "sampled call ends");
         llama_sampler_free(base);
     }
+    // (b2) greedy inside a call: with a very hot sampling chain as base, greedy=true still takes the best allowed token
+    {
+        llama_sampler * base = llama_sampler_chain_init(llama_sampler_chain_default_params());
+        llama_sampler_chain_add(base, llama_sampler_init_temp(50.0f));
+        llama_sampler_chain_add(base, llama_sampler_init_dist(7));
+        bmoe::detail::ToolGrammarSampler s(e.vocab, grammar, "<tool_call>", base);
+        int hits = 0;
+        for (int i = 0; i < 50; ++i) {
+            auto l = prefer(e, T("Hello"), T("\n"));
+            if (s.sample(l.data(), /*greedy*/ true) == T("Hello")) ++hits;
+        }
+        CHECK(hits == 50, "greedy ignores the hot base chain");
+        int hot = 0;
+        for (int i = 0; i < 50; ++i) {
+            auto l = prefer(e, T("Hello"), T("\n"));
+            if (s.sample(l.data(), /*greedy*/ false) == T("Hello")) ++hot;
+        }
+        CHECK(hot < 50, "without greedy the hot chain does sample");
+        llama_sampler_free(base);
+    }
     // (c) unknown tool name is overruled; EOS in the middle of a call is refused (no abort)
     {
         bmoe::detail::ToolGrammarSampler s(e.vocab, grammar, "<tool_call>", nullptr);

@@ -205,7 +205,9 @@ class AgentController(
                     think = settings.thinkingEnabled && (engineRound == 0 || settings.thinkAfterTools),
                     images = if (engineRound == 0) request.images else emptyList(),
                     toolGrammar = toolGrammar,
-                    toolGrammarTrigger = if (toolGrammar.isEmpty()) "" else com.bigmoe.onedge.parser.ToolGrammar.TRIGGER
+                    // Also without the grammar: from this word on the engine writes the call greedily (temperature 0),
+                    // whatever the chat's temperature is, so a call's name and JSON are the model's most likely tokens.
+                    toolGrammarTrigger = if (toolsEnabled) com.bigmoe.onedge.parser.ToolGrammar.TRIGGER else ""
                 )
             ).collect { ev ->
                 when (ev) {

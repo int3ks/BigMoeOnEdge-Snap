@@ -37,7 +37,9 @@ public:
     // and keep it when the grammar allows it; otherwise pick again with the grammar applied first. Accepts the
     // result into the grammar and the base chain. Sets dead_end() and returns an end-of-generation token without
     // accepting anything when no token can continue the grammar.
-    llama_token sample(const float * logits);
+    // `greedy`: pick the highest-scoring allowed token instead of drawing from the base chain (the turn is inside a
+    // tool call, see session.cpp); the base chain still sees the token through accept().
+    llama_token sample(const float * logits, bool greedy = false);
 
     bool dead_end() const { return dead_end_; }
 
@@ -50,7 +52,7 @@ public:
 
 private:
     void fill(const float * logits);
-    llama_token pick_without_grammar(const float * logits);
+    llama_token pick_without_grammar(const float * logits, bool greedy);
 
     const llama_vocab * vocab_;
     int n_vocab_;
