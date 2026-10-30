@@ -153,7 +153,11 @@ class ToolManager(
                 "tool call, stop and wait: the app sends the result; never write <tool_response> yourself. This is Termux " +
                 "on Android, not a Linux server: there is no /root, /mnt/data or sudo, use paths inside the workspace. " +
                 "Python libraries with C code (Pillow, numpy, ...) are faster to get as Termux packages, e.g. " +
-                "pkg install -y python-pillow (pkg search python- lists them); pip would compile them for a long time."
+                "pkg install -y python-pillow (pkg search python- lists them); pip would compile them for a long time. " +
+                "Keep output small, it costs context: use quiet options (pip install -q, pkg install -y), never print " +
+                "whole files or long listings, and end with a short check (e.g. && echo OK). You only get the last " +
+                "${RunShellTool.OUTPUT_BUDGET} characters of a command's output; for more, write it to a file and " +
+                "look at it with tail or grep."
     }
 
     /** Never throws (except coroutine cancellation): failures come back as "Error: ..." text for the model. */

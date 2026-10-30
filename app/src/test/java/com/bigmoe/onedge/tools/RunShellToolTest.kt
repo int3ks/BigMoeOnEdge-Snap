@@ -118,6 +118,19 @@ class RunShellToolTest {
     }
 
     @Test
+    fun longOutputKeepsOnlyItsEndAndDropsProgressNoise() {
+        val pip = (1..2000).joinToString("\n") { "Collecting package-$it" } +
+            "\nDownloading x 10%\rDownloading x 55%\rDownloading x 100%\n\u001B[32mSuccessfully installed fpdf2-2.9.0\u001B[0m\n"
+        val out = RunShellTool.format(TermuxResult(pip, "ERROR: something at the end\n", 0, -1, null))
+        assertTrue(out, out.length < RunShellTool.OUTPUT_BUDGET + 200)
+        assertTrue(out, out.contains("Successfully installed fpdf2-2.9.0") && !out.contains("\u001B"))
+        assertTrue(out, out.contains("Downloading x 100%") && !out.contains("55%"))
+        assertTrue(out, !out.contains("Collecting package-1\n"))
+        assertTrue(out, out.contains("ERROR: something at the end"))
+        assertTrue(out, Regex("--- stdout \\(last \\d+ of \\d+ characters\\) ---\nCollecting package-\\d+\n").containsMatchIn(out))
+    }
+
+    @Test
     fun confirmationShowsTheCommand() {
         val (tool, _, _) = setup()
         val c = tool.confirmation(args("rm -rf build", cwd = "proj"))

@@ -214,7 +214,7 @@ class RunShellTool(
                 Outcome.TimedOut -> {
                     val stopped = stop(pidFile, dir)
                     "No result after ${seconds}s, so the command was " + (if (stopped) "stopped" else "abandoned (it could not be confirmed stopped)") +
-                        ". Output so far:\n" + tail(logFile, 1500).ifBlank { "(none)" } +
+                        ". Output so far (its end):\n" + clean(tail(logFile, 4000)).takeLast(OUTPUT_BUDGET).ifBlank { "(none)" } +
                         "\nFor long jobs, raise timeout_seconds (up to $MAX_TIMEOUT_S) or run it in steps."
                 }
             }
@@ -229,7 +229,7 @@ class RunShellTool(
                 stop(pidFile, dir)
                 endNote = if (notStarted) "cancelled before Termux started it" else "cancelled, stopped"
                 cancelledOutput = if (notStarted) "Termux had not started the command yet, so it did not run."
-                else "Output before it was stopped:\n" + tail(logFile, 1500).ifBlank { "(none)" }
+                else "Output before it was stopped (its end):\n" + clean(tail(logFile, 4000)).takeLast(OUTPUT_BUDGET).ifBlank { "(none)" }
             }
             throw e
         } finally {
@@ -298,6 +298,8 @@ class RunShellTool(
         const val MAX_TIMEOUT_S = 1800
         private const val GRACE_MS = 15_000L
         private const val STOP_TIMEOUT_MS = 8_000L
+        /** How much of a command's output the model gets: the end of stdout and stderr together. */
+        const val OUTPUT_BUDGET = 1_500
         /** How much of the running command's output the chat shows (the end of it). */
         private const val LIVE_OUTPUT_BYTES = 6_000
         const val HISTORY_DIR = "history"
@@ -317,7 +319,9 @@ class RunShellTool(
                 "echo \$\$ > \"\$2/\$3.pid\"\n" +
                 // Output shows up as it is written (Python buffers it otherwise), and nothing can wait for input:
                 // a prompt fails at once instead of hanging until the time limit.
-                "export PYTHONUNBUFFERED=1 PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1 DEBIAN_FRONTEND=noninteractive\n" +
+                // and as little noise as possible: no progress bars, no colours.
+                "export PYTHONUNBUFFERED=1 PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_PROGRESS_BAR=off " +
+                "PIP_NO_COLOR=1 NO_COLOR=1 DEBIAN_FRONTEND=noninteractive\n" +
                 "bash -c \"\$1\" < /dev/null > >(tee -a \"\$2/\$3.log\") 2> >(tee -a \"\$2/\$3.log\" >&2)\n" +
                 "rc=\$?\n" +
                 "echo \$rc > \"\$2/\$3.rc.tmp\" && mv -f \"\$2/\$3.rc.tmp\" \"\$2/\$3.rc\"\n" +
@@ -373,20 +377,53 @@ class RunShellTool(
                 }
                 return "Error: Termux could not run the command (err ${r.err}): ${msg.take(1500).ifEmpty { "no details" }}.$hint"
             }
+            // The model only gets the END of each stream (errors and results are at the end), OUTPUT_BUDGET characters
+            // for both together: a pip or pkg run prints thousands of lines nobody needs in the context.
+            val out = clean(r.stdout)
+            val err = clean(r.stderr)
+            var errBudget = if (out.length + err.length <= OUTPUT_BUDGET) err.length
+            else if (out.isBlank()) OUTPUT_BUDGET else minOf(err.length, OUTPUT_BUDGET * 2 / 3)
+            val outBudget = minOf(out.length, OUTPUT_BUDGET - errBudget)
+            errBudget = minOf(err.length, OUTPUT_BUDGET - outBudget)
             val b = StringBuilder()
             b.append("exit code: ").append(r.exitCode ?: "unknown").append('\n')
-            appendStream(b, "stdout", r.stdout, r.stdoutOriginalLength)
-            appendStream(b, "stderr", r.stderr, r.stderrOriginalLength)
-            if (r.stdout.isBlank() && r.stderr.isBlank()) b.append("(no output)\n")
+            appendStream(b, "stdout", out, outBudget, r.stdout.length, r.stdoutOriginalLength)
+            appendStream(b, "stderr", err, errBudget, r.stderr.length, r.stderrOriginalLength)
+            if (out.isBlank() && err.isBlank()) b.append("(no output)\n")
             if (r.err != -1) b.append("Termux reported err ${r.err}: ").append(r.errmsg.orEmpty().take(500)).append('\n')
             return b.toString().trimEnd()
         }
 
-        private fun appendStream(b: StringBuilder, label: String, text: String, original: Int?) {
+        /**
+         * The last [budget] characters of [text] (cleaned), starting at a line. When that, or Termux's own limit
+         * ([termuxOriginal] > [rawLength]), left something out, the header says how much there was.
+         */
+        private fun appendStream(b: StringBuilder, label: String, text: String, budget: Int, rawLength: Int, termuxOriginal: Int?) {
             if (text.isBlank()) return
+            var shown = text
+            if (text.length > budget) {
+                shown = text.takeLast(budget)
+                val nl = shown.indexOf('\n')
+                if (nl in 0 until shown.length - 1) shown = shown.substring(nl + 1)
+            }
+            val original = maxOf(termuxOriginal ?: 0, rawLength)
             b.append("--- ").append(label)
-            if (original != null && original > text.length) b.append(" (last ${text.length} of $original characters)")
-            b.append(" ---\n").append(text.trimEnd()).append('\n')
+            if (shown.length < text.length || (termuxOriginal ?: 0) > rawLength) b.append(" (last ${shown.length} of $original characters)")
+            b.append(" ---\n").append(shown).append('\n')
+        }
+
+        /**
+         * Output as a terminal would have left it: colour codes removed, a line rewritten with \r (progress bars)
+         * reduced to its last state, blank lines dropped.
+         */
+        internal fun clean(text: String): String {
+            if (text.isBlank()) return ""
+            val b = StringBuilder()
+            for (raw in text.split('\n')) {
+                val line = ANSI.replace(raw.substringAfterLast('\r'), "").trimEnd()
+                if (line.isNotEmpty()) b.append(line).append('\n')
+            }
+            return b.toString().trimEnd()
         }
 
         private const val TERMUX_ALLOW_LINE =
