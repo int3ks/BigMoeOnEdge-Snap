@@ -39,7 +39,10 @@ interface EngineBackend {
         clearKv: Boolean,
         think: Boolean,
         images: List<ImageData>,
-        callback: NativeGenerationCallback
+        callback: NativeGenerationCallback,
+        /** See GenerationRequest.toolGrammar; "" = no grammar. */
+        toolGrammar: String = "",
+        toolGrammarTrigger: String = ""
     )
 
     /**
@@ -106,7 +109,9 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
         clearKv: Boolean,
         think: Boolean,
         images: List<ImageData>,
-        callback: NativeGenerationCallback
+        callback: NativeGenerationCallback,
+        toolGrammar: String,
+        toolGrammarTrigger: String
     ) {
         val flat = ArrayList<ByteArray>(historyFlat.size * 2)
         for (t in historyFlat) {
@@ -122,6 +127,8 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
             think = think,
             imageDims = IntArray(images.size * 2) { i -> if (i % 2 == 0) images[i / 2].width else images[i / 2].height },
             imageData = Array(images.size) { images[it].rgb },
+            toolGrammar = encodeUtf8(toolGrammar),
+            toolGrammarTrigger = encodeUtf8(toolGrammarTrigger),
             callback = callback
         )
     }

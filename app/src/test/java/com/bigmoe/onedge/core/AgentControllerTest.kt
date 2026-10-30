@@ -362,4 +362,24 @@ class AgentControllerTest {
         assertTrue(AgentController.enabledToolNames(base, registered).isEmpty())
         assertEquals(setOf("run_shell"), AgentController.enabledToolNames(base.copy(toolsTermuxEnabled = true), registered))
     }
+
+    @Test
+    fun toolGrammarIsSentWithTheEnabledToolsAndCanBeSwitchedOff() = runTest {
+        val e = env(this)
+        e.fake.script.add(ScriptedTurn(tokens = listOf("plain answer")))
+        e.agent.runAgentLoop(req(), e.sink).toList()
+        val grammar = e.fake.calls.single().toolGrammar
+        assertTrue(grammar.startsWith("root ::= call"))
+        assertTrue(grammar.contains("\"\\\"web_search\\\"\""))
+
+        val off = env(this)
+        off.fake.script.add(ScriptedTurn(tokens = listOf("plain answer")))
+        off.agent.runAgentLoop(req(s = withSearch.copy(toolCallGrammar = false)), off.sink).toList()
+        assertEquals("", off.fake.calls.single().toolGrammar)
+
+        val noTools = env(this)
+        noTools.fake.script.add(ScriptedTurn(tokens = listOf("plain answer")))
+        noTools.agent.runAgentLoop(req(s = EngineSettings(isWebSearchEnabled = false)), noTools.sink).toList()
+        assertEquals("", noTools.fake.calls.single().toolGrammar)
+    }
 }

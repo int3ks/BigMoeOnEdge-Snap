@@ -121,6 +121,8 @@ data class EngineSettings(
     /** Most tool rounds in one answer before the agent has to stop and report. */
     val agentMaxSteps: Int = DEFAULT_AGENT_MAX_STEPS,
     val agentApproval: AgentApproval = AgentApproval.ASK,
+    /** Constrain tool calls with a grammar (parser/ToolGrammar) so they always come out as valid calls. */
+    val toolCallGrammar: Boolean = true,
     /** Longest side of pictures sent to the model, in pixels (more = sharper, but many more tokens). */
     val imageMaxDim: Int = 512,
     /** Frames sampled evenly from an attached video. */
@@ -284,6 +286,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val TOOLS_TERMUX = booleanPreferencesKey("tools_termux")
         val AGENT_MAX_STEPS = intPreferencesKey("agent_max_steps")
         val AGENT_APPROVAL = stringPreferencesKey("agent_approval")
+        val TOOL_CALL_GRAMMAR = booleanPreferencesKey("tool_call_grammar")
         val IMAGE_MAX_DIM = intPreferencesKey("image_max_dim")
         val VIDEO_FRAMES = intPreferencesKey("video_frames")
         val LAST_MMPROJ = stringPreferencesKey("last_mmproj_path")
@@ -364,6 +367,7 @@ class EngineSettingsDataStore(private val context: Context) {
             toolsTermuxEnabled = p[Keys.TOOLS_TERMUX] ?: d.toolsTermuxEnabled,
             agentMaxSteps = (p[Keys.AGENT_MAX_STEPS] ?: d.agentMaxSteps).coerceIn(1, MAX_AGENT_MAX_STEPS),
             agentApproval = enumOrDefault(p[Keys.AGENT_APPROVAL], d.agentApproval),
+            toolCallGrammar = p[Keys.TOOL_CALL_GRAMMAR] ?: d.toolCallGrammar,
             imageMaxDim = p[Keys.IMAGE_MAX_DIM] ?: d.imageMaxDim,
             videoFrames = p[Keys.VIDEO_FRAMES] ?: d.videoFrames,
             lastMmprojPath = p[Keys.LAST_MMPROJ] ?: d.lastMmprojPath,
@@ -475,6 +479,7 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateToolsTermuxEnabled(v: Boolean) = set(Keys.TOOLS_TERMUX, v)
     suspend fun updateAgentMaxSteps(v: Int) = set(Keys.AGENT_MAX_STEPS, v.coerceIn(1, MAX_AGENT_MAX_STEPS))
     suspend fun updateAgentApproval(v: AgentApproval) = set(Keys.AGENT_APPROVAL, v.name)
+    suspend fun updateToolCallGrammar(v: Boolean) = set(Keys.TOOL_CALL_GRAMMAR, v)
     suspend fun updateImageMaxDim(v: Int) = set(Keys.IMAGE_MAX_DIM, v.coerceIn(224, 1344))
     suspend fun updateVideoFrames(v: Int) = set(Keys.VIDEO_FRAMES, v.coerceIn(1, 16))
     suspend fun updateLastMmprojPath(v: String) = set(Keys.LAST_MMPROJ, v)

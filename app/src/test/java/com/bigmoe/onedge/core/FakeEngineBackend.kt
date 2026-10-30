@@ -33,7 +33,8 @@ data class RecordedCall(
     val maxTokens: Int,
     val clearKv: Boolean,
     val think: Boolean,
-    val imageCount: Int = 0
+    val imageCount: Int = 0,
+    val toolGrammar: String = ""
 )
 
 /** Scriptable stand-in for libonedge-engine.so: no JNI, runs on the JVM. */
@@ -79,9 +80,10 @@ class FakeEngineBackend(
 
     override fun generate(
         system: String, historyFlat: List<ChatTurn>, prompt: String, maxTokens: Int,
-        clearKv: Boolean, think: Boolean, images: List<ImageData>, callback: NativeGenerationCallback
+        clearKv: Boolean, think: Boolean, images: List<ImageData>, callback: NativeGenerationCallback,
+        toolGrammar: String, toolGrammarTrigger: String
     ) {
-        calls.add(RecordedCall(system, historyFlat, prompt, maxTokens, clearKv, think, images.size))
+        calls.add(RecordedCall(system, historyFlat, prompt, maxTokens, clearKv, think, images.size, toolGrammar))
         val turn = script.removeFirstOrNull() ?: ScriptedTurn(ok = false, error = "script exhausted")
         started.countDown()
         val answer = StringBuilder()

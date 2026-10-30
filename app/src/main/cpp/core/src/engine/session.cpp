@@ -10,6 +10,7 @@
 #include "logits.h"
 #include "prefill_support.h"
 #include "thinking_control.h"
+#include "tool_grammar.h"
 #include "prefill_path.h"
 #include "../moe/router_hook.h"
 #include "../moe/decide_probe.h"
@@ -1514,6 +1515,25 @@ RunResult Session::generate(const GenerateRequest & req,
         }
     }
 
+    // Tool-call grammar (app chat path only). It wraps smpl_use (or argmax) and, while active, is the ONLY thing the
+    // loop draws tokens from, drafts included, so the grammar sees every emitted token in order. Skipped when the turn
+    // may reason first: a trigger word mentioned inside a reasoning span would switch the grammar on there.
+    std::unique_ptr<detail::ToolGrammarSampler> tool_gs;
+    if (!stateless && !req.tool_grammar.empty()) {
+        if (req.think || im.think_ctl == ThinkControl::None) {
+            std::fprintf(stderr, "bmoe: tool-call grammar skipped (reasoning turn)\n");
+        } else {
+            tool_gs = std::make_unique<detail::ToolGrammarSampler>(im.vocab, req.tool_grammar,
+                                                                   req.tool_grammar_trigger, smpl_use);
+            if (!tool_gs->active()) tool_gs.reset();
+        }
+    }
+    // The next token after logits row `row` (-1 = last), by whichever sampler this turn uses.
+    auto draw = [&](int32_t row) -> llama_token {
+        if (tool_gs) return tool_gs->sample(llama_get_logits_ith(ctx, row));
+        return smpl_use ? llama_sampler_sample(smpl_use, ctx, row) : argmax(llama_get_logits_ith(ctx, row), im.n_vocab);
+    };
+
     const bool image_turn = !req.images.empty();
     if (image_turn) {
 #ifdef BMOE_HAVE_MTMD
@@ -2038,7 +2058,11 @@ RunResult Session::generate(const GenerateRequest & req,
     // to the resident reference the gates check); with a sampling chain, draw from the context's
     // last-position logits, which llama_sampler_sample reads at index -1 — the same logits argmax
     // would have read.
-    llama_token tok = smpl_use ? llama_sampler_sample(smpl_use, ctx, -1) : argmax(logits, im.n_vocab);
+    llama_token tok = draw(-1);
+    // With the tool grammar, drafts are verified by drawing through it (below), and the draw that rejects a draft IS
+    // the next token: it has been accepted into the grammar already and must not be drawn a second time.
+    bool have_next = false;
+    llama_token next_tok = 0;
 
     bool stop_hit = false;     // a stateless-chat stop string matched
     std::string stop_seq;
@@ -2151,8 +2175,14 @@ RunResult Session::generate(const GenerateRequest & req,
         int n_acc = 0;
         bool eog_hit = false;
         for (int i = 0; i < n_draft; ++i) {
-            const llama_token want = argmax(llama_get_logits_ith(ctx, i), im.n_vocab);
-            if (want != im.draft_buf[i]) break;
+            const llama_token want = tool_gs ? draw(i) : argmax(llama_get_logits_ith(ctx, i), im.n_vocab);
+            if (want != im.draft_buf[i]) {
+                if (tool_gs) {
+                    have_next = true;
+                    next_tok = want;
+                }
+                break;
+            }
             ++n_acc; // accepted: it is in the KV whether or not the caller gets to see it
             if (llama_vocab_is_eog(im.vocab, want)) {
                 eog_hit = true; // end-of-generation is never emitted, here as on the plain path
@@ -2289,8 +2319,16 @@ RunResult Session::generate(const GenerateRequest & req,
         n_past += 1 + n_acc;
         const int32_t row = wide ? n_acc : -1;
         logits = llama_get_logits_ith(ctx, row);
-        tok = smpl_use ? llama_sampler_sample(smpl_use, ctx, row) : argmax(logits, im.n_vocab);
+        if (have_next) {
+            tok = next_tok;
+            have_next = false;
+        } else {
+            tok = draw(row);
+        }
     }
+    if (tool_gs && (tool_gs->corrections() > 0 || tool_gs->dead_end()))
+        std::fprintf(stderr, "bmoe: tool-call grammar corrected %d token(s)%s\n", tool_gs->corrections(),
+                     tool_gs->dead_end() ? ", ended the turn at a dead end" : "");
 
     // Speculation can leave the KV ahead of what the caller received: an accepted end-of-generation
     // token is decoded but never emitted, and a group can be cut short by n_predict. The KV and

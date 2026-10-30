@@ -115,6 +115,11 @@ class AgentController(
         toolManager.maxResultChars = settings.toolResultChars
         toolManager.autoApprove = settings.agentApproval == AgentApproval.ALLOW_ALL
         val maxToolRounds = settings.agentMaxSteps.coerceAtLeast(1)
+        // Lazy tool-call grammar over the tools the model may call this turn (the engine decides per round whether
+        // it applies: not when the model is expected to reason first).
+        val toolGrammar = if (settings.toolCallGrammar && toolsEnabled) {
+            com.bigmoe.onedge.parser.ToolGrammar.build(enabledNames, MAX_CALLS_PER_ROUND)
+        } else ""
         val system = buildSystemPrompt(
             settings, toolsEnabled, toolManager.getToolsDescriptionPrompt(enabledNames), alwaysSearch
         )
@@ -175,7 +180,9 @@ class AgentController(
                     // After a tool result the model usually just has to use it: reasoning again costs minutes at
                     // decode speed, so it only happens when the user asked for it.
                     think = settings.thinkingEnabled && (engineRound == 0 || settings.thinkAfterTools),
-                    images = if (engineRound == 0) request.images else emptyList()
+                    images = if (engineRound == 0) request.images else emptyList(),
+                    toolGrammar = toolGrammar,
+                    toolGrammarTrigger = if (toolGrammar.isEmpty()) "" else com.bigmoe.onedge.parser.ToolGrammar.TRIGGER
                 )
             ).collect { ev ->
                 when (ev) {

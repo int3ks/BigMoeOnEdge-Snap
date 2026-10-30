@@ -229,7 +229,13 @@ data class GenerationRequest(
     val maxTokens: Int,
     val think: Boolean,
     /** Images for THIS turn only; needs a loaded vision projector. */
-    val images: List<ImageData> = emptyList()
+    val images: List<ImageData> = emptyList(),
+    /**
+     * Lazy GBNF grammar for tool calls (parser/ToolGrammar), switched on when the output reaches [toolGrammarTrigger].
+     * "" = none. The engine ignores it on turns where reasoning is expected (think on, or a model that always reasons).
+     */
+    val toolGrammar: String = "",
+    val toolGrammarTrigger: String = ""
 )
 
 

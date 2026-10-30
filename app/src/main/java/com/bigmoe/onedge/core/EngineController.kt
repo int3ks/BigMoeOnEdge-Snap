@@ -473,6 +473,8 @@ class EngineController(
                         clearKv = needsReplay,
                         think = request.think,
                         images = request.images,
+                        toolGrammar = request.toolGrammar,
+                        toolGrammarTrigger = request.toolGrammarTrigger,
                         callback = object : NativeGenerationCallback {
                             private var generated = 0
                             override fun onToken(answerDelta: ByteArray, reasoningDelta: ByteArray, contextUsed: Int): Boolean {

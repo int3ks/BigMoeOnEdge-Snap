@@ -602,6 +602,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
     jbyteArray j_system, jobjectArray j_history_flat, jbyteArray j_prompt,
     jint max_tokens, jboolean clear_kv, jboolean think,
     jintArray j_image_dims, jobjectArray j_image_data,
+    jbyteArray j_tool_grammar, jbyteArray j_tool_grammar_trigger,
     jobject callback)
 {
     const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
@@ -646,6 +647,9 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
     req.think = (think == JNI_TRUE);
     req.clear_kv = (clear_kv == JNI_TRUE);
     req.render_text = true; // engine-side, template-aware split of answer vs reasoning
+    // Lazy tool-call grammar (parser/ToolGrammar.kt); empty = none. The engine decides whether it applies this turn.
+    if (j_tool_grammar != nullptr) req.tool_grammar = from_bytes(env, j_tool_grammar);
+    if (j_tool_grammar_trigger != nullptr) req.tool_grammar_trigger = from_bytes(env, j_tool_grammar_trigger);
     if (req.clear_kv) {
         req.system_prompt = from_bytes(env, j_system);
         if (j_history_flat != nullptr) {

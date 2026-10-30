@@ -1,0 +1,10 @@
+root ::= call (ws call){0,3} ws
+call ::= "<tool_call>" ws "{" ws "\"name\"" ws ":" ws name ws "," ws "\"arguments\"" ws ":" ws object ws "}" ws "</tool_call>"
+name ::= "\"create_file\"" | "\"read_file\"" | "\"run_shell\""
+value ::= object | array | string | number | "true" | "false" | "null"
+object ::= "{" ws ( string ws ":" ws value ws ( "," ws string ws ":" ws value ws )* )? "}"
+array ::= "[" ws ( value ws ( "," ws value ws )* )? "]"
+string ::= "\"" char* "\""
+char ::= [^"\\\x7F\x00-\x1F] | "\\" ( ["\\/bfnrt] | "u" [0-9a-fA-F]{4} )
+number ::= "-"? ( "0" | [1-9] [0-9]{0,17} ) ( "." [0-9]{1,17} )? ( [eE] [-+]? [0-9]{1,3} )?
+ws ::= [ \t\n\r]{0,20}

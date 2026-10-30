@@ -60,6 +60,7 @@ class SettingsViewModel(
     fun updateToolsTermuxEnabled(v: Boolean) = launch { dataStore.updateToolsTermuxEnabled(v) }
     fun updateAgentMaxSteps(v: Int) = launch { dataStore.updateAgentMaxSteps(v) }
     fun updateAgentApproval(v: com.bigmoe.onedge.data.local.datastore.AgentApproval) = launch { dataStore.updateAgentApproval(v) }
+    fun updateToolCallGrammar(v: Boolean) = launch { dataStore.updateToolCallGrammar(v) }
     fun updateImageMaxDim(v: Int) = launch { dataStore.updateImageMaxDim(v) }
     fun updateVideoFrames(v: Int) = launch { dataStore.updateVideoFrames(v) }
 

@@ -80,6 +80,14 @@ internal fun AgentAndTermuxSection(settings: EngineSettings, viewModel: Settings
                 "and text the AI reads (web pages, files) can contain instructions it follows. Use this for tasks you watch."
         )
     }
+    SwitchRow(
+        "Grammar-checked tool calls",
+        "On (default): once the AI starts a tool call, the engine only lets it write a valid call to an enabled tool, " +
+            "so calls no longer fail on broken JSON. Not applied on turns where the model reasons first (Thinking on, " +
+            "or a model that always reasons), and while it is active Guess ahead checks drafts against the grammar too. " +
+            "Turn it off if a model behaves oddly with it.",
+        settings.toolCallGrammar
+    ) { viewModel.updateToolCallGrammar(it) }
     Spacer(Modifier.height(12.dp))
 
     // ------------------------------------------------------------ Termux

@@ -12,7 +12,7 @@ sealed interface ToolCallParseResult {
 }
 
 /**
- * The prompt-only tool protocol (the engine has no grammar support, see docs/tool-calling.md):
+ * The text tool protocol (optionally grammar-checked by the engine, see ToolGrammar and docs/tool-calling.md):
  *   model  -> <tool_call>{"name": "...", "arguments": {...}}</tool_call>
  *   app    -> a user turn: <tool_response>...</tool_response>
  * Small models get the JSON slightly wrong all the time, so parsing is deliberately tolerant.

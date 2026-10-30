@@ -16,7 +16,7 @@ The globe toggle is **off by default**. The `ALWAYS` mode below only applies aft
 
 # Tool calling (Phase 7)
 
-## Protocol (prompt-only; `GenerateRequest` has no grammar field)
+## Protocol (prompt plus an optional lazy grammar, see below)
 System prompt (when "web search" is on) lists the tools and asks for exactly
 `<tool_call>{"name": "...", "arguments": {...}}</tool_call>`. The app answers with a user turn
 `<tool_response>\n[tool]\nresult\n</tool_response>`.
@@ -31,10 +31,29 @@ System prompt (when "web search" is on) lists the tools and asks for exactly
   throws because of a tool.
 * Stop button ends the loop even while a tool is running.
 
-## Grammar patch: evaluated, NOT applied
-A grammar string on `GenerateRequest` wired to `llama_sampler_init_grammar` would make invalid JSON impossible.
-It was not done because: (1) `Session` builds its sampler chain inside `open()` from `SessionConfig`; a per-request
-grammar means rebuilding or extending that chain inside `generate()`, touching the speculative-decoding paths
-(MTP/n-gram verify and rollback assume the chain state), (2) it cannot be compiled or tested in this environment
-(no NDK, no device, no model), and a sampler bug corrupts every generation, (3) the tolerant parser + retry covers
-the failure mode in practice. If wanted later, add it as `patches/0002-…` and test on a device first.
+## Grammar-checked tool calls (Snap fork)
+Settings → Tools → Agent → "Grammar-checked tool calls" (on by default). `parser/ToolGrammar` builds a GBNF grammar for
+`<tool_call>{"name": <one of the enabled tools>, "arguments": {<JSON object>}}</tool_call>` (up to 4 calls, whitespace
+between, then only end-of-turn). `AgentController` sends it with every round as `GenerationRequest.toolGrammar`;
+it reaches the engine as `GenerateRequest::tool_grammar` / `tool_grammar_trigger` (JNI `nativeGenerate`).
+
+Engine side (`core/src/engine/tool_grammar.{h,cpp}`, `session.cpp`):
+* A LAZY grammar (`llama_sampler_init_grammar_lazy_patterns`): free sampling until the output contains `<tool_call>`,
+  then every token must continue the grammar. Prose before a call is unaffected.
+* It wraps whatever the turn draws from (session chain, per-request chain, or argmax). Fast path: take the token the
+  turn would take, check that single token against the grammar, and only on rejection resample with the grammar
+  applied to the whole vocabulary.
+* Speculative decoding: while the grammar is active, drafts are verified by drawing through it instead of argmax, so
+  the grammar sees every emitted token in order; the draw that rejects a draft becomes the next token directly.
+* Never accepts a token the grammar rejects or an end-of-generation inside an open call (llama.cpp aborts on both);
+  a dead end ends the turn instead and the tolerant parser + retry take over.
+* Skipped when the turn may reason first (`think` on, or `ThinkControl::None`): a `<tool_call>` mentioned inside a
+  reasoning span would switch it on there. With "Think after tool results" off (default) this means every round
+  after the first is constrained, and all rounds when Thinking is off.
+* A grammar that does not parse is dropped with a log line; the turn runs unconstrained.
+* The stateless API-server path is unchanged.
+
+Tested on the host against the vendored llama.cpp with a vocab-only GGUF: valid call untouched, unknown tool name
+overruled, end-of-turn refused mid-call, prose after a call refused, raw newline inside a JSON string refused, trigger
+split over single-character tokens, 60,000 characters of prose before a call (about 0.5 ms per token on a desktop CPU
+for the trigger search). Not yet run on a device.

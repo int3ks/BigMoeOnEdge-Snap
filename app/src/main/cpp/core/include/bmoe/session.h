@@ -145,6 +145,14 @@ struct GenerateRequest {
     // When true: temp <= 0 is greedy, otherwise a top-k/top-p/temperature chain seeded with `sampling.seed`.
     bool sampling_override = false;
     SamplingConfig sampling;
+
+    // ---- Tool-call grammar (app chat path only; ignored in stateless chat mode) ---------------------------
+    // Non-empty = a GBNF grammar (root rule "root") applied LAZILY: sampling is free until the generated text
+    // contains the literal word `tool_grammar_trigger`, and from that word on every token must continue the grammar. Only applied when this turn is not expected to reason first (think off and
+    // the model can be stopped from reasoning), since a trigger mentioned inside a reasoning span would otherwise fire.
+    // A grammar that fails to parse is dropped with a log line; the turn then runs unconstrained.
+    std::string tool_grammar;
+    std::string tool_grammar_trigger;
 };
 
 // Teacher-forced quality measurement. The text is fixed, so every cell scores the SAME token

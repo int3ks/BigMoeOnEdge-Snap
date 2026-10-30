@@ -123,6 +123,10 @@ class EngineNativeBridge {
         think: Boolean,
         imageDims: IntArray,
         imageData: Array<ByteArray>,
+        /** UTF-8 GBNF, empty = no tool-call grammar. */
+        toolGrammar: ByteArray,
+        /** UTF-8 literal word that switches the lazy grammar on (e.g. "<tool_call>"). */
+        toolGrammarTrigger: ByteArray,
         callback: NativeGenerationCallback
     ): Boolean
 
