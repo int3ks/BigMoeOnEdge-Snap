@@ -86,14 +86,22 @@ tells you. Start a new chat, or raise the context size on the Models / Engine se
 ## 3. What you see in the chat
 
 * **Live status row** above the input while a tool runs: what it is doing (`Termux: pip install gtts…`), the elapsed
-  time, and the **last output line** of the command (`› Successfully installed gtts-2.5.4`). While the model is writing a
-  tool call you already see `Writing run_shell: python3 make_audio.py…`; after a command it shows *Reading the result…*.
-* **Cancel button** next to the running command. It stops the command **including all child processes** (TERM, then
-  KILL for the whole process tree) and tells the model "Cancelled by the user after N s", so it can react instead of
-  waiting. The normal Stop button also stops a running command.
-* **Timeouts:** if a command takes longer than its `timeout_seconds`, it is stopped the same way and the model gets
-  the output so far with a note. The tool description tells the model to ask for a longer `timeout_seconds` for
-  installs (up to 1800 s = 30 minutes).
+  time with the limit (`1 min 05 s / 10 min`), and "no output for N min" when a command has been silent for a while.
+  While the model is writing a tool call you already see `Writing run_shell: python3 make_audio.py…`; after a command it
+  shows *Reading the result…*.
+* **Output, folded:** under the status row, `▸ Output` with the latest line. Tap it to unfold the command's whole output
+  so far; it follows the end like a terminal. Python output appears as it is printed.
+* **Cancel** next to the running command shows *Stopping…* at once, stops the command **including all child processes**
+  (TERM, then KILL for the whole process tree) and **ends the agent run**: the model is not asked again, you say how to go
+  on. The normal Stop button also stops a running command.
+* **Time limits:** if a command takes longer than its `timeout_seconds`, it is stopped the same way and the model gets
+  the output so far with a note. The tool description tells the model to ask for a longer limit for installs (up to
+  1800 s = 30 minutes).
+* **When Termux does not react:** if Termux has not started a command after 20 s (Android paused it in the background),
+  the agent gets a clear error instead of waiting for the limit, and the command is marked so it can never start later.
+  If a command finished but Termux's answer got lost, the app reads the exit code and output from the files after 5 s.
+* **No hanging on prompts:** commands get no input, so a program that asks a question fails at once with an error the
+  model can react to (e.g. by adding `-y`).
 * **Results** appear as collapsible tool cards titled `Termux · exit 0 ✓`, `Termux · exit 1 ✗`,
   `Termux · cancelled` or `Termux · stopped (time limit)`; tap one to see the full command output.
 
@@ -180,7 +188,7 @@ reports `cover.png`.
 | *the workspace is in the app's private storage* | Turn on *Shared workspace folder* (step 3). |
 | `Permission denied` on files in the workspace | Run `termux-setup-storage` in Termux and allow storage access. |
 | `pkg install` fails / *unable to locate package* | Let it run `pkg update -y` first; on a slow mirror run `termux-change-repo` once in Termux. |
-| A command hangs | Tap **Cancel** next to it; the whole process tree is stopped. Often a program waited for input – the model then retries with `-y` or a non-interactive flag. |
+| A command hangs | Tap **Cancel** next to it; the whole process tree is stopped and the run ends. Unfold *Output* to see where it stopped. |
 | The agent explains commands instead of running them | Make sure the Termux switch is on for this chat (tool chips above the input). |
 | The agent stops with a context note | Start a new chat, or raise the context size and use a `Q8_0` KV cache. |
-| No result and no error after a long time | Open Termux once: Android may have put it to sleep. Excluding Termux from battery optimisation helps for long jobs. |
+| *Termux did not start the command within 20s* | Android paused Termux. Open Termux once and allow it to run in the background (battery settings: no restrictions / allow background activity). |

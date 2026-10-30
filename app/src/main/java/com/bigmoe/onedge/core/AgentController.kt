@@ -66,6 +66,8 @@ sealed interface AgentEvent {
     data class ToolStarted(val name: String, val arguments: String) : AgentEvent
     /** Live status of the running tool, e.g. elapsed time and the last line a Termux command printed. */
     data class ToolProgress(val text: String) : AgentEvent
+    /** The running command's output so far (its end), shown folded under the status line. */
+    data class ToolOutput(val text: String) : AgentEvent
     /** All tools of this round have finished (or were cancelled); the cancel button can go. */
     data object ToolsFinished : AgentEvent
     /** The model is writing a tool call right now (the call itself is hidden from the chat), e.g. "Writing create_file: a.py". */
@@ -102,11 +104,20 @@ class AgentController(
         toolManager.cancelRunningTools()
     }
 
-    /** The cancel button next to a running tool: ends only the tool(s); the model gets "cancelled" and goes on. */
-    fun cancelRunningTools(): Boolean = toolManager.cancelRunningTools()
+    /**
+     * The cancel button next to a running tool: ends the tool(s) (the model gets "cancelled" as their result, so the
+     * chat history stays complete) and then the agent run, without another model turn. The user says how to go on.
+     */
+    @Volatile private var cancelRequested = false
+
+    fun cancelRunningTools(): Boolean {
+        cancelRequested = true
+        return toolManager.cancelRunningTools()
+    }
 
     fun runAgentLoop(request: AgentRequest, sink: MessageSink): Flow<AgentEvent> = flow {
         stopRequested = false
+        cancelRequested = false
         val settings = request.settings
         // Web search has two modes (docs/tool-calling.md):
         //  AUTO   - the model is told about the tool and decides to emit <tool_call> itself;
@@ -295,7 +306,11 @@ class AgentController(
             // Status events from the tools (which call starts, live progress) arrive on this channel and are emitted by
             // the loop below while the tools run, so the chat shows what is happening instead of a frozen line.
             val live = Channel<AgentEvent>(Channel.UNLIMITED)
-            val toolCtx = ToolContext(request.sessionId, assistantId) { text -> live.trySend(AgentEvent.ToolProgress(text)) }
+            val toolCtx = ToolContext(
+                request.sessionId, assistantId,
+                onOutput = { text -> live.trySend(AgentEvent.ToolOutput(text)) },
+                onProgress = { text -> live.trySend(AgentEvent.ToolProgress(text)) }
+            )
             suspend fun runOne(name: String, args: String): String {
                 live.trySend(AgentEvent.ToolStarted(name, args))
                 return when {
@@ -343,6 +358,11 @@ class AgentController(
             emit(AgentEvent.MessageSaved(toolId, MessageRole.TOOL))
             if (stopRequested) {
                 emit(AgentEvent.Notice(NOTE_STOPPED))
+                emit(AgentEvent.Done)
+                return@flow
+            }
+            if (cancelRequested || outputs.any { it.startsWith(ToolManager.CANCELLED_BY_USER) }) {
+                emit(AgentEvent.Notice(NOTE_CANCELLED))
                 emit(AgentEvent.Done)
                 return@flow
             }
@@ -414,6 +434,7 @@ ${request.prompt}""".trim()
     companion object {
         const val MAX_CALLS_PER_ROUND = 4
         const val NOTE_STOPPED = "Stopped"
+        const val NOTE_CANCELLED = "Cancelled. Tell the AI how to go on."
 
         /**
          * Non-null when the next round would not fit: [nPast] tokens already in the context, plus the tool result

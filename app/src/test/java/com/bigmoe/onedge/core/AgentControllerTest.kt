@@ -41,17 +41,17 @@ class AgentControllerTest {
         }
     }
 
-    private class Env(scope: TestScope) {
+    private class Env(scope: TestScope, reply: String = "RESULT-TEXT") {
         val fake = FakeEngineBackend()
         val engine = EngineController({ fake }, UnconfinedTestDispatcher(scope.testScheduler))
-        val tool = FakeSearchTool()
+        val tool = FakeSearchTool(reply)
         val tools = ToolManager().apply { registerTool(tool) }
         val agent = AgentController(engine, tools)
         val sink = RecordingSink()
     }
 
-    private suspend fun env(scope: TestScope): Env {
-        val e = Env(scope)
+    private suspend fun env(scope: TestScope, reply: String = "RESULT-TEXT"): Env {
+        val e = Env(scope, reply)
         e.engine.loadModel(File.createTempFile("m", ".gguf").apply { deleteOnExit() }.path, cfg)
         return e
     }
@@ -177,6 +177,22 @@ class AgentControllerTest {
         assertTrue(second.prompt.startsWith("<tool_response>"))
         assertTrue(second.prompt.contains("RESULT-TEXT"))
         assertTrue("tools described in the system prompt", e.fake.calls[0].system.contains("<tool_call>"))
+    }
+
+    @Test
+    fun cancelledToolEndsTheRunWithoutAnotherModelTurn() = runTest {
+        // A tool whose result says the user cancelled it (what ToolManager returns after the Cancel button).
+        val e = env(this, reply = ToolManager.CANCELLED_BY_USER + " after 3s.")
+        e.fake.script.add(ScriptedTurn(tokens = listOf(call)))
+        e.fake.script.add(ScriptedTurn(tokens = listOf("should never be generated")))
+        val events = e.agent.runAgentLoop(req(), e.sink).toList()
+
+        assertEquals(1, e.tool.calls.size)
+        assertEquals("only the turn with the call ran", 1, e.fake.calls.size)
+        assertEquals(listOf(MessageRole.ASSISTANT, MessageRole.TOOL), e.sink.saved.map { it.role })
+        assertTrue(e.sink.saved[1].content.contains(ToolManager.CANCELLED_BY_USER))
+        assertTrue(events.any { it is AgentEvent.Notice && it.text == AgentController.NOTE_CANCELLED })
+        assertTrue(events.last() is AgentEvent.Done)
     }
 
     @Test

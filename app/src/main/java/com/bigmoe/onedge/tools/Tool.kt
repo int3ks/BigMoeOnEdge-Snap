@@ -6,9 +6,16 @@ enum class ToolCategory { FILES, CODE, WEB, UTILITIES, TERMUX }
 
 /**
  * Which chat message a tool call belongs to (so created files can be linked to it). [onProgress] takes a short
- * live status line while a long-running tool works (e.g. the last line a Termux command printed); thread-safe.
+ * live status line while a long-running tool works (e.g. the last line a Termux command printed); [onOutput] the
+ * running command's whole output so far (its end), which the chat shows folded. Both thread-safe.
+ * [onProgress] stays the last parameter, so `ToolContext(session, message) { line -> ... }` sets it.
  */
-data class ToolContext(val sessionId: String, val messageId: String, val onProgress: (String) -> Unit = {}) {
+data class ToolContext(
+    val sessionId: String,
+    val messageId: String,
+    val onOutput: (String) -> Unit = {},
+    val onProgress: (String) -> Unit = {}
+) {
     companion object {
         val NONE = ToolContext("", "")
     }
@@ -55,6 +62,12 @@ interface Tool {
      * legitimately run for minutes (a package install in Termux) say so here.
      */
     fun timeoutMs(arguments: JSONObject): Long? = null
+
+    /** The time limit to show next to the elapsed time while the tool runs, in seconds; null = none shown. */
+    fun limitSeconds(arguments: JSONObject): Int? = null
+
+    /** Called once when an agent run ends (finished, stopped or failed), e.g. to release what the tool held. */
+    suspend fun onRunFinished() {}
 
     /** Non-null = the user must approve first. May read files (called off the main thread). */
     fun confirmation(arguments: JSONObject): ConfirmationRequest? = null

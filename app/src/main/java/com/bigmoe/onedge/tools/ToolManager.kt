@@ -130,6 +130,9 @@ class ToolManager(
     }
 
     companion object {
+        /** Start of a tool result when the user pressed Cancel; the agent run then ends after this round. */
+        const val CANCELLED_BY_USER = "Cancelled by the user"
+
         /** Appended when run_shell is enabled: how to work as an agent in Termux. Kept short, it is part of every prompt. */
         const val AGENT_SHELL_HINT =
             "\n\nYou are an agent with a real Linux environment on this device: run_shell runs bash in Termux. Use it on " +
@@ -143,8 +146,10 @@ class ToolManager(
                 "command -v ffmpeg >/dev/null || pkg install -y ffmpeg ; " +
                 "python3 -c 'import gtts' 2>/dev/null || pip install gtts ; " +
                 "if Python itself is missing: pkg install -y python. If pkg fails, run pkg update -y first. Never start " +
-                "interactive programs. For long jobs, write the output to a file. Only report success when the exit code " +
-                "and the output show it, and then tell the user which file(s) you made."
+                "interactive programs (input is closed, so a prompt fails at once). For long jobs, write the output to a " +
+                "file. Never claim a result before the tool call that produces it: write your answer to the user only after " +
+                "the last tool result, and only report success when the exit code and the output show it. Then name the " +
+                "file(s) by their path in the workspace (e.g. story.pdf), never as sandbox: or /mnt/data links."
     }
 
     /** Never throws (except coroutine cancellation): failures come back as "Error: ..." text for the model. */
@@ -179,8 +184,8 @@ class ToolManager(
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     if (e !is TimeoutCancellationException && cancelledByUser.contains(job) && currentCoroutineContext().isActive) {
                         val s = (System.nanoTime() - startedNs) / 1_000_000_000L
-                        return@coroutineScope "Cancelled by the user after ${s}s. Do not simply run the same thing " +
-                            "again; if it is still needed, try a different way or ask the user."
+                        return@coroutineScope "$CANCELLED_BY_USER after ${s}s. The run was stopped there; wait for the " +
+                            "user's next message and do not simply run the same thing again."
                     }
                     throw e
                 } finally {
@@ -218,5 +223,18 @@ class ToolManager(
     fun describeCall(toolName: String, argumentsJson: String): String {
         val tool = registeredTools[toolName] ?: return toolName
         return try { tool.describe(if (argumentsJson.isBlank()) JSONObject() else JSONObject(argumentsJson)) } catch (_: Exception) { toolName }
+    }
+
+    /** The time limit the chat shows next to a running call, in seconds, or null. */
+    fun limitSecondsOf(toolName: String, argumentsJson: String): Int? {
+        val tool = registeredTools[toolName] ?: return null
+        return try { tool.limitSeconds(if (argumentsJson.isBlank()) JSONObject() else JSONObject(argumentsJson)) } catch (_: Exception) { null }
+    }
+
+    /** End of an agent run: every tool may release what it held (run_shell: Termux's wake lock). Never throws. */
+    suspend fun finishRun() {
+        for (tool in registeredTools.values) {
+            try { tool.onRunFinished() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { }
+        }
     }
 }

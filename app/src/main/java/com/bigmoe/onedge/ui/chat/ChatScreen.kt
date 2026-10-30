@@ -329,12 +329,14 @@ fun ChatScreen(
                                 if (uiState.liveText.isEmpty() && uiState.liveReasoning.isEmpty()) {
                                     LiveStatusRow(
                                         uiState.liveStatus ?: "Reading…",
-                                        if (uiState.toolRunning) formatToolElapsed(uiState.toolElapsedMs) else formatStats(
+                                        if (uiState.toolRunning) formatToolTelemetry(uiState.toolElapsedMs, uiState.toolLimitMs, uiState.toolQuietMs) else formatStats(
                                             uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
                                             uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                         ),
                                         detail = uiState.liveDetail,
-                                        onCancel = if (uiState.toolRunning) viewModel::cancelTool else null
+                                        onCancel = if (uiState.toolRunning) viewModel::cancelTool else null,
+                                        output = uiState.liveOutput,
+                                        cancelling = uiState.toolCancelling
                                     )
                                 } else {
                                     ChatMessageBubble(
@@ -352,12 +354,14 @@ fun ChatScreen(
                                     uiState.liveStatus?.let {
                                         LiveStatusRow(
                                             it,
-                                            if (uiState.toolRunning) formatToolElapsed(uiState.toolElapsedMs) else formatStats(
+                                            if (uiState.toolRunning) formatToolTelemetry(uiState.toolElapsedMs, uiState.toolLimitMs, uiState.toolQuietMs) else formatStats(
                                                 uiState.liveTokensPerSecond, null, uiState.generationTokens, null,
                                                 uiState.generationElapsedMs, uiState.contextUsed.takeIf { it > 0 }, uiState.contextTotal
                                             ),
                                             detail = uiState.liveDetail,
-                                            onCancel = if (uiState.toolRunning) viewModel::cancelTool else null
+                                            onCancel = if (uiState.toolRunning) viewModel::cancelTool else null,
+                                            output = uiState.liveOutput,
+                                            cancelling = uiState.toolCancelling
                                         )
                                     }
                                 }
@@ -609,8 +613,12 @@ private fun LiveStatusRow(
     text: String,
     telemetry: String? = null,
     detail: String? = null,
-    onCancel: (() -> Unit)? = null
+    onCancel: (() -> Unit)? = null,
+    /** A running command's output so far: folded to its last line ([detail]), unfolds to all of it. */
+    output: String? = null,
+    cancelling: Boolean = false
 ) {
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -628,16 +636,63 @@ private fun LiveStatusRow(
             if (onCancel != null) {
                 androidx.compose.material3.OutlinedButton(
                     onClick = onCancel,
+                    enabled = !cancelling,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(30.dp)
-                ) { Text("Cancel", style = MaterialTheme.typography.labelMedium) }
+                ) { Text(if (cancelling) "Stopping…" else "Cancel", style = MaterialTheme.typography.labelMedium) }
             }
         }
-        if (!detail.isNullOrBlank()) {
+        val mono = androidx.compose.ui.text.font.FontFamily.Monospace
+        if (!output.isNullOrBlank()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .padding(start = 16.dp, top = 2.dp)
+                    .clickable { expanded = !expanded }
+            ) {
+                Text(
+                    if (expanded) "▾ Output" else "▸ Output",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary
+                )
+                if (!expanded && !detail.isNullOrBlank()) {
+                    Text(
+                        detail, style = MaterialTheme.typography.labelSmall, fontFamily = mono,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (expanded) {
+                val scroll = androidx.compose.foundation.rememberScrollState()
+                // Follows the end like a terminal: after each new chunk, once it is laid out, scroll to the bottom.
+                androidx.compose.runtime.LaunchedEffect(output) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    scroll.scrollTo(scroll.maxValue)
+                }
+                androidx.compose.material3.Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp)
+                ) {
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(
+                            output.trimEnd(),
+                            style = MaterialTheme.typography.labelSmall, fontFamily = mono,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .heightIn(max = 280.dp)
+                                .verticalScroll(scroll)
+                                .padding(8.dp)
+                        )
+                    }
+                }
+            }
+        } else if (!detail.isNullOrBlank()) {
             Text(
                 text = detail,
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                fontFamily = mono,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 16.dp, top = 2.dp)
@@ -646,8 +701,18 @@ private fun LiveStatusRow(
     }
 }
 
+/** "3 min 05 s / 30 min • no output for 2 min" for a running tool. */
+internal fun formatToolTelemetry(elapsedMs: Long, limitMs: Long?, quietMs: Long): String {
+    val b = StringBuilder(formatToolElapsed(elapsedMs))
+    if (limitMs != null && limitMs > 0) {
+        b.append(" / ").append(if (limitMs % 60_000L == 0L) "${limitMs / 60_000L} min" else formatToolElapsed(limitMs))
+    }
+    if (quietMs >= 60_000L) b.append(" • no output for ").append(quietMs / 60_000L).append(" min")
+    return b.toString()
+}
+
 /** "12 s" / "3 min 05 s" for a running tool. */
-private fun formatToolElapsed(ms: Long): String {
+internal fun formatToolElapsed(ms: Long): String {
     val s = ms / 1000
     return if (s < 60) "$s s" else "${s / 60} min ${(s % 60).toString().padStart(2, '0')} s"
 }

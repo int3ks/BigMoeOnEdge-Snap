@@ -4,13 +4,14 @@ import com.bigmoe.onedge.workspace.Workspace
 import com.bigmoe.onedge.workspace.WorkspaceException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /** What a shell command returned. Plain data, so [RunShellTool] can be tested on the JVM. */
@@ -50,8 +51,19 @@ interface ShellBackend {
 class RunShellTool(
     private val backend: ShellBackend,
     private val workspace: Workspace,
-    private val sharedWorkspaceRoot: () -> File?
+    private val sharedWorkspaceRoot: () -> File?,
+    private val timing: Timing = Timing()
 ) : Tool {
+    /**
+     * [startGraceMs]: how long Termux may take to start a command (its pid file appears) before the app reports that
+     * Termux is not responding. [resultGraceMs]: how long to wait for Termux's answer after the command has finished
+     * (its exit-code file appears) before the app reads the result from the files itself.
+     */
+    data class Timing(val pollMs: Long = 1_000L, val startGraceMs: Long = 20_000L, val resultGraceMs: Long = 5_000L)
+
+    /** termux-wake-lock is held from the first command of an agent run until [onRunFinished]. */
+    private val wakeLockHeld = AtomicBoolean(false)
+
     override val name = "run_shell"
     override val category = ToolCategory.TERMUX
     override val description =
@@ -76,6 +88,15 @@ class RunShellTool(
         "Termux: " + arguments.optString("command").lineSequence().firstOrNull().orEmpty().take(60)
 
     override fun timeoutMs(arguments: JSONObject): Long = waitSeconds(arguments) * 1000L + GRACE_MS
+
+    override fun limitSeconds(arguments: JSONObject): Int = waitSeconds(arguments)
+
+    /** End of an agent run: lets Android put Termux to sleep again. */
+    override suspend fun onRunFinished() {
+        if (!wakeLockHeld.compareAndSet(true, false)) return
+        val root = sharedWorkspaceRoot() ?: return
+        try { backend.run("termux-wake-unlock", root.path, 10_000L) } catch (_: Exception) { }
+    }
 
     override fun confirmation(arguments: JSONObject): ConfirmationRequest {
         val cwd = arguments.optString("cwd").ifBlank { "workspace" }
@@ -111,49 +132,114 @@ class RunShellTool(
         if (!dir.path.startsWith(root.path)) throw ToolInputException("the workspace changed while the command was prepared; try again")
 
         val seconds = waitSeconds(arguments)
-        // Housekeeping next to the files: the command's pid (to stop it) and a copy of its output (shown live).
+        // Housekeeping next to the files: the command's pid (to stop it), a copy of its output (shown live), its exit
+        // code (so the result does not depend on Termux's answer arriving) and, when the app gave up on a command
+        // Termux had not started yet, a marker that makes the wrapper exit instead of running it late.
         val runDir = File(root, Workspace.AGENT_DIR).apply { mkdirs() }
+        cleanStaleMarkers(runDir)
         val id = "run-" + nextRun.incrementAndGet() + "-" + (System.currentTimeMillis() % 100_000)
         val pidFile = File(runDir, "$id.pid")
         val logFile = File(runDir, "$id.log")
+        val rcFile = File(runDir, "$id.rc")
+        val abandonFile = File(runDir, "$id.abandon")
         val label = describe(arguments)
+
+        // Keeps Termux awake for the rest of the agent run (released in onRunFinished). Best effort: when Termux does
+        // not answer, the start check below reports it.
+        if (wakeLockHeld.compareAndSet(false, true)) {
+            try { backend.run("termux-wake-lock", root.path, 10_000L) } catch (_: Exception) { }
+        }
+
         try {
-            val result = coroutineScope {
-                val poll = launch {
-                    var shown = ""
-                    while (true) {
-                        delay(PROGRESS_INTERVAL_MS)
+            val outcome: Outcome = coroutineScope {
+                val run = async { backend.run(WRAPPER, dir.path, seconds * 1000L, listOf("bmoe-run", command, runDir.path, id)) }
+                val startedAt = System.currentTimeMillis()
+                var started = false
+                var finishedAt: Long? = null
+                var shownLine = ""
+                var shownOutput = ""
+                while (!run.isCompleted) {
+                    withTimeoutOrNull(timing.pollMs) { run.join() }
+                    if (run.isCompleted) break
+                    val now = System.currentTimeMillis()
+                    val output = tail(logFile, LIVE_OUTPUT_BYTES)
+                    if (output != shownOutput) {
+                        shownOutput = output
+                        ctx.onOutput(output)
                         val last = lastLine(logFile)
-                        if (last.isNotEmpty() && last != shown) {
-                            shown = last
+                        if (last.isNotEmpty() && last != shownLine) {
+                            shownLine = last
                             ctx.onProgress("$label…\n› $last") // the chat shows the elapsed time itself
                         }
                     }
+                    if (pidFile.isFile || rcFile.isFile) started = true
+                    if (!started && now - startedAt > timing.startGraceMs) {
+                        abandonFile.createNewFile() // if Termux wakes up later, the wrapper exits instead of running it
+                        run.cancel()
+                        return@coroutineScope Outcome.NotStarted
+                    }
+                    if (rcFile.isFile) {
+                        val since = finishedAt ?: now.also { finishedAt = it }
+                        if (now - since > timing.resultGraceMs) {
+                            run.cancel()
+                            return@coroutineScope Outcome.FromFiles(resultFromFiles(rcFile, logFile))
+                        }
+                    }
                 }
-                try {
-                    backend.run(WRAPPER, dir.path, seconds * 1000L, listOf("bmoe-run", command, runDir.path, id))
-                } finally {
-                    poll.cancel()
+                run.await()?.let { Outcome.Answered(it) } ?: Outcome.TimedOut
+            }
+            return when (outcome) {
+                is Outcome.Answered -> format(outcome.result)
+                is Outcome.FromFiles -> format(outcome.result) +
+                    "\n(Termux's answer did not arrive, so this was read from the command's log; stdout and stderr are mixed.)"
+                Outcome.NotStarted ->
+                    "Error: Termux did not start the command within ${timing.startGraceMs / 1000}s. Android has probably " +
+                        "paused Termux in the background. Tell the user to open Termux once and allow it to run in the " +
+                        "background (battery settings: no restrictions, allow background activity), then try again. " +
+                        "The command was not run."
+                Outcome.TimedOut -> {
+                    val stopped = stop(pidFile, dir)
+                    "No result after ${seconds}s, so the command was " + (if (stopped) "stopped" else "abandoned (it could not be confirmed stopped)") +
+                        ". Output so far:\n" + tail(logFile, 1500).ifBlank { "(none)" } +
+                        "\nFor long jobs, raise timeout_seconds (up to $MAX_TIMEOUT_S) or run it in steps."
                 }
             }
-            if (result == null) {
-                val stopped = stop(pidFile, dir)
-                return "No result after ${seconds}s, so the command was " + (if (stopped) "stopped" else "abandoned (it could not be confirmed stopped)") +
-                    ". Output so far:\n" + tail(logFile, 1500).ifBlank { "(none)" } +
-                    "\nFor long jobs, raise timeout_seconds (up to $MAX_TIMEOUT_S) or run it in steps."
-            }
-            return format(result)
         } catch (e: ShellBackend.Unavailable) {
             throw ToolInputException(e.message ?: "Termux is not reachable")
         } catch (e: CancellationException) {
-            // The cancel button or Stop: end the command in Termux too, so nothing keeps running unseen.
-            withContext(NonCancellable) { stop(pidFile, dir) }
+            // The cancel button or Stop: end the command in Termux too, so nothing keeps running unseen; a command
+            // Termux has not started yet is marked so it never starts.
+            withContext(NonCancellable) {
+                if (!pidFile.isFile && !rcFile.isFile) runCatching { abandonFile.createNewFile() }
+                stop(pidFile, dir)
+            }
             throw e
         } finally {
             pidFile.delete()
             logFile.delete()
+            rcFile.delete()
             runDir.delete() // only when empty
         }
+    }
+
+    private sealed interface Outcome {
+        data class Answered(val result: TermuxResult) : Outcome
+        data class FromFiles(val result: TermuxResult) : Outcome
+        data object NotStarted : Outcome
+        data object TimedOut : Outcome
+    }
+
+    /** The command finished but Termux's answer is missing: exit code and output come from the wrapper's files. */
+    private fun resultFromFiles(rcFile: File, logFile: File): TermuxResult {
+        val rc = runCatching { rcFile.readText().trim().toInt() }.getOrNull()
+        val len = logFile.length().toInt()
+        return TermuxResult(tail(logFile, FALLBACK_OUTPUT_BYTES), "", rc, -1, null, stdoutOriginalLength = len)
+    }
+
+    /** Markers of commands that never started are removed after a day; nothing else is left in the folder. */
+    private fun cleanStaleMarkers(runDir: File) {
+        val old = System.currentTimeMillis() - 24 * 3600_000L
+        runDir.listFiles { f -> f.name.endsWith(".abandon") && f.lastModified() < old }?.forEach { it.delete() }
     }
 
     /** Ends the wrapper and every process below it. True when Termux confirmed the stop script ran. */
@@ -171,7 +257,10 @@ class RunShellTool(
         const val MAX_TIMEOUT_S = 1800
         private const val GRACE_MS = 15_000L
         private const val STOP_TIMEOUT_MS = 8_000L
-        private const val PROGRESS_INTERVAL_MS = 1_000L
+        /** How much of the running command's output the chat shows (the end of it). */
+        private const val LIVE_OUTPUT_BYTES = 6_000
+        /** Same limit Termux has for its own answer. */
+        private const val FALLBACK_OUTPUT_BYTES = 100_000
         private val nextRun = AtomicInteger(0)
 
         /**
@@ -180,9 +269,14 @@ class RunShellTool(
          * both streams separately. The command's exit code is the wrapper's.
          */
         internal const val WRAPPER =
-            "echo \$\$ > \"\$2/\$3.pid\"\n" +
-                "bash -c \"\$1\" > >(tee -a \"\$2/\$3.log\") 2> >(tee -a \"\$2/\$3.log\" >&2)\n" +
+            "[ -e \"\$2/\$3.abandon\" ] && { rm -f \"\$2/\$3.abandon\"; exit 125; }\n" +
+                "echo \$\$ > \"\$2/\$3.pid\"\n" +
+                // Output shows up as it is written (Python buffers it otherwise), and nothing can wait for input:
+                // a prompt fails at once instead of hanging until the time limit.
+                "export PYTHONUNBUFFERED=1 PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1 DEBIAN_FRONTEND=noninteractive\n" +
+                "bash -c \"\$1\" < /dev/null > >(tee -a \"\$2/\$3.log\") 2> >(tee -a \"\$2/\$3.log\" >&2)\n" +
                 "rc=\$?\n" +
+                "echo \$rc > \"\$2/\$3.rc.tmp\" && mv -f \"\$2/\$3.rc.tmp\" \"\$2/\$3.rc\"\n" +
                 "rm -f \"\$2/\$3.pid\"\n" +
                 "exit \$rc\n"
 

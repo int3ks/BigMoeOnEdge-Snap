@@ -237,11 +237,16 @@ the commands with one tap.
 #### In the chat
 
 * A **live status row** shows what is going on: `Writing run_shell: python3 make_audio.py…` while the call is written,
-  then `Termux: pip install gtts…` with the elapsed time and the latest output line (`› Successfully installed …`),
-  then *Reading the result…*.
-* **Cancel** next to the running command stops it with its whole process tree and tells the model it was cancelled;
-  Stop does the same. A command that exceeds its time limit is stopped the same way and the model gets the output so
-  far.
+  then `Termux: pip install gtts…` with elapsed time and limit (`1 min 05 s / 10 min`, plus "no output for N min" when
+  it goes quiet), then *Reading the result…*.
+* **▸ Output** under the status row shows the latest line; tap it to unfold the command's whole output so far, which
+  follows the end like a terminal (Python output appears as it is printed).
+* **Cancel** next to the running command shows *Stopping…*, stops it with its whole process tree and ends the agent run;
+  you say how to go on. Stop does the same. A command that exceeds its time limit is stopped the same way and the model
+  gets the output so far.
+* Commands get no input, so a program that asks a question fails at once instead of hanging. If Termux does not start
+  a command within 20 s (Android paused it), the agent gets a clear error; if Termux's answer gets lost, the app reads
+  exit code and output from the command's files.
 * Each result is a collapsible card: `Termux · exit 0 ✓`, `Termux · exit 1 ✗`, `Termux · cancelled`,
   `Termux · stopped (time limit)`.
 

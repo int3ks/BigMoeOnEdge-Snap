@@ -74,6 +74,12 @@ data class ChatUiState(
     /** A tool is running right now: show its elapsed time and a cancel button. */
     val toolRunning: Boolean = false,
     val toolElapsedMs: Long = 0L,
+    /** The running command's output so far (shown folded), its time limit and how long it has printed nothing. */
+    val liveOutput: String? = null,
+    val toolLimitMs: Long? = null,
+    val toolQuietMs: Long = 0L,
+    /** Cancel was pressed and the tool is being stopped. */
+    val toolCancelling: Boolean = false,
     val inputDraft: String = "",
     val chooseFromOptions: Boolean = false,
     val choiceOptions: String = "",
@@ -164,6 +170,10 @@ class ChatViewModel(
                         liveDetail = if (sameChat && g.active) g.liveDetail else null,
                         toolRunning = sameChat && g.active && g.toolRunning,
                         toolElapsedMs = if (sameChat && g.active) g.toolElapsedMs else 0L,
+                        liveOutput = if (sameChat && g.active) g.liveOutput else null,
+                        toolLimitMs = if (sameChat && g.active) g.toolLimitMs else null,
+                        toolQuietMs = if (sameChat && g.active) g.toolQuietMs else 0L,
+                        toolCancelling = sameChat && g.active && g.toolCancelling,
                         notice = if (sameChat) g.notice ?: it.notice else it.notice,
                         pendingConfirmation = if (sameChat) g.pendingConfirmation else null
                     )
@@ -227,6 +237,10 @@ class ChatViewModel(
                     liveDetail = if (same && g.active) g.liveDetail else null,
                     toolRunning = same && g.active && g.toolRunning,
                     toolElapsedMs = if (same && g.active) g.toolElapsedMs else 0L,
+                    liveOutput = if (same && g.active) g.liveOutput else null,
+                    toolLimitMs = if (same && g.active) g.toolLimitMs else null,
+                    toolQuietMs = if (same && g.active) g.toolQuietMs else 0L,
+                    toolCancelling = same && g.active && g.toolCancelling,
                     pendingConfirmation = if (same) g.pendingConfirmation else null
                 ) }
             }
@@ -607,7 +621,7 @@ class ChatViewModel(
             is AgentEvent.Notice -> _uiState.update { it.copy(notice = ev.text) }
             is AgentEvent.ToolProgress -> _uiState.update { it.copy(liveStatus = ev.text.substringBefore('\n')) }
             is AgentEvent.ToolWriting -> _uiState.update { it.copy(liveStatus = ev.label) }
-            AgentEvent.ToolsFinished -> Unit
+            AgentEvent.ToolsFinished, is AgentEvent.ToolOutput -> Unit
             AgentEvent.GenerationStarted, is AgentEvent.GenerationProgress -> Unit
             // The saved message is now in the list below; start a clean live bubble for the next round.
             is AgentEvent.MessageSaved -> _uiState.update { it.copy(liveText = "", liveReasoning = "") }
@@ -620,7 +634,7 @@ class ChatViewModel(
         generationManager.stop() // Also refuses any tool approval currently waiting.
     }
 
-    /** Cancel button next to a running tool (e.g. a hanging Termux command): ends the tool, the agent goes on. */
+    /** Cancel button next to a running tool (e.g. a hanging Termux command): ends the tool and the agent run. */
     fun cancelTool() {
         generationManager.cancelTool()
     }

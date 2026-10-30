@@ -41,7 +41,16 @@ class GenerationManager(
         val toolStartedAt: Long? = null,
         val toolElapsedMs: Long = 0L,
         /** Second status line from the running tool, e.g. the last line a Termux command printed. */
-        val liveDetail: String? = null
+        val liveDetail: String? = null,
+        /** The running command's whole output so far (its end); the chat shows it folded. */
+        val liveOutput: String? = null,
+        /** The running tool's time limit, shown next to the elapsed time; null = none. */
+        val toolLimitMs: Long? = null,
+        /** When the running tool last printed something (or started); gives "no output for ...". */
+        val lastOutputAt: Long? = null,
+        val toolQuietMs: Long = 0L,
+        /** Cancel was pressed; the chat shows "Stopping…" until the tool has ended. */
+        val toolCancelling: Boolean = false
     ) {
         /** The new token count, with the live rate measured from the first generated token. */
         fun withTokens(tokens: Int, now: Long = System.currentTimeMillis()): State {
@@ -138,23 +147,36 @@ class GenerationManager(
                                 when (event) {
                                     AgentEvent.GenerationStarted -> update { copy(startedAt = startedAt ?: System.currentTimeMillis()) }
                                     is AgentEvent.ToolStarted -> update {
+                                        val now = System.currentTimeMillis()
                                         copy(
                                             liveStatus = toolManager.describeCall(event.name, event.arguments) + "…",
-                                            liveDetail = null, toolRunning = true,
-                                            toolStartedAt = System.currentTimeMillis(), toolElapsedMs = 0L
+                                            liveDetail = null, liveOutput = null, toolRunning = true,
+                                            toolStartedAt = now, toolElapsedMs = 0L, lastOutputAt = now, toolQuietMs = 0L,
+                                            toolLimitMs = toolManager.limitSecondsOf(event.name, event.arguments)?.let { it * 1000L },
+                                            toolCancelling = false
                                         )
+                                    }
+                                    is AgentEvent.ToolOutput -> update {
+                                        copy(liveOutput = event.text, lastOutputAt = System.currentTimeMillis(), toolQuietMs = 0L)
                                     }
                                     is AgentEvent.ToolProgress -> update {
                                         val lines = event.text.split('\n', limit = 2)
-                                        copy(liveStatus = lines[0], liveDetail = lines.getOrNull(1))
+                                        // While stopping, the "Stopping…" line stays.
+                                        if (toolCancelling) copy(liveDetail = lines.getOrNull(1))
+                                        else copy(liveStatus = lines[0], liveDetail = lines.getOrNull(1))
                                     }
                                     AgentEvent.ToolsFinished -> update {
-                                        copy(liveStatus = "Reading the result…", liveDetail = null, toolRunning = false, toolStartedAt = null)
+                                        copy(
+                                            liveStatus = if (toolCancelling) "Stopped" else "Reading the result…",
+                                            liveDetail = null, liveOutput = null, toolRunning = false, toolStartedAt = null,
+                                            toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false
+                                        )
                                     }
                                     is AgentEvent.ToolWriting -> update { copy(liveStatus = event.label, liveDetail = null) }
                                     is AgentEvent.Notice -> {
                                         terminalState = when {
                                             event.text == AgentController.NOTE_STOPPED -> "CANCELLED"
+                                            event.text == AgentController.NOTE_CANCELLED -> "CANCELLED"
                                             Regex("(?i)\\b(error|failed|crashed|unexpected|could not)\\b").containsMatchIn(event.text) -> "ERROR"
                                             else -> "FINISHED"
                                         }
@@ -195,7 +217,12 @@ class GenerationManager(
                         )
                     }
                     repository.finishGeneration(session.id, elapsed, final.generatedTokens, final.contextUsed, final.contextTotal, final.notice, terminalState)
-                    _state.value = final.copy(active = false, elapsedMs = elapsed, toolRunning = false, toolStartedAt = null, liveDetail = null)
+                    _state.value = final.copy(
+                        active = false, elapsedMs = elapsed, toolRunning = false, toolStartedAt = null, liveDetail = null,
+                        liveOutput = null, toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false
+                    )
+                    // Tools release what they held for the run (Termux's wake lock); not awaited, it may take a moment.
+                    scope.launch { toolManager.finishRun() }
                     clockJob?.cancel()
                     persistenceJob?.cancel()
                     GenerationForegroundService.stop(context)
@@ -210,7 +237,10 @@ class GenerationManager(
                 val st = s.startedAt
                 val now = System.currentTimeMillis()
                 if (s.active && st != null) update {
-                    copy(elapsedMs = now - st, toolElapsedMs = toolStartedAt?.let { now - it } ?: 0L)
+                    copy(
+                        elapsedMs = now - st, toolElapsedMs = toolStartedAt?.let { now - it } ?: 0L,
+                        toolQuietMs = lastOutputAt?.let { now - it } ?: 0L
+                    )
                 }
             }
         }
@@ -232,7 +262,15 @@ class GenerationManager(
     fun resolveConfirmation(approved: Boolean) { confirmation?.complete(approved) }
     fun stop() { if (generationJob?.isActive == true) agentController.requestStop(); confirmation?.complete(false) }
 
-    /** The cancel button next to a running tool: ends only that tool; the agent goes on with "cancelled" as result. */
-    fun cancelTool() { if (generationJob?.isActive == true) agentController.cancelRunningTools() }
+    /**
+     * The cancel button next to a running tool: ends the tool and then the agent run (see AgentController). Shows
+     * "Stopping…" at once, since ending a Termux command can take a few seconds. Also refuses a pending approval.
+     */
+    fun cancelTool() {
+        if (generationJob?.isActive != true) return
+        update { copy(toolCancelling = true, liveStatus = "Stopping…") }
+        confirmation?.complete(false)
+        agentController.cancelRunningTools()
+    }
     private inline fun update(crossinline transform: State.() -> State) { _state.value = transform(_state.value) }
 }
