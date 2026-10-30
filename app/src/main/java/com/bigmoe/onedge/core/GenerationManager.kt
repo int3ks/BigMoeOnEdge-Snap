@@ -50,7 +50,9 @@ class GenerationManager(
         val lastOutputAt: Long? = null,
         val toolQuietMs: Long = 0L,
         /** Cancel was pressed; the chat shows "Stopping…" until the tool has ended. */
-        val toolCancelling: Boolean = false
+        val toolCancelling: Boolean = false,
+        /** "Termux: pip install …" of the running call, shown again once a pending approval is given. */
+        val toolLabel: String? = null
     ) {
         /** The new token count, with the live rate measured from the first generated token. */
         fun withTokens(tokens: Int, now: Long = System.currentTimeMillis()): State {
@@ -81,7 +83,6 @@ class GenerationManager(
             confirmation = answer
             // The status row says that it waits for the user (with Accept / Reject right there), instead of looking
             // like a running command; the tool's clock starts once it is approved.
-            val runningLabel = _state.value.liveStatus
             update { copy(pendingConfirmation = request, liveStatus = "Waiting for your approval…", liveDetail = null) }
             var approved = false
             try { answer.await().also { approved = it } } finally {
@@ -89,7 +90,7 @@ class GenerationManager(
                 update {
                     copy(
                         pendingConfirmation = null,
-                        liveStatus = if (approved && !toolCancelling) runningLabel else liveStatus,
+                        liveStatus = if (approved && !toolCancelling) toolLabel ?: liveStatus else liveStatus,
                         toolStartedAt = if (approved) System.currentTimeMillis() else toolStartedAt,
                         toolElapsedMs = if (approved) 0L else toolElapsedMs,
                         lastOutputAt = if (approved) System.currentTimeMillis() else lastOutputAt
@@ -160,8 +161,11 @@ class GenerationManager(
                                     AgentEvent.GenerationStarted -> update { copy(startedAt = startedAt ?: System.currentTimeMillis()) }
                                     is AgentEvent.ToolStarted -> update {
                                         val now = System.currentTimeMillis()
+                                        val label = toolManager.describeCall(event.name, event.arguments) + "…"
                                         copy(
-                                            liveStatus = toolManager.describeCall(event.name, event.arguments) + "…",
+                                            // The approval request may already be up (it races this event): keep its line.
+                                            liveStatus = if (pendingConfirmation != null) liveStatus else label,
+                                            toolLabel = label,
                                             liveDetail = null, liveOutput = null, toolRunning = true,
                                             toolStartedAt = now, toolElapsedMs = 0L, lastOutputAt = now, toolQuietMs = 0L,
                                             toolLimitMs = toolManager.limitSecondsOf(event.name, event.arguments)?.let { it * 1000L },
@@ -228,10 +232,13 @@ class GenerationManager(
                         )
                     }
                     repository.finishGeneration(session.id, elapsed, final.generatedTokens, final.contextUsed, final.contextTotal, final.notice, terminalState)
-                    _state.value = final.copy(
-                        active = false, elapsedMs = elapsed, toolRunning = false, toolStartedAt = null, liveDetail = null,
-                        liveOutput = null, toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false
-                    )
+                    update {
+                        copy(
+                            active = false, elapsedMs = elapsed, toolRunning = false, toolStartedAt = null, liveDetail = null,
+                            liveOutput = null, toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false,
+                            pendingConfirmation = null
+                        )
+                    }
                     // Tools release what they held for the run (Termux's wake lock); not awaited, it may take a moment.
                     scope.launch { toolManager.finishRun() }
                     clockJob?.cancel()
@@ -283,5 +290,10 @@ class GenerationManager(
         confirmation?.complete(false) // still waiting for approval: this call is declined, the model decides
         agentController.cancelRunningTools()
     }
-    private inline fun update(crossinline transform: State.() -> State) { _state.value = transform(_state.value) }
+    /**
+     * Atomic (compare-and-set, retried on a race): agent events, the approval handler and the clock change the state
+     * from different threads. A plain read-modify-write here lost updates — an approval request overwritten by the
+     * "tool started" event that arrives at the same moment never showed its dialog, and the call waited forever.
+     */
+    private inline fun update(crossinline transform: State.() -> State) { _state.update { it.transform() } }
 }
