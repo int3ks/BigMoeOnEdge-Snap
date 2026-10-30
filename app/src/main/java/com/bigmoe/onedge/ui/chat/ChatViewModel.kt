@@ -143,9 +143,42 @@ class ChatViewModel(
     private var composerLoadJob: Job? = null
     private var composerSwitchJob: Job? = null
 
+    /** The app-wide settings; [chatToggles] (the open chat's own switches, if it has any) are laid over them. */
+    private var globalSettings = com.bigmoe.onedge.data.local.datastore.EngineSettings()
+    private var chatToggles: com.bigmoe.onedge.data.local.datastore.ChatToggles? = null
+    /** The chat being opened: the session row arrives a moment later, its switches must not wait for it. */
+    @Volatile private var openingComposerKey: String = ChatDraftState.NEW_CHAT_KEY
+
+    /** uiState.settings is what the open chat uses: the app-wide settings with the chat's own switches. */
+    private fun publishSettings() {
+        val effective = chatToggles?.applyTo(globalSettings) ?: globalSettings
+        _uiState.update { it.copy(settings = effective) }
+    }
+
+    /**
+     * A switch under the input changed: it is saved with this chat (a new chat keeps it once it is sent), and it is
+     * also the starting point of the next new chat. Other chats keep their own switches.
+     */
+    private fun updateToggles(change: (com.bigmoe.onedge.data.local.datastore.ChatToggles) -> com.bigmoe.onedge.data.local.datastore.ChatToggles) {
+        val key = currentComposerKey()
+        val before = chatToggles ?: com.bigmoe.onedge.data.local.datastore.ChatToggles.from(globalSettings)
+        val next = change(before)
+        chatToggles = next
+        publishSettings()
+        viewModelScope.launch {
+            composerStore.saveToggles(key, next)
+            if (next.thinking != before.thinking) settingsDataStore.updateThinkingEnabled(next.thinking)
+            if (next.webSearch != before.webSearch) settingsDataStore.updateWebSearchEnabled(next.webSearch)
+            if (next.files != before.files) settingsDataStore.updateToolsFilesEnabled(next.files)
+            if (next.code != before.code) settingsDataStore.updateToolsCodeEnabled(next.code)
+            if (next.utilities != before.utilities) settingsDataStore.updateToolsUtilitiesEnabled(next.utilities)
+            if (next.termux != before.termux) settingsDataStore.updateToolsTermuxEnabled(next.termux)
+        }
+    }
+
     init {
         settingsDataStore.settingsFlow
-            .onEach { s -> _uiState.update { it.copy(settings = s) } }
+            .onEach { s -> globalSettings = s; publishSettings() }
             .launchIn(viewModelScope)
         engineController.state
             .onEach { s ->
@@ -187,6 +220,7 @@ class ChatViewModel(
     fun loadSession(sessionId: String) {
         if (_uiState.value.currentSession?.id == sessionId) return
         composerSwitchJob?.cancel()
+        openingComposerKey = sessionId
         composerSwitchJob = viewModelScope.launch {
             flushComposerNow()
             observeSession(sessionId)
@@ -196,6 +230,7 @@ class ChatViewModel(
 
     /** Starts an empty chat; the session row is created lazily on the first message. */
     fun newChat() {
+        openingComposerKey = ChatDraftState.NEW_CHAT_KEY
         composerSwitchJob?.cancel()
         composerSwitchJob = viewModelScope.launch {
             flushComposerNow()
@@ -308,7 +343,10 @@ class ChatViewModel(
                 if (modelName.isNotBlank()) repository.addModelName(sessionId, modelName)
                 val userId = repository.addMessage(sessionId, NewMessage(MessageRole.USER, userText))
                 composerStore.clearSession(composerKey)
-                if (composerKey != sessionId) composerStore.clearSession(ChatDraftState.NEW_CHAT_KEY)
+                if (composerKey != sessionId) {
+                    composerStore.clearSession(ChatDraftState.NEW_CHAT_KEY)
+                    composerStore.moveToggles(composerKey, sessionId)
+                }
                 _uiState.update { it.copy(inputDraft = "", pendingAttachments = emptyList()) }
 
                 var contextText = ""
@@ -395,7 +433,10 @@ class ChatViewModel(
                 }
                 repository.addMessage(session.id, NewMessage(MessageRole.ASSISTANT, body, note = result.metrics))
                 composerStore.clearSession(composerKey)
-                if (composerKey != session.id) composerStore.clearSession(ChatDraftState.NEW_CHAT_KEY)
+                if (composerKey != session.id) {
+                    composerStore.clearSession(ChatDraftState.NEW_CHAT_KEY)
+                    composerStore.moveToggles(composerKey, session.id)
+                }
                 _uiState.update { it.copy(inputDraft = "", pendingAttachments = emptyList(), isGenerating = false) }
             } catch (e: CancellationException) { throw e }
             catch (t: Throwable) { _uiState.update { it.copy(isGenerating = false, notice = "Unexpected error: ${t.message ?: t.javaClass.simpleName}") } }
@@ -499,6 +540,16 @@ class ChatViewModel(
         val storedPending = composerStore.getPending(key)
         val pending = storedPending.filter { runCatching { workspace.exists(it.path) }.getOrDefault(false) }
         val draft = composerStore.getDraft(key)
+        var toggles = composerStore.getToggles(key, globalSettings)
+        if (toggles == null && key != ChatDraftState.NEW_CHAT_KEY) {
+            // A chat from before per-chat switches: it keeps what is set now, later changes elsewhere do not move it.
+            toggles = com.bigmoe.onedge.data.local.datastore.ChatToggles.from(globalSettings)
+            composerStore.saveToggles(key, toggles)
+        }
+        if (openingComposerKey == key) {
+            chatToggles = toggles
+            publishSettings()
+        }
         if (currentComposerKey() == key) {
             _uiState.update { it.copy(inputDraft = draft, pendingAttachments = pending) }
             if (pending.size != storedPending.size) composerStore.savePending(key, pending)
@@ -519,25 +570,14 @@ class ChatViewModel(
         generationManager.resolveConfirmation(approved)
     }
 
-    fun toggleToolFiles() {
-        val v = !_uiState.value.settings.toolsFilesEnabled
-        viewModelScope.launch { settingsDataStore.updateToolsFilesEnabled(v) }
-    }
+    // The switches under the input belong to the open chat (see updateToggles); Settings sets the defaults.
+    fun toggleToolFiles() = updateToggles { it.copy(files = !it.files) }
 
-    fun toggleToolCode() {
-        val v = !_uiState.value.settings.toolsCodeEnabled
-        viewModelScope.launch { settingsDataStore.updateToolsCodeEnabled(v) }
-    }
+    fun toggleToolCode() = updateToggles { it.copy(code = !it.code) }
 
-    fun toggleToolUtilities() {
-        val v = !_uiState.value.settings.toolsUtilitiesEnabled
-        viewModelScope.launch { settingsDataStore.updateToolsUtilitiesEnabled(v) }
-    }
+    fun toggleToolUtilities() = updateToggles { it.copy(utilities = !it.utilities) }
 
-    fun toggleToolTermux() {
-        val v = !_uiState.value.settings.toolsTermuxEnabled
-        viewModelScope.launch { settingsDataStore.updateToolsTermuxEnabled(v) }
-    }
+    fun toggleToolTermux() = updateToggles { it.copy(termux = !it.termux) }
 
     /** Files already made from a given text in this run (key = chat + text), so a second tap reuses the same file. */
     private val savedArtifactPaths = HashMap<String, String>()
@@ -766,16 +806,12 @@ class ChatViewModel(
     }
 
     /** The globe button in the input bar. */
-    fun toggleWebSearch() {
-        val enabled = !_uiState.value.settings.isWebSearchEnabled
-        viewModelScope.launch { settingsDataStore.updateWebSearchEnabled(enabled) }
-    }
+    fun toggleWebSearch() = updateToggles { it.copy(webSearch = !it.webSearch) }
 
     /** The brain button in the input bar; feeds GenerateRequest.think of the next message. */
     fun toggleThinking() {
         if (!_uiState.value.thinkingSwitchable) return
-        val enabled = !_uiState.value.settings.thinkingEnabled
-        viewModelScope.launch { settingsDataStore.updateThinkingEnabled(enabled) }
+        updateToggles { it.copy(thinking = !it.thinking) }
     }
 
     fun selectArtifact(artifact: ArtifactModel?) {

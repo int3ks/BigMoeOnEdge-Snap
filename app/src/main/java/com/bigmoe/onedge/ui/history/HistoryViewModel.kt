@@ -29,7 +29,7 @@ class HistoryViewModel(
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
             repository.deleteSession(sessionId)
-            composerStore.clearSession(sessionId)
+            composerStore.forgetChat(sessionId)
         }
     }
 
