@@ -488,8 +488,8 @@ fun ChatScreen(
                     request.diff?.let { DiffPreview(it) }
                 }
             },
-            confirmButton = { TextButton(onClick = { viewModel.resolveConfirmation(true) }) { Text(if (request.destructive) "Delete" else "Accept") } },
-            dismissButton = { TextButton(onClick = { viewModel.resolveConfirmation(false) }) { Text(if (request.destructive) "Cancel" else "Reject") } }
+            confirmButton = { TextButton(onClick = { viewModel.resolveConfirmation(true) }) { Text(request.approveText) } },
+            dismissButton = { TextButton(onClick = { viewModel.resolveConfirmation(false) }) { Text(request.rejectText) } }
         )
     }
 }
@@ -645,12 +645,12 @@ private fun LiveStatusRow(
                     onClick = { onApprove(true) },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(30.dp)
-                ) { Text(if (approval.destructive) "Delete" else "Accept", style = MaterialTheme.typography.labelMedium) }
+                ) { Text(approval.approveText, style = MaterialTheme.typography.labelMedium) }
                 androidx.compose.material3.OutlinedButton(
                     onClick = { onApprove(false) },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(30.dp)
-                ) { Text("Reject", style = MaterialTheme.typography.labelMedium) }
+                ) { Text(approval.rejectText, style = MaterialTheme.typography.labelMedium) }
             } else if (onCancel != null) {
                 androidx.compose.material3.OutlinedButton(
                     onClick = onCancel,

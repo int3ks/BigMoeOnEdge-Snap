@@ -155,7 +155,8 @@ class CreateFileTool(private val ws: Workspace, private val registry: ArtifactRe
             title = "Replace ${ws.normalize(path)}?",
             message = "The AI wants to overwrite this file.",
             diff = DiffUtil.unified(old, arguments.requireString("content")).ifEmpty { "(no changes)" },
-            destructive = true
+            destructive = true,
+            confirmLabel = "Replace"
         )
     }
 

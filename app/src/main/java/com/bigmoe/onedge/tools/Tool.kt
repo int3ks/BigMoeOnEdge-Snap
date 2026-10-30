@@ -26,8 +26,13 @@ data class ConfirmationRequest(
     val title: String,
     val message: String,
     val diff: String? = null,
-    val destructive: Boolean = false
-)
+    val destructive: Boolean = false,
+    /** Text of the approve button: what happens, e.g. "Replace"; null = "Delete" when destructive, else "Accept". */
+    val confirmLabel: String? = null
+) {
+    val approveText: String get() = confirmLabel ?: if (destructive) "Delete" else "Accept"
+    val rejectText: String get() = if (destructive) "Cancel" else "Reject"
+}
 
 fun interface ConfirmationHandler {
     /** Suspends until the user decides. true = approved. */
