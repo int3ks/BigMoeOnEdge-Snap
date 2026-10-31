@@ -254,8 +254,7 @@ class AutoTuneViewModel(
         viewModelScope.launch {
             val ready = engineController.state.value as? EngineState.Ready ?: return@launch
             val s = dataStore.settingsFlow.first()
-            val draft = if (s.spec == SpecSource.MTP)
-                modelManager.draftForModel(ready.info.path) else null
+            val draft = modelManager.draftForModel(ready.info.path) // used only when the model's mode is MTP
             _ui.update { it.copy(reloadNeeded = false, busy = "Reloading the model…") }
             val err = engineController.loadModel(ready.info.path, s.toLoadConfig(), ready.info.mmprojPath, draft)
             _ui.update { it.copy(busy = null) }
@@ -364,7 +363,8 @@ class AutoTuneViewModel(
                         // Free the previous load completely before the next one: two big loads must never overlap.
                         engineController.unload()
                         delay(1500)
-                        val loadError = engineController.loadModel(facts.path, config, null, null)
+                        // A measurement loads exactly the candidate's guess ahead, not the model's own choice.
+                        val loadError = engineController.loadModel(facts.path, config, null, null, useModelSpec = false)
                         if (loadError != null) {
                             store.upsert(save.copy(measuredTps = null, measuredAt = null, lastError = loadError.take(300)))
                             continue
@@ -393,8 +393,7 @@ class AutoTuneViewModel(
                 withContext(NonCancellable) {
                     _ui.update { it.copy(busy = "Restoring your previous model…") }
                     if (previous != null) {
-                        val draft = if (before.spec == SpecSource.MTP)
-                            modelManager.draftForModel(previous.path) else null
+                        val draft = modelManager.draftForModel(previous.path) // used only when the model's mode is MTP
                         engineController.loadModel(previous.path, before.toLoadConfig(), previous.mmprojPath, draft)
                     } else {
                         engineController.unload()

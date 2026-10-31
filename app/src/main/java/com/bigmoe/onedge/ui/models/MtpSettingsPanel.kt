@@ -55,7 +55,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
     // Speculation cannot run together with these two streaming modes (the engine refuses the combination).
     val blocked = settings.routeAhead != 0 || settings.rowStream
     var expanded by remember { mutableStateOf(mode != SpecSource.OFF) }
-    val summary = if (mode == SpecSource.OFF) "Off" else "${guessLabel(mode)} • ${settings.draftMax} tokens/pass"
+    val summary = "Default ${guessLabel(mode)} • ${settings.draftMax} tokens/pass"
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(
@@ -63,7 +63,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Guess ahead • all models", style = MaterialTheme.typography.titleSmall)
+                    Text("Guess ahead • default and tuning", style = MaterialTheme.typography.titleSmall)
                     Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Icon(
@@ -73,8 +73,9 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                 )
             }
             if (expanded) {
+                Hint("A model can have its own mode on its card below; this mode is for every model that has none.")
                 ChoiceSetting(
-                    "Mode",
+                    "Default mode",
                     listOf(SpecSource.OFF to "Off", SpecSource.MTP to "MTP", SpecSource.NGRAM to "N-gram (repeated text)"),
                     mode,
                     enabled = !blocked
@@ -91,22 +92,23 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                     )
                     SpecSource.NGRAM -> Unit
                 }
-                if (mode != SpecSource.OFF) {
+                // Shown whatever the default is: a model with its own MTP or n-gram on its card uses these too.
+                run {
                     ChoiceSetting("Tokens drafted per pass", DRAFT_MAX.map { it to it.toString() }, settings.draftMax) {
                         viewModel.updateDraftMax(it)
                     }
                 }
-                if (mode == SpecSource.MTP) {
+                run {
                     ChoiceSetting(
-                        "Confidence floor",
+                        "MTP confidence floor",
                         listOf(0 to "Always draft", 40 to "Above 40%", 60 to "Above 60%", 80 to "Above 80%"),
                         settings.mtpPMinPct
                     ) { viewModel.updateMtpPMinPct(it) }
                     Hint("Stops a draft early when the drafter's confidence in its next token is below this. A message with an image is answered without drafting; text-only messages still use MTP. A separate drafter adds its weights to memory use.")
                 }
-                if (mode == SpecSource.NGRAM) {
+                run {
                     ChoiceSetting(
-                        "Minimum match",
+                        "N-gram minimum match",
                         NGRAM_MIN.filter { it <= settings.ngramMaxMatch }.map { it to "$it tokens" },
                         settings.ngramMinMatch.coerceAtMost(settings.ngramMaxMatch)
                     ) {
@@ -114,7 +116,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                         if (it > settings.ngramMaxMatch) viewModel.updateNgramMaxMatch(it)
                     }
                     ChoiceSetting(
-                        "Maximum match",
+                        "N-gram maximum match",
                         NGRAM_MAX.filter { it >= settings.ngramMinMatch }.map { it to "$it tokens" },
                         settings.ngramMaxMatch.coerceAtLeast(settings.ngramMinMatch)
                     ) {
@@ -123,7 +125,7 @@ internal fun GuessAheadCard(settings: EngineSettings, viewModel: ModelViewModel)
                     }
                     Hint("Minimum controls how exact a repeated suffix must be before drafting. Maximum bounds the lookup work; long matches are not always more useful.")
                 }
-                if (mode != SpecSource.OFF) Hint("Works with any temperature: guesses are checked by drawing with your sampling settings, so the answer is the same kind of text as without guessing. At higher temperatures fewer guesses are kept. More tokens per pass only pay off when most of them are accepted.")
+                Hint("Works with any temperature: guesses are checked by drawing with your sampling settings, so the answer is the same kind of text as without guessing. At higher temperatures fewer guesses are kept. More tokens per pass only pay off when most of them are accepted.")
             }
         }
     }

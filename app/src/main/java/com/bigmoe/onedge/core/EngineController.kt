@@ -34,7 +34,9 @@ class EngineController(
     /** The LoRA adapter attached to a model (Models page), applied whenever that model loads; null = none. */
     private val loraProvider: suspend (modelPath: String) -> LoraChoice? = { null },
     /** The KV cache type chosen for a model on the Models page; F16 when none was chosen. */
-    private val kvCacheTypeProvider: suspend (modelPath: String) -> KvCacheType = { KvCacheType.F16 }
+    private val kvCacheTypeProvider: suspend (modelPath: String) -> KvCacheType = { KvCacheType.F16 },
+    /** Guess ahead chosen on a model's card (Models page); null = the requested (global) setting applies. */
+    private val specProvider: suspend (modelPath: String) -> SpecSource? = { null }
 ) {
     private val backend: EngineBackend by lazy(backendProvider)
 
@@ -90,9 +92,11 @@ class EngineController(
      */
     suspend fun loadModel(
         modelPath: String,
-        requested: LoadConfig,
+        requestedConfig: LoadConfig,
         mmprojPath: String? = null,
-        draftPath: String? = null
+        draftPath: String? = null,
+        /** false = load exactly [requestedConfig]'s guess ahead (the auto-tuner measuring one), ignoring the model's own. */
+        useModelSpec: Boolean = true
     ): String? = withContext(ioDispatcher) {
         lifecycleMutex.withLock {
             val file = File(modelPath)
@@ -102,6 +106,14 @@ class EngineController(
                 return@withLock msg
             }
             val kind = GgufInspector.inspect(file).kind
+            // A guess-ahead mode chosen on the model's card wins over the global one. The drafter is passed by the
+            // callers whenever one is attached and used only when the mode that applies is MTP.
+            // Route-ahead and row streaming cannot run with speculation (the engine refuses the pair), and the Guess ahead
+            // card is locked to Off then; a model's own MTP / n-gram yields to them the same way instead of failing the load.
+            val specBlocked = requestedConfig.routeAhead != 0 || requestedConfig.rowStream
+            val modelSpec = if (useModelSpec) runCatching { specProvider(modelPath) }.getOrNull()
+                ?.let { if (specBlocked && it != SpecSource.OFF) null else it } else null
+            val requested = if (modelSpec != null) requestedConfig.copy(spec = modelSpec) else requestedConfig
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar
@@ -131,7 +143,7 @@ class EngineController(
                 var activeConfig = config
                 var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
                 var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
-                val requestedAddOns = RequestedAddOns(config, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null)
+                val requestedAddOns = RequestedAddOns(config, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null, modelSpec)
                 var warning: String? = null
                 var error = try {
                     backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)

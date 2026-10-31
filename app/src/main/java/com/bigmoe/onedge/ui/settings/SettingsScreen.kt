@@ -158,7 +158,8 @@ private fun SettingsContent(
 ) {
     val context = LocalContext.current
     val readyInfo = (engine as? EngineState.Ready)?.info
-    val reloadNeeded = readyInfo != null && loadConfigDiffers(readyInfo.config, settings)
+    // A model with its own guess ahead (Models page) is not compared with the global mode.
+    val reloadNeeded = readyInfo != null && loadConfigDiffers(readyInfo.config, settings, ignoreSpec = readyInfo.requested.modelSpec != null)
     // Streaming settings only apply when the loaded model is a Mixture-of-Experts one (chosen automatically on load).
     val stream = readyInfo?.config?.mmapBaseline != true
     val cacheOn = stream && settings.cacheMb != 0

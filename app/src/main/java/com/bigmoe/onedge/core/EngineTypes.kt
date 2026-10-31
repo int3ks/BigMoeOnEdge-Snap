@@ -179,7 +179,9 @@ data class RequestedAddOns(
     val kvCacheType: KvCacheType = KvCacheType.F16,
     val lora: LoraChoice? = null,
     val mmprojPath: String? = null,
-    val draftPath: String? = null
+    val draftPath: String? = null,
+    /** The guess-ahead mode set on the model's card that this load used; null = the global setting applied. */
+    val modelSpec: SpecSource? = null
 )
 
 /** The steps of a model load as the engine reports them (core/include/bmoe/load_progress.h, same numbers). */

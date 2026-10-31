@@ -159,8 +159,7 @@ class SettingsViewModel(
     fun reloadModel() = launch {
         val ready = engineController.state.value as? EngineState.Ready ?: return@launch
         val s = dataStore.settingsFlow.first()
-        val draftPath = if (s.spec == SpecSource.MTP)
-            modelManager.draftForModel(ready.info.path) else null
+        val draftPath = modelManager.draftForModel(ready.info.path) // used only when the model's mode is MTP
         engineController.loadModel(ready.info.path, s.toLoadConfig(), ready.info.mmprojPath, draftPath)
     }
 }

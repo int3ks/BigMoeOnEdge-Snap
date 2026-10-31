@@ -89,7 +89,8 @@ class AppContainer(private val context: Context) {
             backendProvider = { NativeEngineBackend(EngineNativeBridge()) },
             csvPathProvider = { newMetricsCsvPath() },
             loraProvider = { path -> modelManager.loraForModel(path) },
-            kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) }
+            kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) },
+            specProvider = { path -> modelManager.specForModel(path) }
         )
     }
 
@@ -240,8 +241,8 @@ class AppContainer(private val context: Context) {
                 )
                 val projector = modelManager.mmprojForModel(s.lastModelPath)
                     ?: s.lastMmprojPath.takeIf { it.isNotBlank() && File(it).isFile }
-                val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP)
-                    modelManager.draftForModel(s.lastModelPath) else null
+                // Passed whenever attached: the engine controller uses it only when the mode for this model is MTP.
+                val draftPath = modelManager.draftForModel(s.lastModelPath)
                 engineController.loadModel(s.lastModelPath, s.toLoadConfig(), projector, draftPath)
             }
         }

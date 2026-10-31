@@ -480,6 +480,19 @@ class ModelManager(
         saveModelOptions(props)
     }
 
+    /** Guess ahead (MTP / n-gram / off) chosen for [modelPath] on its card; null = the default from the Guess ahead card. */
+    suspend fun specForModel(modelPath: String): SpecSource? = withContext(io) {
+        val v = modelOptions().getProperty(encodePath(canonicalPath(modelPath)) + SPEC_SUFFIX)
+        SpecSource.values().firstOrNull { it.name == v }
+    }
+
+    suspend fun setSpecForModel(modelPath: String, spec: SpecSource?) = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath)) + SPEC_SUFFIX
+        if (spec == null) props.remove(key) else props.setProperty(key, spec.name)
+        saveModelOptions(props)
+    }
+
     private val draftLinksFile: File get() = File(modelsDir, ".draft-links.properties")
     private fun draftLinks(): java.util.Properties = java.util.Properties().also { props ->
         try { draftLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
@@ -1439,6 +1452,7 @@ class ModelManager(
         const val DEFAULT_LORA_SCALE = 1.75f
         private const val SCALE_SUFFIX = ".scale"
         private const val KV_SUFFIX = ".kv"
+        private const val SPEC_SUFFIX = ".spec"
         private const val USED_SUFFIX = ".used"
         private val LORA_MARK = "adapter.type".toByteArray(Charsets.US_ASCII)
 

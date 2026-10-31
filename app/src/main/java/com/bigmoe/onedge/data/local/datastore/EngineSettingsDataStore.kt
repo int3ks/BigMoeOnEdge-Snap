@@ -222,9 +222,11 @@ const val DEFAULT_SERVER_QUEUE_SEC = 60
 
 /** True when a model loaded with [loaded] would behave differently after a reload with [settings]. */
 /** The streaming-or-ordinary mode is chosen automatically per model, so it never counts as a changed setting. */
-fun loadConfigDiffers(loaded: LoadConfig, settings: EngineSettings): Boolean =
+fun loadConfigDiffers(loaded: LoadConfig, settings: EngineSettings, ignoreSpec: Boolean = false): Boolean =
     // The KV cache type is a per-model choice (Models page), not part of the settings; leave it out of the comparison.
-    loaded.copy(mmapBaseline = false, kvCacheType = KvCacheType.F16) != settings.toLoadConfig().copy(mmapBaseline = false)
+    // So is guess ahead when the model has its own ([ignoreSpec]).
+    loaded.copy(mmapBaseline = false, kvCacheType = KvCacheType.F16, spec = if (ignoreSpec) SpecSource.OFF else loaded.spec) !=
+        settings.toLoadConfig().copy(mmapBaseline = false, spec = if (ignoreSpec) SpecSource.OFF else settings.spec)
 
 class EngineSettingsDataStore(private val context: Context) {
 

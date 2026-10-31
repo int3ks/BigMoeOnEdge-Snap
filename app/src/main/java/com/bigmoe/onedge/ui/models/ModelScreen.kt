@@ -195,14 +195,7 @@ fun ModelScreen(
                 // drafter (only while Guess ahead is MTP). Compared with what the load asked for, so a fallback the
                 // engine had to take does not keep asking for a reload.
                 val loadedInfo = (engine as? EngineState.Ready)?.info
-                val addOnsChanged = loadedInfo?.let { info ->
-                    val req = info.requested
-                    val p = info.path
-                    (ui.modelKvTypes[p] ?: com.bigmoe.onedge.core.KvCacheType.F16) != req.kvCacheType ||
-                        ui.modelLoras[p] != req.lora ||
-                        ui.modelMmprojs[p] != req.mmprojPath ||
-                        (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[p] != req.draftPath)
-                } == true
+                val addOnsChanged = loadedInfo?.let { info -> addOnsChangedFor(info, ui, settings) } == true
                 // Loading, loaded and failed are shown in the model's own card below. This card is only for a state
                 // no card in the list belongs to (a model whose file is no longer listed, a failure without a path).
                 val enginePath = engineModelPath(engine)
@@ -394,13 +387,7 @@ fun ModelScreen(
             }
             items(ui.models.filterNot { ModelManager.isProjectorName(it.name) }, key = { it.path }) { model ->
                 val loadedInfo = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }
-                val addOnsChanged = loadedInfo?.let { info ->
-                    val req = info.requested
-                    (ui.modelKvTypes[model.path] ?: com.bigmoe.onedge.core.KvCacheType.F16) != req.kvCacheType ||
-                        ui.modelLoras[model.path] != req.lora ||
-                        ui.modelMmprojs[model.path] != req.mmprojPath ||
-                        (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[model.path] != req.draftPath)
-                } == true
+                val addOnsChanged = loadedInfo?.let { info -> addOnsChangedFor(info, ui, settings) } == true
                 ModelRow(
                     model = model,
                     isLoaded = loadedInfo != null,
@@ -434,6 +421,9 @@ fun ModelScreen(
                         targetMmprojModelPath = model.path
                         mmprojPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     },
+                    spec = ui.modelSpecs[model.path],
+                    loadedSpec = loadedInfo?.let { it.requested.config?.spec ?: it.config.spec },
+                    onSpec = { viewModel.setSpecForModel(model.path, it) },
                     kvType = ui.modelKvTypes[model.path] ?: com.bigmoe.onedge.core.KvCacheType.F16,
                     loadedKvType = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }?.config?.kvCacheType,
                     onKvType = { viewModel.setKvCacheType(model.path, it) },
@@ -536,6 +526,23 @@ private fun StatusCard(
     }
 }
 
+/**
+ * The loaded model's own options (Models page) changed since it was loaded: KV cache, LoRA, projector, guess ahead,
+ * drafter (only while its guess ahead is MTP). Compared with what the load asked for, so a fallback the engine had to
+ * take does not keep asking for a reload.
+ */
+private fun addOnsChangedFor(info: com.bigmoe.onedge.core.ModelInfo, ui: ModelsUiState, settings: EngineSettings): Boolean {
+    val req = info.requested
+    val p = info.path
+    val spec = ui.modelSpecs[p] ?: settings.spec
+    val loadedSpec = req.config?.spec ?: info.config.spec
+    return (ui.modelKvTypes[p] ?: com.bigmoe.onedge.core.KvCacheType.F16) != req.kvCacheType ||
+        ui.modelLoras[p] != req.lora ||
+        ui.modelMmprojs[p] != req.mmprojPath ||
+        spec != loadedSpec ||
+        (spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[p] != req.draftPath)
+}
+
 /** Which model the engine state is about (loading, loaded or failed), or null. */
 private fun engineModelPath(engine: EngineState): String? = when (engine) {
     is EngineState.Loading -> engine.path
@@ -623,12 +630,13 @@ private fun ModelStatusSection(
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
-                    val settingsChanged = loadConfigDiffers(info.requested.config ?: info.config, settings)
+                    // Guess ahead is compared per model (addOnsChanged), so it is left out here.
+                    val settingsChanged = loadConfigDiffers(info.requested.config ?: info.config, settings, ignoreSpec = true)
                     if (settingsChanged || addOnsChanged) {
                         Text(
                             listOfNotNull(
-                                if (settingsChanged) "settings (context, sampling, cache, threads, guess ahead)" else null,
-                                if (addOnsChanged) "this model's KV cache, LoRA, projector or drafter" else null
+                                if (settingsChanged) "settings (context, sampling, cache, threads, guess ahead tuning)" else null,
+                                if (addOnsChanged) "this model's guess ahead, KV cache, LoRA, projector or drafter" else null
                             ).joinToString(" and ", prefix = "Changed since this model was loaded: ", postfix = ". They apply after a reload."),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.tertiary
@@ -668,6 +676,9 @@ private fun ModelRow(
     attachedMmproj: String?,
     onAttachMmproj: (String?) -> Unit,
     onPickMmproj: () -> Unit,
+    spec: com.bigmoe.onedge.core.SpecSource?,
+    loadedSpec: com.bigmoe.onedge.core.SpecSource?,
+    onSpec: (com.bigmoe.onedge.core.SpecSource?) -> Unit,
     kvType: com.bigmoe.onedge.core.KvCacheType,
     loadedKvType: com.bigmoe.onedge.core.KvCacheType?,
     onKvType: (com.bigmoe.onedge.core.KvCacheType) -> Unit,
@@ -681,6 +692,7 @@ private fun ModelRow(
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember(model.path, model.displayName) { mutableStateOf(model.displayName) }
     val attachedName = drafts.firstOrNull { it.path == attachedDraftPath }?.name
+    val effectiveSpec = spec ?: settings.spec
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -697,7 +709,9 @@ private fun ModelRow(
                     if (!expanded) {
                         // What is attached, in one line, so the collapsed card still says how the model will load.
                         val parts = listOfNotNull(
-                            attachedName?.let { "MTP" },
+                            effectiveSpec.takeIf { it != com.bigmoe.onedge.core.SpecSource.OFF }?.let {
+                                guessLabel(it) + if (it == com.bigmoe.onedge.core.SpecSource.MTP && attachedName != null) " + drafter" else ""
+                            },
                             attachedMmproj?.let { "Vision" },
                             attachedLora?.let { "LoRA" },
                             kvType.takeIf { it != com.bigmoe.onedge.core.KvCacheType.F16 }?.let { "KV ${it.label}" }
@@ -729,7 +743,8 @@ private fun ModelRow(
                     ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload)
                     androidx.compose.material3.HorizontalDivider()
                 }
-                DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
+                GuessAheadRow(spec, settings.spec, loadedSpec, attachedName != null, onSpec)
+                DrafterRow(settings.copy(spec = effectiveSpec), drafts, attachedName, onAttachDraft, onPickDraft)
                 MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
                 LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
                 KvCacheRow(kvType, loadedKvType, onKvType)

@@ -47,6 +47,8 @@ data class ModelsUiState(
     val modelMmprojs: Map<String, String> = emptyMap(),
     /** KV cache type per model; models not in the map use F16. */
     val modelKvTypes: Map<String, com.bigmoe.onedge.core.KvCacheType> = emptyMap(),
+    /** Guess ahead set on a model's card; a model without an entry uses the Guess ahead card's mode. */
+    val modelSpecs: Map<String, com.bigmoe.onedge.core.SpecSource> = emptyMap(),
     val existingPathInput: String = "",
     val importProgress: ImportProgress? = null,
     val pendingLoad: PendingLoad? = null,
@@ -90,13 +92,14 @@ class ModelViewModel(
             val loraLinks = list.mapNotNull { model -> modelManager.loraForModel(model.path)?.let { model.path to it } }.toMap()
             val mmprojLinks = list.mapNotNull { model -> modelManager.mmprojForModel(model.path)?.let { model.path to it } }.toMap()
             val kvTypes = list.associate { model -> model.path to modelManager.kvCacheTypeForModel(model.path) }
+            val specs = list.mapNotNull { model -> modelManager.specForModel(model.path)?.let { model.path to it } }.toMap()
             val folder = modelManager.modelFolder()
             val folderReadable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { folder?.let { it.isDirectory && it.canRead() } == true }
             val folderFiles = if (folderReadable) modelManager.modelFolderFileCount() else 0
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
-                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes,
+                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable
                 )
             }
@@ -230,6 +233,13 @@ class ModelViewModel(
         }
     }
 
+    fun setSpecForModel(modelPath: String, spec: com.bigmoe.onedge.core.SpecSource?) {
+        viewModelScope.launch {
+            modelManager.setSpecForModel(modelPath, spec)
+            refresh()
+        }
+    }
+
     fun setKvCacheType(modelPath: String, type: com.bigmoe.onedge.core.KvCacheType) {
         viewModelScope.launch {
             modelManager.setKvCacheType(modelPath, type)
@@ -356,8 +366,8 @@ class ModelViewModel(
     private fun loadNow(path: String, mmprojPath: String?, currentDraftPath: String? = null) {
         viewModelScope.launch {
             val s = settingsDataStore.settingsFlow.first()
-            val draftPath = if (s.spec == com.bigmoe.onedge.core.SpecSource.MTP)
-                currentDraftPath?.takeIf { File(it).isFile } ?: modelManager.draftForModel(path) else null
+            // Passed whenever attached: the engine controller uses it only when the mode for this model is MTP.
+            val draftPath = currentDraftPath?.takeIf { File(it).isFile } ?: modelManager.draftForModel(path)
             val error = engineController.loadModel(path, s.toLoadConfig(), mmprojPath, draftPath)
             if (error == null) {
                 settingsDataStore.updateLastModelPath(path)
