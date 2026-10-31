@@ -480,7 +480,7 @@ class ModelManager(
         saveModelOptions(props)
     }
 
-    /** Guess ahead (MTP / n-gram / off) chosen for [modelPath] on its card; null = the default from the Guess ahead card. */
+    /** Guess ahead (MTP / n-gram / off) chosen for [modelPath] on its card; null = the default mode (Settings → Guess ahead). */
     suspend fun specForModel(modelPath: String): SpecSource? = withContext(io) {
         val v = modelOptions().getProperty(encodePath(canonicalPath(modelPath)) + SPEC_SUFFIX)
         SpecSource.values().firstOrNull { it.name == v }

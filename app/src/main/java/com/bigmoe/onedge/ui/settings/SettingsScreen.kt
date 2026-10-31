@@ -531,6 +531,9 @@ private fun SettingsContent(
             Hint("Consult fewer experts per token than the model asks for. Cuts compute and reads together, and changes the reply.")
 
             Spacer(Modifier.height(8.dp))
+            GuessAheadSettings(settings, viewModel)
+
+            Spacer(Modifier.height(8.dp))
             ExperimentalHeader(expanded = experimental) { experimental = !experimental }
             if (experimental) {
                 Spacer(Modifier.height(8.dp))
@@ -543,7 +546,7 @@ private fun SettingsContent(
                 ) { viewModel.updateIoTwoWave(it) }
                 Spacer(Modifier.height(8.dp))
                 Section("Prefetch and routing")
-                Hint("Guess ahead (MTP and n-gram) is set per model on the Models page under \"Guess ahead\".")
+                Hint("Guess ahead (MTP and n-gram): the mode per model on its card (Models page), the tuning above.")
                 ChoiceSetting(
                     "Temporal prefetch (layers)",
                     Choices.PREFETCH.map { it to if (it == 0) "off" else "$it" },

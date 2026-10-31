@@ -47,7 +47,7 @@ data class ModelsUiState(
     val modelMmprojs: Map<String, String> = emptyMap(),
     /** KV cache type per model; models not in the map use F16. */
     val modelKvTypes: Map<String, com.bigmoe.onedge.core.KvCacheType> = emptyMap(),
-    /** Guess ahead set on a model's card; a model without an entry uses the Guess ahead card's mode. */
+    /** Guess ahead set on a model's card; a model without an entry uses the default mode (Settings → Guess ahead). */
     val modelSpecs: Map<String, com.bigmoe.onedge.core.SpecSource> = emptyMap(),
     val existingPathInput: String = "",
     val importProgress: ImportProgress? = null,

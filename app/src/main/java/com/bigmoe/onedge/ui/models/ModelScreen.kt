@@ -345,7 +345,6 @@ fun ModelScreen(
                 }
             }
 
-            item(key = "guess_ahead") { GuessAheadCard(settings, viewModel) }
 
             val projectors = ui.models.filter { ModelManager.isProjectorName(it.name) }
             if (ui.incompleteImports.isNotEmpty()) {

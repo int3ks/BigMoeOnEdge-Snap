@@ -20,14 +20,14 @@ import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.SpecSource
 
 /**
- * Guess ahead for this model, stored with it: Off, MTP or n-gram, or the default from the Guess ahead card (null).
- * How many tokens are drafted and the MTP / n-gram fine settings stay on that card for all models.
+ * Guess ahead for this model, stored with it: Off, MTP or n-gram, or the default from Settings → Guess ahead (null).
+ * How many tokens are drafted and the MTP / n-gram fine settings are there too, for all models.
  */
 @Composable
 internal fun GuessAheadRow(
     /** The model's own choice, or null when it follows the default. */
     selected: SpecSource?,
-    /** The Guess ahead card's mode, used while [selected] is null. */
+    /** The default mode (Settings → Guess ahead), used while [selected] is null. */
     default: SpecSource,
     /** The mode the model is loaded with right now, or null when it is not loaded. */
     loadedWith: SpecSource?,
@@ -53,7 +53,7 @@ internal fun GuessAheadRow(
                         text = {
                             Column {
                                 Text("Default (${guessLabel(default)})")
-                                Text("Follows the Guess ahead card above", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Follows Settings → Guess ahead", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         },
                         onClick = { menu = false; onSelect(null) }
