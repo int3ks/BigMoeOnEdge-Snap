@@ -8,7 +8,9 @@
 //      (kv_reuse == KV_REUSE_CHECKPOINT, n_reused == previous prompt length);
 //   3. that answer is byte-identical to a fresh session's answer to the same request (lossless);
 //   4. with ctx_checkpoints = 0 the same request is a full re-prefill (KV_REUSE_REFUSED), same answer;
-//   5. the app's own chat path (clear_kv=false turns) still reuses the KV and gives the same answers.
+//   5. the app's own chat path (clear_kv=false turns) still reuses the KV and gives the same answers;
+//   6. a replayed conversation (clear_kv=true: edit, regenerate, chat switch) keeps the shared prefix and
+//      answers exactly as a fresh session.
 #include "bmoe/session.h"
 #include "bmoe/runtime.h"
 #include "bmoe/metrics.h"
@@ -111,15 +113,71 @@ static void app_path(const char * path) {
     }
 }
 
+// The app replays a conversation with clear_kv=true after an edit, a regenerate or a chat switch. The
+// KV is now kept and diffed like any other turn: same answer as a fresh session, less prefilled.
+static void replay_path(const char * path, int ckpts, bool recurrent = true) {
+    const std::string tag = std::string(recurrent ? "" : "llama ") + "replay (checkpoints " + std::to_string(ckpts) + "): ";
+    const bool moe = recurrent; // the dense llama has no experts to stream
+    auto s = open_session(path, ckpts, moe, false);
+    GenerateRequest r0;
+    r0.prompt = "Hello there";
+    r0.n_predict = 12;
+    r0.think = false;
+    r0.clear_kv = true;
+    const RunResult a0 = s->generate(r0);
+    GenerateRequest r1 = r0;
+    r1.prompt = "Hello world";
+    r1.clear_kv = false;
+    const RunResult a1 = s->generate(r1);
+    check(a0.ok && a1.ok, tag + "two turns");
+
+    // Edit of the second message: the app replays turn 1 and its answer, with the new text.
+    GenerateRequest edit = r0;
+    edit.prompt = "the world";
+    edit.clear_kv = true;
+    edit.history = {{"user", "Hello there"}, {"assistant", a0.generated_text}};
+    const RunResult e = s->generate(edit);
+    auto fresh = open_session(path, ckpts, moe, false);
+    const RunResult want = fresh->generate(edit);
+    std::printf("    edit reused=%d/%d kv_reuse=%d\n", e.summary.n_reused, e.summary.n_prompt_total, e.summary.kv_reuse);
+    check(e.ok && want.ok && e.generated_text == want.generated_text, tag + "edit answers as a fresh session does");
+    if (!recurrent)
+        check(e.summary.n_reused > 0 && e.summary.kv_reuse == KV_REUSE_PARTIAL,
+              tag + "the edit keeps the conversation before it (KV cut at the change)");
+    else if (ckpts > 0)
+        check(e.summary.n_reused > 0 && e.summary.kv_reuse == KV_REUSE_CHECKPOINT,
+              tag + "the edit keeps the conversation before it");
+    else
+        check(e.summary.n_reused == 0, tag + "without checkpoints a recurrent model prefills all of it");
+
+    // Regenerate the edited answer: the same replay again.
+    const RunResult g = s->generate(edit);
+    check(g.ok && g.generated_text == want.generated_text, tag + "regenerate gives the same answer");
+    std::printf("    regenerate reused=%d/%d kv_reuse=%d\n", g.summary.n_reused, g.summary.n_prompt_total,
+                g.summary.kv_reuse);
+
+    // A different chat: only what it shares (nothing here, no system prompt) may be reused.
+    GenerateRequest other = r0;
+    other.prompt = "the world";
+    other.history = {{"user", "Hello world"}, {"assistant", "Hello"}};
+    const RunResult o = s->generate(other);
+    auto fresh2 = open_session(path, ckpts, moe, false);
+    const RunResult want2 = fresh2->generate(other);
+    check(o.ok && o.generated_text == want2.generated_text, tag + "switching chats answers as a fresh session does");
+}
+
 int main(int argc, char ** argv) {
     if (argc < 2) {
-        std::printf("usage: %s tiny-jamba.gguf\n", argv[0]);
+        std::printf("usage: %s tiny-jamba.gguf [tiny-llama.gguf]\n", argv[0]);
         return 2;
     }
+    if (argc > 2) replay_path(argv[2], 4, /*recurrent*/ false);
     scenario(argv[1], /*moe*/ true, /*spec*/ false);
     scenario(argv[1], /*moe*/ false, /*spec*/ false);
     scenario(argv[1], /*moe*/ true, /*spec*/ true);
     app_path(argv[1]);
+    replay_path(argv[1], 4);
+    replay_path(argv[1], 0);
     if (failures) {
         std::printf("\n%d check(s) FAILED\n", failures);
         return 1;

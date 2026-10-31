@@ -1,19 +1,25 @@
-# A tiny random Jamba (attention + Mamba + MoE hybrid) for host tests of the engine:
+# A tiny random Jamba (or, with --llama, a tiny dense llama) (attention + Mamba + MoE hybrid) for host tests of the engine:
 # its memory is hybrid (recurrent layers refuse a partial cut), its MoE layers are an
 # architecture the registry does not name (the expert layout is read from the file).
 import sys, gguf, numpy as np
 out = sys.argv[1]
+llama = len(sys.argv) > 2 and sys.argv[2] == "--llama"  # a plain attention model whose KV can be cut anywhere
 rng = np.random.default_rng(1234)
 n_embd, d_inner, d_conv, d_state, dt_rank = 64, 128, 4, 16, 4
 n_layer, n_head, n_ff, n_expert = 4, 4, 128, 4
-head_kv = [0, 4, 0, 4]
-moe_layer = [False, True, False, True]
-w = gguf.GGUFWriter(out, "jamba")
+head_kv = [4, 4, 4, 4] if llama else [0, 4, 0, 4]
+moe_layer = [False] * 4 if llama else [False, True, False, True]
+w = gguf.GGUFWriter(out, "llama" if llama else "jamba")
 w.add_context_length(1024); w.add_embedding_length(n_embd); w.add_block_count(n_layer)
-w.add_feed_forward_length(n_ff); w.add_head_count(n_head); w.add_head_count_kv(head_kv)
+w.add_feed_forward_length(n_ff); w.add_head_count(n_head)
+if not llama:
+    w.add_head_count_kv(head_kv)
 w.add_layer_norm_rms_eps(1e-5)
-w.add_ssm_conv_kernel(d_conv); w.add_ssm_inner_size(d_inner); w.add_ssm_state_size(d_state); w.add_ssm_time_step_rank(dt_rank)
-w.add_expert_count(n_expert); w.add_expert_used_count(2)
+if llama:
+    w.add_head_count_kv(4); w.add_rope_dimension_count(n_embd // n_head)
+else:
+    w.add_ssm_conv_kernel(d_conv); w.add_ssm_inner_size(d_inner); w.add_ssm_state_size(d_state); w.add_ssm_time_step_rank(dt_rank)
+    w.add_expert_count(n_expert); w.add_expert_used_count(2)
 toks = ["<unk>", "<s>", "</s>", "<|im_start|>", "<|im_end|>"]
 types = [2, 3, 3, 3, 3]
 for c in range(32, 127):

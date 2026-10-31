@@ -1639,19 +1639,33 @@ RunResult Session::generate(const GenerateRequest & req,
         im.kv_has_media = false;
     }
 
-    // clear_kv = "new chat": drop the KV and the engine-held conversation. Otherwise this turn
-    // continues the conversation, reusing the KV prefix already decoded from earlier turns.
+    // clear_kv = "new chat": drop the engine-held conversation; the app replays it (system prompt and
+    // history) with this request - after an edit, a regenerate, a chat switch or a reload. Otherwise
+    // this turn continues the conversation, reusing the KV prefix already decoded from earlier turns.
+    //
+    // The KV itself is kept when it can be described (chat mode, kv_tokens tracks it exactly): the
+    // replayed conversation is rendered and tokenized like any other turn, and the prefix reuse below
+    // keeps exactly the tokens it shares with what the context holds - token for token, so a different
+    // chat shares at most its system prompt - and prefills the rest, as the stateless API path does.
+    // An edit of the last message or a regenerate then prefills only the end of the conversation (on a
+    // recurrent or sliding-window model from the newest context checkpoint before the change). Without
+    // a tracked prefix (raw prompts, a decide() that overwrote the context, nothing yet) it is cleared.
+    bool replay_keeps_kv = false;
     if (stateless) {
         // The KV is deliberately kept (prefix reuse below). The engine-held chat_history belongs to the
         // app's own conversation protocol and is meaningless to this request, so drop it.
         im.chat_history.clear();
     } else if (req.clear_kv) {
-        im.clear_memory(ctx);
-        // The draft context tracks the target's positions and must be dropped with it, or the first
-        // draft of the new conversation is conditioned on the previous one.
-        if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
+        replay_keeps_kv = im.chat_on && !im.kv_tokens.empty();
+        if (!replay_keeps_kv) {
+            im.clear_memory(ctx);
+            // The draft context tracks the target's positions and must be dropped with it, or the first
+            // draft of the new conversation is conditioned on the previous one. (When the KV is kept, the
+            // prefix reuse below rewinds the draft context to the same point as the target.)
+            if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
+            im.forget_kv_tokens();
+        }
         im.chat_history.clear();
-        im.forget_kv_tokens();
         // A new chat resets the sampler RNG, so a fixed seed reproduces the same transcript from a
         // fresh conversation. A continued turn (clear_kv=false) keeps the stream going, matching the
         // KV it decodes against.
@@ -1733,6 +1747,13 @@ RunResult Session::generate(const GenerateRequest & req,
             im.chat_history.resize(history_base);
             history_pushed = false;
             chat_on = false;
+            // A raw prompt is not diffed against the KV, so a context kept for the replay must go now.
+            if (replay_keeps_kv) {
+                im.clear_memory(ctx);
+                if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
+                im.forget_kv_tokens();
+                replay_keeps_kv = false;
+            }
         }
     }
 
