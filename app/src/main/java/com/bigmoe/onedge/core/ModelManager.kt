@@ -1543,12 +1543,8 @@ class ModelManager(
             if (size > 0 && size < 200L * 1024 * 1024) {
                 warnings.add("The file is very small (${formatBytes(size)}). Is it a complete download?")
             }
-            if (config.spec != SpecSource.OFF) {
-                warnings.add("Guess ahead is disabled for image turns when a vision projector is loaded; image prompts and speculation are not combined.")
-            }
-            if (file.isFile && GgufInspector.inspect(file).kind == ModelKind.DENSE) {
-                warnings.add("This is a regular (non-MoE) model. It is loaded the ordinary way, without expert streaming, so it should fit in RAM.")
-            }
+            // Only real risks ask before loading. Plain information (a dense model loads without streaming, Guess ahead
+            // pauses for image turns) is not a question: the status card already says how the model was loaded.
             return LoadAdvice(errors, warnings)
         }
 

@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- Loading asks only when there is a real risk (RAM, a fixed cache over 60 % of RAM, pinned weights, a suspiciously small file) or an error. The notes "regular (non-MoE) model" and "Guess ahead pauses for image turns" no longer open the dialog, so with n-gram on by default a model loads with one tap.
 - Defaults: Guess ahead is n-gram (exact at any temperature, costs nothing when nothing repeats) and "prefer cached experts" is 15 %. Existing settings are kept.
 - Models page: the model list is sorted by last use (the chat's model menu too); MTP drafters, LoRA adapters and vision projectors are listed below the models and show where the file is. Registered paths and attachments whose file was deleted are dropped (only when its folder can still be read, so an unreachable SD card keeps them). "Reload model" also appears when the loaded model's own settings changed (KV cache, LoRA, projector, drafter while Guess ahead is MTP), compared with what the load asked for, and a reload now takes the current attachments. The load warning about greedy decoding with Guess ahead is gone.
 - Agent: the model is asked to keep scripts short (no comments or extras; a one-line command for a one-off step), and gets the last 1000 characters of a command's output (was 1500).
