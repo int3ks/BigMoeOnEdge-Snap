@@ -93,6 +93,14 @@ jobs:
             "$TOOLCHAIN_IMAGE" \
             bash /workspace/scripts/build-hexagon-onedge-engine.sh
 
+      - name: ccache statistics
+        if: steps.native.outputs.cache-hit != 'true'
+        run: |
+          CCACHE_DIR="$PWD/.ccache" "$RUNNER_TEMP/ccache-bin/ccache" --print-stats 2>/dev/null \
+            | grep -E '^(direct_cache_hit|preprocessed_cache_hit|cache_miss)\s' \
+            | tr '\n' ' ' | sed 's/^/::notice::ccache /' || true
+          echo
+
       - name: Save ccache
         if: steps.native.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
