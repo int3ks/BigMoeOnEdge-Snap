@@ -183,6 +183,7 @@ private fun SettingsContent(
     var chatExpanded by remember { mutableStateOf(false) }
     var mediaExpanded by remember { mutableStateOf(false) }
     var toolsExpanded by remember { mutableStateOf(false) }
+    var agentExpanded by remember { mutableStateOf(false) }
     var searchExpanded by remember { mutableStateOf(false) }
     var workspaceExpanded by remember { mutableStateOf(false) }
     var editingPalette by remember { mutableStateOf<PaletteSpec?>(null) }
@@ -685,8 +686,8 @@ private fun SettingsContent(
         }
 
         SettingsFoldout(
-            title = "Tools, web search, pictures & videos",
-            subtitle = "Multimodal input, online search and tool permissions",
+            title = "Tools, agent, web search, pictures & videos",
+            subtitle = "Multimodal input, tool permissions, agent and Termux, online search",
             expanded = toolsMediaExpanded,
             onToggle = { toolsMediaExpanded = !toolsMediaExpanded }
         )
@@ -762,7 +763,18 @@ private fun SettingsContent(
                 settings.thinkAfterTools
             ) { viewModel.updateThinkAfterTools(it) }
             Hint("Web search, image search, and web-page reading are controlled by the globe button in the chat. These tools are off by default.")
-            Spacer(Modifier.height(12.dp))
+            Divider()
+
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        SettingsFoldout(
+            title = "Agent & Termux", subtitle = "Tool rounds, approval, grammar-checked calls, Termux commands", expanded = agentExpanded,
+            onToggle = { agentExpanded = !agentExpanded }
+        )
+        androidx.compose.animation.AnimatedVisibility(visible = agentExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             AgentAndTermuxSection(settings = settings, viewModel = viewModel)
             Divider()
 

@@ -467,16 +467,17 @@ class ModelManager(
         modelOptionsFile.outputStream().use { props.store(it, "BigMoeOnEdge per-model options") }
     }
 
-    /** KV cache type used when [modelPath] loads (Models page); F16 unless set. */
+    /** KV cache type used when [modelPath] loads (Models page); [DEFAULT_KV_CACHE_TYPE] unless set. */
     suspend fun kvCacheTypeForModel(modelPath: String): KvCacheType = withContext(io) {
         val v = modelOptions().getProperty(encodePath(canonicalPath(modelPath)) + KV_SUFFIX)
-        KvCacheType.values().firstOrNull { it.name == v } ?: KvCacheType.F16
+        KvCacheType.values().firstOrNull { it.name == v } ?: DEFAULT_KV_CACHE_TYPE
     }
 
+    /** Stored explicitly, the default too, so a later change of the default does not change a choice made here. */
     suspend fun setKvCacheType(modelPath: String, type: KvCacheType) = withContext(io) {
         val props = modelOptions()
         val key = encodePath(canonicalPath(modelPath)) + KV_SUFFIX
-        if (type == KvCacheType.F16) props.remove(key) else props.setProperty(key, type.name)
+        props.setProperty(key, type.name)
         saveModelOptions(props)
     }
 
@@ -1452,6 +1453,8 @@ class ModelManager(
         const val DEFAULT_LORA_SCALE = 1.75f
         private const val SCALE_SUFFIX = ".scale"
         private const val KV_SUFFIX = ".kv"
+        /** A model without its own choice: Q8_0, about half the memory of F16 and nearly lossless. */
+        val DEFAULT_KV_CACHE_TYPE = KvCacheType.Q8_0
         private const val SPEC_SUFFIX = ".spec"
         private const val USED_SUFFIX = ".used"
         private val LORA_MARK = "adapter.type".toByteArray(Charsets.US_ASCII)

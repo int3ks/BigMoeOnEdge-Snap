@@ -20,8 +20,8 @@ import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.KvCacheType
 
 /**
- * The model's KV cache type, used whenever it loads. F16 is llama.cpp's default; Q8_0 roughly halves the cache with
- * almost no quality loss; Q4_0 quarters it and does cost quality. A type the device cannot run for this model is
+ * The model's KV cache type, used whenever it loads. Q8_0 is this app's default and roughly halves the cache against
+ * llama.cpp's F16 with almost no quality loss; Q4_0 quarters it and does cost quality. A type the device cannot run for this model is
  * replaced by F16 at load, with a note.
  */
 @Composable
@@ -70,7 +70,7 @@ internal fun KvCacheRow(
 }
 
 private fun describe(t: KvCacheType): String = when (t) {
-    KvCacheType.F16 -> "Default, full precision"
-    KvCacheType.Q8_0 -> "About half the memory, nearly lossless"
+    KvCacheType.F16 -> "Full precision, twice the memory of Q8_0"
+    KvCacheType.Q8_0 -> "Default: about half the memory of F16, nearly lossless"
     KvCacheType.Q4_0 -> "About a quarter of the memory, costs quality"
 }

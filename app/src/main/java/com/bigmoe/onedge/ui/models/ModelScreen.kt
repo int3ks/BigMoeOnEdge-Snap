@@ -423,7 +423,7 @@ fun ModelScreen(
                     spec = ui.modelSpecs[model.path],
                     loadedSpec = loadedInfo?.let { it.requested.config?.spec ?: it.config.spec },
                     onSpec = { viewModel.setSpecForModel(model.path, it) },
-                    kvType = ui.modelKvTypes[model.path] ?: com.bigmoe.onedge.core.KvCacheType.F16,
+                    kvType = ui.modelKvTypes[model.path] ?: ModelManager.DEFAULT_KV_CACHE_TYPE,
                     loadedKvType = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }?.config?.kvCacheType,
                     onKvType = { viewModel.setKvCacheType(model.path, it) },
                     settings = settings
@@ -535,7 +535,7 @@ private fun addOnsChangedFor(info: com.bigmoe.onedge.core.ModelInfo, ui: ModelsU
     val p = info.path
     val spec = ui.modelSpecs[p] ?: settings.spec
     val loadedSpec = req.config?.spec ?: info.config.spec
-    return (ui.modelKvTypes[p] ?: com.bigmoe.onedge.core.KvCacheType.F16) != req.kvCacheType ||
+    return (ui.modelKvTypes[p] ?: ModelManager.DEFAULT_KV_CACHE_TYPE) != req.kvCacheType ||
         ui.modelLoras[p] != req.lora ||
         ui.modelMmprojs[p] != req.mmprojPath ||
         spec != loadedSpec ||
@@ -713,7 +713,7 @@ private fun ModelRow(
                             },
                             attachedMmproj?.let { "Vision" },
                             attachedLora?.let { "LoRA" },
-                            kvType.takeIf { it != com.bigmoe.onedge.core.KvCacheType.F16 }?.let { "KV ${it.label}" }
+                            kvType.takeIf { it != ModelManager.DEFAULT_KV_CACHE_TYPE }?.let { "KV ${it.label}" }
                         )
                         if (parts.isNotEmpty()) {
                             Text(parts.joinToString(" • "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
