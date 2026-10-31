@@ -49,8 +49,20 @@ test -d "$TOOLS_ROOT" || { echo "ERROR: HEXAGON_TOOLS_ROOT does not exist: $TOOL
 }
 printf "Hexagon SDK: %s\nHexagon tools: %s\nPREBUILT_LIB_DIR: %s\n" "$SDK_ROOT" "$TOOLS_ROOT" "$PREBUILT_LIB_DIR"
 
+# Optional compiler cache (CI passes BMOE_CCACHE and CCACHE_* through the container): unchanged sources are not
+# compiled again. Without it, or when the binary does not run here, the build is the same as before.
+LAUNCHER=()
+if [[ -n "${BMOE_CCACHE:-}" ]] && "$BMOE_CCACHE" --version >/dev/null 2>&1; then
+    LAUNCHER=(-DCMAKE_C_COMPILER_LAUNCHER="$BMOE_CCACHE" -DCMAKE_CXX_COMPILER_LAUNCHER="$BMOE_CCACHE")
+    "$BMOE_CCACHE" --zero-stats >/dev/null 2>&1 || true
+    echo "ccache: $BMOE_CCACHE, dir ${CCACHE_DIR:-default}"
+elif [[ -n "${BMOE_CCACHE:-}" ]]; then
+    echo "ccache: $BMOE_CCACHE does not run in this image; building without it"
+fi
+
 cmake -S "$ROOT/app/src/main/cpp" -B "$OUT" \
   -G Ninja \
+  ${LAUNCHER[@]+"${LAUNCHER[@]}"} \
   -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
   -DCMAKE_BUILD_TYPE=Release \
@@ -94,3 +106,7 @@ printf '\nStaged Android JNI libraries:\n'
 ls -lh "$JNI"
 printf '\nStaged Hexagon DSP skeleton assets:\n'
 ls -lh "$DSP_ASSETS"
+if [[ ${#LAUNCHER[@]} -gt 0 ]]; then
+    printf '\nccache:\n'
+    "$BMOE_CCACHE" --show-stats || true
+fi

@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- CI: the NPU engine is cached by the git tree hashes of `app/src/main/cpp`, the two build scripts and the toolchain image digest; a push that changed none of them restores the engine instead of building it (~7 of ~11 minutes). When it has to be built, ccache (pinned 4.10.2, checksum-verified, cache kept between runs) skips unchanged objects. The APK job verifies the payload and signature either way.
 - Mouse right-click in the chat input (also while editing a message) opens Cut / Copy / Paste / Select all / Share / Search the web at the pointer (`TextFieldWithMouseMenu`). Compose 1.6 has no such menu on Android: a right-click only moved the cursor and dropped the selection; touch selection with the system toolbar is unchanged.
 - Editing a sent message happens in the input bar (with a "Editing your message … Cancel" line above it) instead of a dialog, where the text field's copy/paste menu did not appear on some devices; the unsent draft is kept. Tool results (e.g. Termux output) have a Copy button and can be selected when expanded; notices and the live command output can be copied too.
 - Loading asks only when there is a real risk (RAM, a fixed cache over 60 % of RAM, pinned weights, a suspiciously small file) or an error. The notes "regular (non-MoE) model" and "Guess ahead pauses for image turns" no longer open the dialog, so with n-gram on by default a model loads with one tap.

@@ -28,19 +28,95 @@ jobs:
   native-hexagon:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      TOOLCHAIN_IMAGE: ghcr.io/snapdragon-toolchain/arm64-android@sha256:91714433626f0d94a926538a1e46ec43756c5b8e3262b91b95df1e812940aed1
+      CCACHE_VERSION: 4.10.2
+      CCACHE_SHA256: 80cab87bd510eca796467aee8e663c398239e0df1c4800a0b5dff11dca0b4f18
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
+      # The engine (llama.cpp, the NPU backend, the JNI bridge) depends only on app/src/main/cpp, the two build scripts
+      # and the toolchain image. Their git tree hashes name the result: a push that changed none of them (most app
+      # changes) restores the engine built before instead of compiling it again for ~7 minutes. The APK job below
+      # verifies the payload either way.
+      - name: Native cache key
+        id: key
+        run: |
+          cpp=$(git rev-parse HEAD:app/src/main/cpp)
+          build=$(git rev-parse HEAD:scripts/build-hexagon-onedge-engine.sh)
+          verify=$(git rev-parse HEAD:scripts/verify-npu-payload.sh)
+          image=${TOOLCHAIN_IMAGE##*:}
+          echo "key=hexagon-native-v1-${cpp:0:16}-${build:0:12}-${verify:0:12}-${image:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the engine built from the same sources
+        id: native
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            app/src/main/jniLibs/arm64-v8a
+            app/src/main/assets/hexagon
+          key: ${{ steps.key.outputs.key }}
+
+      # When the engine has to be built: ccache keeps compiled objects between runs, so a change in one engine file
+      # does not recompile all of llama.cpp. The binary runs inside the toolchain container (x86-64 glibc).
+      - name: Prepare ccache
+        if: steps.native.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ccache.tar.xz" \
+            "https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz"
+          echo "${CCACHE_SHA256}  $RUNNER_TEMP/ccache.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ccache-bin" .ccache
+          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP/ccache-bin" --strip-components=1 \
+            "ccache-${CCACHE_VERSION}-linux-x86_64/ccache"
+
+      - name: Restore ccache
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-hexagon-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-hexagon-
+
       - name: Build libonedge-engine.so with Hexagon support
+        if: steps.native.outputs.cache-hit != 'true'
         run: |
           docker run --rm \
             -e OUT=/workspace/build-hexagon-onedge \
             -e BMOE_BUILD_JOBS="$(nproc)" \
+            -e BMOE_CCACHE=/ccache-bin/ccache \
+            -e CCACHE_DIR=/workspace/.ccache -e CCACHE_BASEDIR=/workspace -e CCACHE_NOHASHDIR=true \
+            -e CCACHE_COMPILERCHECK=content -e CCACHE_MAXSIZE=1500M -e CCACHE_UMASK=002 \
             -v "$PWD:/workspace" \
-            ghcr.io/snapdragon-toolchain/arm64-android@sha256:91714433626f0d94a926538a1e46ec43756c5b8e3262b91b95df1e812940aed1 \
+            -v "$RUNNER_TEMP/ccache-bin:/ccache-bin:ro" \
+            "$TOOLCHAIN_IMAGE" \
             bash /workspace/scripts/build-hexagon-onedge-engine.sh
+
+      - name: Save ccache
+        if: steps.native.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-hexagon-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save the engine for later builds from the same sources
+        if: steps.native.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            app/src/main/jniLibs/arm64-v8a
+            app/src/main/assets/hexagon
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Engine source
+        run: |
+          if [ "${{ steps.native.outputs.cache-hit }}" = "true" ]; then
+            echo "::notice::Engine restored from cache (${{ steps.key.outputs.key }}): app/src/main/cpp and the build scripts are unchanged."
+          else
+            echo "::notice::Engine built (${{ steps.key.outputs.key }})."
+          fi
+          ls -la app/src/main/jniLibs/arm64-v8a app/src/main/assets/hexagon
 
       - uses: actions/upload-artifact@v4
         with:
