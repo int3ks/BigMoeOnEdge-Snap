@@ -80,7 +80,7 @@ private object Choices {
     // Finer where it matters: 250 MiB steps up to 2000, 500 up to 5000, then 1000 up to 8000.
     val CACHE = listOf(CACHE_AUTO_MB, 0, 500, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000)
     val CACHE_CEIL = listOf(0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
-    val IO = listOf(1, 2, 4, 8)
+    val IO = (1..8).toList() // the engine allows up to 8 lanes; one by one, as the device tuner tests them
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)
     val PREDICT_SPEC = listOf(0, 1, 2, 4)
@@ -392,7 +392,7 @@ private fun SettingsContent(
             Hint(viewModel.npuPrefillStatus)
             ChoiceSetting(
                     "NPU prefill loader threads",
-                    listOf(2 to "2", 4 to "4", 6 to "6", 8 to "8", 12 to "12", 16 to "16"),
+                    (1..16).map { it to it.toString() }, // one by one, as the device tuner tests them
                     settings.npuLoaders,
                     enabled = npuToggleEnabled && settings.npuPrefill
                 ) { viewModel.updateNpuLoaders(it) }
