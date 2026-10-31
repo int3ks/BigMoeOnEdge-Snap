@@ -382,15 +382,36 @@ fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(16.dp)
                     )
+                    Spacer(modifier = Modifier.weight(1f))
+                    // The whole result (e.g. a Termux error) to pass on, without screenshots.
+                    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(16.dp).clickable {
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
+                        }
+                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                LinkedInlineText(
-                    text = body,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = if (expanded) Int.MAX_VALUE else 3,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (expanded) {
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(
+                            text = body,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else {
+                    LinkedInlineText(
+                        text = body,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
@@ -114,7 +115,11 @@ fun ChatScreen(
     val chatsDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
     var showFilesSheet by remember { mutableStateOf(false) }
+    // Editing a sent message happens in the input bar (not in a dialog: there the text field's copy/paste menu did not
+    // show on some devices). The unsent draft stays untouched and comes back after the edit.
     var editingMessage by remember { mutableStateOf<ChatMessageUiModel?>(null) }
+    var editedText by remember { mutableStateOf("") }
+    LaunchedEffect(uiState.currentSession?.id) { editingMessage = null } // another chat: no edit carries over
 
     // The live bubble shows while a response is in progress: reasoning-only counts too (a reasoning model
     // can think for a while before the first answer token), and so does a running tool.
@@ -304,7 +309,7 @@ fun ChatScreen(
                                     onOpenCodeArtifact = viewModel::saveCodeAsArtifact,
                                     // Long-press: user message -> Edit + Copy, assistant message -> Copy.
                                     onEdit = if (message.role == MessageRole.USER && !uiState.isGenerating) {
-                                        { editingMessage = message }
+                                        { editingMessage = message; editedText = message.text }
                                     } else null,
                                     // Long-press / right-click: answer this turn again without editing it first.
                                     onRegenerate = if ((message.role == MessageRole.USER || message.role == MessageRole.ASSISTANT) && !uiState.isGenerating) {
@@ -387,11 +392,35 @@ fun ChatScreen(
 
             uiState.notice?.let { NoticeBar(text = it, onDismiss = { viewModel.dismissNotice() }) }
 
+            val editing = editingMessage
+            if (editing != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp)
+                ) {
+                    Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Editing your message. Sending it replaces the replies after it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { editingMessage = null }) { Text("Cancel") }
+                    }
+                }
+            }
             ChatInputBar(
-                textValue = uiState.inputDraft,
-                onTextChanged = viewModel::setInputDraft,
+                textValue = if (editing != null) editedText else uiState.inputDraft,
+                onTextChanged = { if (editing != null) editedText = it else viewModel.setInputDraft(it) },
                 onSendClicked = {
-                    if ((uiState.inputDraft.isNotBlank() || uiState.pendingAttachments.isNotEmpty()) && !uiState.isGenerating) {
+                    if (editing != null) {
+                        if (editedText.isNotBlank() && !uiState.isGenerating) {
+                            follow = true
+                            viewModel.editUserMessage(editing.id, editedText)
+                            editingMessage = null
+                        }
+                    } else if ((uiState.inputDraft.isNotBlank() || uiState.pendingAttachments.isNotEmpty()) && !uiState.isGenerating) {
                         follow = true
                         viewModel.sendMessage(uiState.inputDraft)
                     }
@@ -430,43 +459,6 @@ fun ChatScreen(
             onOpenFile(path)
             viewModel.consumeOpenFile()
         }
-    }
-
-    editingMessage?.let { message ->
-        var editedText by remember(message.id) { mutableStateOf(message.text) }
-        AlertDialog(
-            onDismissRequest = { editingMessage = null },
-            title = { Text("Edit message") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = editedText,
-                        onValueChange = { editedText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 4,
-                        maxLines = 10
-                    )
-                    Text(
-                        "The replies after this message are removed and a new answer is generated.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = editedText.isNotBlank() && !uiState.isGenerating,
-                    onClick = {
-                        follow = true
-                        viewModel.editUserMessage(message.id, editedText)
-                        editingMessage = null
-                    }
-                ) { Text("Save & regenerate") }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingMessage = null }) { Text("Cancel") }
-            }
-        )
     }
 
     if (showFilesSheet) {
@@ -599,12 +591,17 @@ private fun NoticeBar(text: String, onDismiss: () -> Unit) {
             modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f)
-            )
+            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+            androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f)) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+            IconButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text)) }) {
+                Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "Copy")
+            }
             IconButton(onClick = onDismiss) {
                 Icon(imageVector = Icons.Default.Close, contentDescription = "Dismiss")
             }
@@ -682,6 +679,14 @@ private fun LiveStatusRow(
                     if (expanded) "▾ Output" else "▸ Output",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary
                 )
+                if (expanded) {
+                    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    Text(
+                        "Copy",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { clipboard.setText(androidx.compose.ui.text.AnnotatedString(output.trimEnd())) }
+                    )
+                }
                 if (!expanded && !detail.isNullOrBlank()) {
                     Text(
                         detail, style = MaterialTheme.typography.labelSmall, fontFamily = mono,
