@@ -1,5 +1,6 @@
 #include "bmoe/session.h"
 #include "bmoe/recipe.h"
+#include "bmoe/expert_layout.h"
 #include "bmoe/route_trace.h"
 #include "bmoe/decode_trace.h"
 #include "bmoe/version.h"
@@ -11,6 +12,8 @@
 #include "prefill_support.h"
 #include "thinking_control.h"
 #include "tool_grammar.h"
+#include "context_checkpoints.h"
+#include "cache_brake.h"
 #include "prefill_path.h"
 #include "../moe/router_hook.h"
 #include "../moe/decide_probe.h"
@@ -361,6 +364,11 @@ int prefill_piece(const SessionConfig & cfg) {
 struct Session::Impl {
     SessionConfig cfg;
     std::string arch;
+    // A recipe read off the file's tensor shapes (bmoe/expert_layout.h) when the architecture is not
+    // in arch_registry.cpp, or when the registry's row does not name the tensors the file holds. The
+    // recipe's suffix pointers point into `discovered_suffix`, which lives as long as the hook.
+    std::string discovered_suffix[MoeRecipe::max_exps];
+    MoeRecipe discovered_recipe{};
     double load_seconds = 0.0;
 
     // Ownership order matters at teardown: the source's I/O pool holds fds into the mmap'd
@@ -436,6 +444,9 @@ struct Session::Impl {
     const llama_vocab * vocab = nullptr;
     int n_vocab = 0;
     int n_expert_used = 0; // effective routing width, after any override (0 = not MoE)
+    // The expert cache's brake (cache_brake.h): its reference is this session's own decode speed, so
+    // it lives as long as the session; a reload starts from the configured budget again.
+    CacheBrake brake;
     int n_layer = 0;
     // Trained MTP heads in this gguf (0 = no nextn block). The MTP block occupies layer indices
     // [n_layer, n_layer + n_layer_nextn), contiguous with the trunk and using the same tensor
@@ -461,6 +472,28 @@ struct Session::Impl {
     // and prefill only the diverging suffix instead of re-running the whole conversation.
     std::vector<common_chat_msg> chat_history;
     std::vector<llama_token> kv_tokens;
+    // What a refused cut of the KV rolls back to (context_checkpoints.h, ported from upstream 0.36).
+    // They describe a prefix of kv_tokens, so they go wherever it goes.
+    detail::ContextCheckpoints checkpoints;
+    bool checkpoint_size_logged = false; // the size is the model's, so said once per session
+    detail::CheckpointContexts checkpoint_contexts() { return {ctx.get(), ctx_dft.get(), mtp.get()}; }
+    void forget_kv_tokens() {
+        kv_tokens.clear();
+        checkpoints.clear();
+    }
+    // Keep the first n tokens of the KV and drop the rest. Where the memory refuses the cut, the
+    // newest checkpoint at or before n stands in for it; returns how many tokens are still held,
+    // 0 with the context cleared when no checkpoint helps. The draft context is the caller's.
+    size_t keep_kv_prefix(size_t n) {
+        size_t kept = n;
+        if (!llama_memory_seq_rm(llama_get_memory(ctx.get()), 0, (llama_pos) n, -1)) {
+            kept = (size_t) checkpoints.restore(checkpoint_contexts(), (int64_t) n);
+            if (kept == 0) clear_memory(ctx.get());
+        }
+        kv_tokens.resize(std::min(kept, kv_tokens.size()));
+        checkpoints.drop_after((int64_t) kept);
+        return kept;
+    }
 
     // decide()'s kept prefix state. Chosen at the first decide() (the policy needs the backend's
     // answer on prefill cost), null when the policy keeps none.
@@ -574,7 +607,7 @@ PplResult Session::perplexity(const PplRequest & req) {
     r.n_tokens = n;
 
     im.clear_memory(ctx);
-    im.kv_tokens.clear();
+    im.forget_kv_tokens();
 
     // Warm-up graph, discarded. Both routing policies decide at the terminal node of each layer's
     // weight chain, and which node that is gets LEARNED from the first graph of a run — so on a
@@ -720,7 +753,7 @@ DecideResult Session::decide(const DecideRequest & req) {
     // A decision is not a conversation turn: whatever generate() was continuing is gone once the
     // context is overwritten, so forget it rather than let a later turn diff against stale tokens.
     im.chat_history.clear();
-    im.kv_tokens.clear();
+    im.forget_kv_tokens();
 
     detail::LlamaDecideDeps deps;
     deps.ctx = im.ctx.get();
@@ -897,10 +930,43 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
 
     const MoeRecipe * recipe = nullptr;
     if (cfg.moe.enabled) {
-        recipe = find_moe_recipe(arch);
-        if (!recipe)
-            return fail(std::string("no MoE recipe for architecture '") + arch +
-                        "' — add one in core/src/moe/arch_registry.cpp (see docs/adding-a-model.md)");
+        // Which tensors are the routed experts. An architecture the registry names keeps its row (and
+        // its slot order) whenever the file holds exactly those tensors, so every model that streamed
+        // before streams the same way. Any other MoE file - an architecture llama.cpp learned after the
+        // registry was written, or a variant whose tensors differ from its row - is read off the file's
+        // shapes, as upstream BigMoeOnEdge does since 0.34 (#266): a block's 3-D `.weight` whose third
+        // extent is the declared expert count is a routed expert, every other tensor stays resident.
+        const MoeRecipe * row = find_moe_recipe(arch);
+        const ExpertLayout layout = discover_expert_layout(meta().offsets.extents, gguf().n_expert);
+        bool row_matches = row != nullptr;
+        if (row && layout.ok) {
+            int n_row = 0;
+            for (int p = 0; p < MoeRecipe::max_exps; ++p) {
+                if (!row->exps_suffix[p]) continue;
+                ++n_row;
+                bool found = false;
+                for (int q = 0; q < layout.n_slots; ++q)
+                    if (layout.suffix[q] == row->exps_suffix[p]) found = true;
+                if (!found) row_matches = false;
+            }
+            if (n_row != layout.n_slots) row_matches = false;
+        }
+        if (row_matches) {
+            recipe = row;
+        } else if (layout.ok) {
+            for (int p = 0; p < MoeRecipe::max_exps; ++p) {
+                im.discovered_suffix[p] = p < layout.n_slots ? layout.suffix[p] : std::string();
+                im.discovered_recipe.exps_suffix[p] = p < layout.n_slots ? im.discovered_suffix[p].c_str() : nullptr;
+            }
+            im.discovered_recipe.arch = im.arch.c_str();
+            recipe = &im.discovered_recipe;
+            std::fprintf(stderr, "bmoe: architecture '%s': %d expert tensors per layer read from the file (%s%s%s%s%s)\n",
+                         arch, layout.n_slots, layout.suffix[0].c_str(), layout.n_slots > 1 ? ", " : "",
+                         layout.n_slots > 1 ? layout.suffix[1].c_str() : "", layout.n_slots > 2 ? ", " : "",
+                         layout.n_slots > 2 ? layout.suffix[2].c_str() : "");
+        } else {
+            return fail(std::string("not a MoE this engine streams (architecture '") + arch + "'): " + layout.error);
+        }
     }
 
     // Chat templates are model-bound: initialise once here, apply per prompt in generate().
@@ -1325,6 +1391,8 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         im.clear_memory(ctx); // discard warm-up KV
         if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
     }
+    im.checkpoints.configure(cfg.ctx_checkpoints, cfg.checkpoint_min_step, llama_model_n_swa(model),
+                             (size_t) cfg.checkpoint_budget_mib << 20);
 
     if (im.prefill) {
         std::string perr;
@@ -1567,7 +1635,7 @@ RunResult Session::generate(const GenerateRequest & req,
     if (im.kv_has_media || image_turn) {
         im.clear_memory(ctx);
         if (im.ctx_dft) im.clear_memory(im.ctx_dft.get());
-        im.kv_tokens.clear();
+        im.forget_kv_tokens();
         im.kv_has_media = false;
     }
 
@@ -1583,7 +1651,7 @@ RunResult Session::generate(const GenerateRequest & req,
         // draft of the new conversation is conditioned on the previous one.
         if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
         im.chat_history.clear();
-        im.kv_tokens.clear();
+        im.forget_kv_tokens();
         // A new chat resets the sampler RNG, so a fixed seed reproduces the same transcript from a
         // fresh conversation. A continued turn (clear_kv=false) keeps the stream going, matching the
         // KV it decodes against.
@@ -1798,16 +1866,20 @@ RunResult Session::generate(const GenerateRequest & req,
         while (n_common < im.kv_tokens.size() && n_common < max_common && im.kv_tokens[n_common] == tokens[n_common])
             ++n_common;
         if (n_common < im.kv_tokens.size()) {
-            // SWA-style memory (e.g. Gemma) can refuse a partial removal; fall back to a full
-            // re-prefill in that case rather than continuing from an inconsistent cache.
-            if (!llama_memory_seq_rm(llama_get_memory(ctx), 0, (llama_pos) n_common, -1)) {
-                im.clear_memory(ctx);
-                n_common = 0;
-                kv_reuse = KV_REUSE_REFUSED;
-            } else {
+            // A recurrent state (Qwen3.5/3.6) or a sliding window (Gemma) can refuse a partial removal.
+            // Then the newest context checkpoint before the divergence stands in for the cut, and only a
+            // context with none starts again with a full re-prefill.
+            if (llama_memory_seq_rm(llama_get_memory(ctx), 0, (llama_pos) n_common, -1)) {
+                im.kv_tokens.resize(n_common);
+                im.checkpoints.drop_after((int64_t) n_common);
                 kv_reuse = KV_REUSE_PARTIAL;
+            } else {
+                const size_t want = n_common;
+                n_common = im.keep_kv_prefix(n_common);
+                kv_reuse = n_common > 0 ? KV_REUSE_CHECKPOINT : KV_REUSE_REFUSED;
+                if (n_common > 0)
+                    std::fprintf(stderr, "bmoe: context checkpoint restored: %zu of %zu tokens kept\n", n_common, want);
             }
-            im.kv_tokens.resize(n_common);
         } else {
             kv_reuse = KV_REUSE_FULL;
         }
@@ -1829,12 +1901,8 @@ RunResult Session::generate(const GenerateRequest & req,
     // tokens we fed, and un-append the user message. Used on cancel so prior turns stay usable.
     auto rollback_turn = [&]() {
         if (chat_on) {
-            if (!llama_memory_seq_rm(llama_get_memory(ctx), 0, (llama_pos) rollback_keep, -1)) {
-                im.clear_memory(ctx);
-                im.kv_tokens.clear();
-            } else {
-                im.kv_tokens.resize(std::min(rollback_keep, im.kv_tokens.size()));
-            }
+            // A memory that refuses the cut goes back to the newest checkpoint at or before it.
+            rollback_keep = im.keep_kv_prefix(rollback_keep);
             if (history_pushed) {
                 im.chat_history.pop_back();
                 history_pushed = false;
@@ -1945,6 +2013,9 @@ RunResult Session::generate(const GenerateRequest & req,
     const long long device_nodes0 = im.hook->device_nodes();
     for (int i = (int) n_common; i < n_prompt_text_end; i += pf_step) {
         const int chunk = std::min(pf_step, n_prompt - i);
+        // A long prompt prefilled in pieces leaves checkpoints inside it too, min_step apart.
+        if (chat_on && !image_turn && i > (int) n_common && im.checkpoints.wanted(i, /*prompt_end*/ false))
+            im.checkpoints.create(im.checkpoint_contexts(), i);
         if (im.prefill) {
             const bool on_dev = chunk >= im.cfg.prefill.min_tokens;
             im.place_prefill(on_dev);
@@ -1990,6 +2061,16 @@ RunResult Session::generate(const GenerateRequest & req,
     if (chat_on && !image_turn)
         for (int i = (int) n_common; i < n_prompt; ++i)
             im.kv_tokens.push_back(tokens[i]);
+    // The end of this prompt is where the next request most often diverges: an edit or a regenerate
+    // of the answer, a template that renders the answer back without its thinking, an API client
+    // that resends the answer as text.
+    if (chat_on && !image_turn && im.checkpoints.create(im.checkpoint_contexts(), n_prompt) &&
+        !im.checkpoint_size_logged) {
+        im.checkpoint_size_logged = true;
+        std::fprintf(stderr, "bmoe: context checkpoints: %.1f MiB each, up to %d kept\n",
+                     (double) im.checkpoints.bytes() / (double) im.checkpoints.count() / (1024.0 * 1024.0),
+                     im.cfg.ctx_checkpoints);
+    }
     // Prefill is done: a cancel from here on keeps the prompt. Not with an MTP draft context: its own KV is not
     // guaranteed to cover the whole prompt at this point, so a cancelled turn rolls back to the old state instead.
     if (stateless && !im.ctx_dft) rollback_keep = (size_t) n_prompt;
@@ -2083,6 +2164,34 @@ RunResult Session::generate(const GenerateRequest & req,
     bool stop_hit = false;     // a stateless-chat stop string matched
     std::string stop_seq;
     bool natural_end = false;  // the model ended the turn itself (end-of-generation token)
+    double last_compute_s = 0.0; // the last decode's compute time, what the cache brake reads
+    // Between two decodes, the only time the budget may move. A stalled token is asked about first,
+    // because it is the cheap signal; the residency sample is the expensive one and runs only to
+    // confirm it, so a run that never stalls never pays for it.
+    // The first decodes of a turn are not asked: pages Android took back while the app sat idle
+    // between two turns fault back in once and are fine again, which is no reason to halve the cache
+    // for the rest of the session. Pressure that lasts shows on the tokens after them.
+    int brake_quiet = 4;
+    auto brake_cache = [&]() {
+        if (!moe.enabled || !moe.cache_brake || im.source.cache_budget() == 0) return;
+        if (brake_quiet > 0) {
+            --brake_quiet;
+            return;
+        }
+        const double ref = im.brake.reference();
+        if (!im.brake.stalled(last_compute_s)) return;
+        const double lost = im.source.cache_lost_frac(/*sample*/ 64);
+        if (lost <= 0.0) return; // slow, but not because memory went: the cores, the clock, a neighbour
+        const size_t budget = im.source.cache_budget();
+        const size_t floor = im.source.worst_cycle_bytes(im.n_expert_used);
+        const size_t next = CacheBrake::braked(budget, floor);
+        if (next >= budget) return;
+        im.source.set_cache_budget(next);
+        std::fprintf(stderr,
+                     "bmoe: cache brake: a token took %.0f ms of compute against %.0f, and %.0f%% of the cache's "
+                     "sampled pages were no longer in RAM; cache %zu -> %zu MiB\n",
+                     last_compute_s * 1000.0, ref * 1000.0, lost * 100.0, budget >> 20, next >> 20);
+    };
     while (n_gen < n_predict) {
         if (llama_vocab_is_eog(im.vocab, tok)) {
             natural_end = true;
@@ -2315,14 +2424,17 @@ RunResult Session::generate(const GenerateRequest & req,
                     }
                 }
             }
-            if (e == 0)
+            if (e == 0) {
                 tally.record(m, wall, f1 - f0, c1 - c0, im.turn, moe.enabled ? &st : nullptr, sink != nullptr);
-            else
+                last_compute_s = m.compute_ms / 1000.0;
+            } else
                 tally.record(m, 0.0, 0, 0.0, im.turn, moe.enabled ? &st : nullptr, sink != nullptr);
             if (on_token) on_token(m);
             if (sink) sink->on_token(m);
             if (stop_hit) break;
         }
+
+        brake_cache();
 
         // verify_toks = [tok, drafts...]; after the rejected tail was rolled back the KV holds the first 1 + n_acc of
         // them, and the caller got the first n_emitted_here. The rest is KV content nobody was shown.
@@ -2376,10 +2488,14 @@ RunResult Session::generate(const GenerateRequest & req,
                 for (llama_token t : group_surplus) im.kv_tokens.push_back(t);
                 kept_surplus = true;
             } else {
-                // Nothing survives that we can still describe, so say so rather than leave kv_tokens
-                // asserting a prefix the context no longer holds. The next turn re-prefills in full.
-                im.clear_memory(ctx);
-                im.kv_tokens.clear();
+                // Keep what a context checkpoint still describes (at worst nothing) rather than leave
+                // kv_tokens asserting a prefix the context no longer holds.
+                if (chat_on && !image_turn) {
+                    im.keep_kv_prefix((size_t) emitted_end);
+                } else {
+                    im.clear_memory(ctx);
+                    im.forget_kv_tokens();
+                }
             }
         }
         // The draft context mirrors the target's positions (process() decodes the same batches into

@@ -52,6 +52,12 @@ struct MoeStreamConfig {
     // device whose free RAM it cannot know in advance; it does not chase memory pressure afterwards.
     // Mutually exclusive with an explicit cache_mb > 0. See docs/cache-sizing.md.
     bool cache_auto = false;
+    // The cache brake (ported from upstream BigMoeOnEdge 0.34, docs there: pressure.md): a token whose
+    // compute stalls at twice this session's median, confirmed by a sample of the cache's pages that
+    // are no longer in RAM (Android compressed or swapped them), halves the cache instead of letting
+    // the system thrash. It only shrinks, never under one token's worst-case cycle; a reload of the
+    // model starts from the configured size again. A slow token with the pages in place moves nothing.
+    bool cache_brake = true;
     int cache_floor_mb = 1536; // RAM to leave free for the rest of the system when auto-sizing
     int cache_ceil_mb = 0;     // upper bound on the auto budget in MiB (0 = cap only at the full
                                // expert-set size); useful to keep the cache from taking all the
@@ -458,6 +464,22 @@ struct RunConfig {
     // Decode is unaffected: a decode graph is one token wide whatever this says. The cost is
     // prefill throughput, which processes a long prompt in more, smaller passes.
     int n_ubatch = 0;
+
+    // Context checkpoints, as llama.cpp's server keeps them (ported from upstream BigMoeOnEdge
+    // 0.36): copies of the part of the context's state that cannot be cut at an arbitrary position
+    // (a recurrent state such as Qwen3.5/3.6's Gated DeltaNet, a sliding window), so a chat turn
+    // whose prompt diverges from the cached one rolls back to the newest checkpoint before the
+    // divergence instead of prefilling the whole conversation again. One is taken at the end of
+    // every prompt, and inside a long prompt every checkpoint_min_step tokens. A memory that can be
+    // cut anywhere has no such state and keeps none. Lossless: a restored state is the state the
+    // same tokens computed.
+    //
+    // Fewer than upstream's 8 by default, and capped in bytes: on a tablet every MiB they hold is a
+    // MiB the expert cache does not get (Qwen3.6-35B-A3B's is about 63 MiB each). An edit,
+    // regenerate or agent turn nearly always diverges inside the last prompt or two.
+    int ctx_checkpoints = 4;              // 0 keeps none
+    int checkpoint_min_step = 8192;       // tokens between two checkpoints inside one prompt
+    int checkpoint_budget_mib = 320;      // all checkpoints together; the oldest go first (the newest always stays)
     bool chatml = false;   // wrap the prompt in the model family's chat turn (arch-aware)
     bool progress = false; // emit machine telemetry (one JSON line per token)
 

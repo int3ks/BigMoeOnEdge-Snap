@@ -107,8 +107,10 @@ enum KvReuse : int {
     KV_REUSE_NONE = 0,    // nothing to reuse: first turn, "new chat", or a one-shot run
     KV_REUSE_FULL = 1,    // the whole cached sequence was a prefix of the new prompt; only the suffix was prefilled
     KV_REUSE_PARTIAL = 2, // the prompts diverged; the cached tail was dropped and the common prefix kept
-    KV_REUSE_REFUSED = 3  // the prompts diverged but the memory cannot drop a tail (recurrent / hybrid / SWA):
-                          // everything was prefilled again
+    KV_REUSE_REFUSED = 3,   // the prompts diverged but the memory cannot drop a tail (recurrent / hybrid / SWA):
+                            // everything was prefilled again
+    KV_REUSE_CHECKPOINT = 4 // the memory could not drop the tail, and a context checkpoint before the divergence
+                            // was restored instead: n_reused tokens were kept, the rest prefilled
 };
 
 struct RunSummary {

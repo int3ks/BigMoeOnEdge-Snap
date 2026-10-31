@@ -7,8 +7,10 @@
 add_library(bmoe_core STATIC
     src/config.cpp
     src/moe/arch_registry.cpp
+    src/moe/expert_layout.cpp
     src/engine/ngram_draft.cpp
     src/engine/logits.cpp
+    src/engine/cache_brake.cpp
     src/engine/decide/prompt_split.cpp
     src/engine/decide/choice_scorer.cpp
     src/engine/decide/prefix_cache.cpp
@@ -37,6 +39,7 @@ if(BMOE_HAVE_LLAMA)
         src/moe/decide_probe.cpp
         src/moe/device_arena.cpp
         src/engine/session.cpp
+        src/engine/context_checkpoints.cpp
         src/engine/prefill_device.cpp
         src/engine/prefill_path.cpp
         src/engine/decide/llama_backend.cpp

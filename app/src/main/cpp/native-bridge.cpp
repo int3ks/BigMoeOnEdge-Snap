@@ -150,10 +150,10 @@ static void log_run_stats(const bmoe::RunSummary & s, bool npu_requested) {
     const double cores_busy = s.s_per_token > 0.0 ? s.cpu_s_per_token / s.s_per_token : 0.0;
     LOGI("Run stats: n_gen=%d tok/s=%.3f s/tok=%.3f compute_s/tok=%.3f io_s/tok=%.3f stall_s/tok=%.3f "
          "mgmt_s/tok=%.3f cpu_s/tok=%.3f cores_busy=%.2f majflt/tok=%.1f loop_overhead_s/tok=%.4f "
-         "cache_hit=%.1f%% read_mib=%.0f",
+         "cache_hit=%.1f%% read_mib=%.0f cache_mib=%.0f kv_reuse=%d n_reused=%d",
          s.n_generated, s.tokens_per_second, s.s_per_token, s.moe_compute_s_per_token, s.moe_io_s_per_token,
          s.moe_stall_s_per_token, s.moe_mgmt_s_per_token, s.cpu_s_per_token, cores_busy, s.majflt_per_token,
-         s.loop_overhead_s_per_token, s.cache_hit_pct, s.moe_read_mib);
+         s.loop_overhead_s_per_token, s.cache_hit_pct, s.moe_read_mib, s.cache_budget_mib, s.kv_reuse, s.n_reused);
     if (npu_requested) {
         LOGI("NPU prefill evidence: device_tokens=%d device_nodes=%lld device_read_mib=%.2f device_stall_s=%.3f",
              s.prefill_device_tokens, s.prefill_device_nodes, s.prefill_device_read_mib, s.prefill_device_stall_seconds);

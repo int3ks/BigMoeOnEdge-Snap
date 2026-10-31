@@ -117,6 +117,13 @@ public:
     // load_layer/generate. Intended for an app's memory-pressure callback (Android onTrimMemory)
     // and exercised by the shrink gate. This is the only thing that moves the budget after init.
     void set_cache_budget(size_t bytes);
+    size_t cache_budget() const { return cache_max_; }
+
+    // The share of the cache's resident pages the system has taken back (compressed into zram or
+    // swapped out), from one page of each of up to `n` entries spread over the LRU, hot to cold.
+    // -1 when there is nothing to sample. Asked by the cache brake (engine/cache_brake.h) between two
+    // decodes only, like set_cache_budget: no decode in flight.
+    double cache_lost_frac(int n);
 
     // The cliff from cache-sizing.md, computed at init from model shape alone: the bytes one
     // token's pass over the layer stack demands in the worst case, i.e. every bound layer's top_k

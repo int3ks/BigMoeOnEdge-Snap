@@ -56,6 +56,11 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 * **Approval setting:** ask before every command and change (default) or allow everything for watched tasks.
 
 ### Engine and models
+* **Engine updates from upstream BigMoeOnEdge 0.34-0.36:** context checkpoints (Qwen3.5/3.6, Gemma and other
+  hybrid or sliding-window models no longer prefill the whole conversation again when a prompt differs from what the
+  context holds), MoE expert tensors read from the file (new MoE architectures stream without a registry entry), a
+  cache brake (the expert cache halves itself when Android takes its memory back, instead of thrashing) and a
+  truncated model file failing the load. Ported onto this fork's engine; host tests in `app/src/main/cpp/core/tests`.
 * **Newer llama.cpp:** the vendored tree moved from 965f897 (2026-09-26) to Helldez/llama.cpp
   `bmoe/expert-ready-hook-2810` (upstream of 2026-10-28), the revision BigMoeOnEdge uses. It brings faster Hexagon
   (NPU) MoE kernels, DeepSeek V4.1 Flash, LFM3 and more models, and the **Flint** architecture
@@ -352,7 +357,8 @@ Full details, every curl command, and what was and was not verified: [`docs/API_
 
 ### Native engine
 
-* `app/src/main/cpp/core`: the customised BigMoeOnEdge engine (0.28 baseline with local patches, see `patches/`).
+* `app/src/main/cpp/core`: the customised BigMoeOnEdge engine (0.28 baseline with local patches, see `patches/`, and
+  later upstream engine work ported piece by piece, see `docs/UPSTREAM_WATCH.md`). Host tests: `scripts/host-engine-tests.sh`.
 * `app/src/main/cpp/third_party/llama.cpp`: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-2810` (396b6c4,
   upstream of 2026-10-28) with the local changes in `patches/0007`.
 * `app/src/main/cpp/native-bridge.cpp` and `EngineNativeBridge.kt`: the JNI bridge.

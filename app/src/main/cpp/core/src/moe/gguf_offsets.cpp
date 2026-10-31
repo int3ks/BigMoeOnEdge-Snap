@@ -53,6 +53,10 @@ void fill_offsets(const gguf_context * gctx, int file_idx, GgufOffsets & out) {
         out.off_by_name[name] = data_off + (uint64_t) gguf_get_tensor_offset(gctx, i);
         out.size_by_name[name] = (uint64_t) gguf_get_tensor_size(gctx, i);
         out.file_by_name[name] = file_idx;
+        // Exactly three dimensions: gguf pads ne to GGML_MAX_DIMS with ones, so a 3-D tensor is one
+        // whose fourth extent is 1 and whose third is not.
+        const int64_t * ne = gguf_get_tensor_ne(gctx, i);
+        out.extents.push_back({name, ne && ne[3] == 1 && ne[2] > 1 ? (uint64_t) ne[2] : 0});
     }
 }
 

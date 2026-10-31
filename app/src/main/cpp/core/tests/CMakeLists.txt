@@ -1,0 +1,20 @@
+# Host (Linux/macOS) tests of the engine core. Not part of the app build: run
+# scripts/host-engine-tests.sh, which configures this directory on its own with the vendored llama.cpp.
+cmake_minimum_required(VERSION 3.22)
+project(bmoe_host_tests VERSION 0.28.1 LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
+foreach(o LLAMA_BUILD_TESTS LLAMA_BUILD_EXAMPLES LLAMA_BUILD_SERVER LLAMA_BUILD_TOOLS LLAMA_BUILD_APP LLAMA_CURL
+          LLAMA_OPENSSL LLAMA_BUILD_UI LLAMA_USE_PREBUILT_UI GGML_OPENMP GGML_NATIVE GGML_CPU_KLEIDIAI LLAMA_LLGUIDANCE)
+    set(${o} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(CPP ${CMAKE_CURRENT_LIST_DIR}/../..)
+add_subdirectory(${CPP}/third_party/llama.cpp llama_build EXCLUDE_FROM_ALL)
+set(BMOE_HAVE_LLAMA ON)
+add_subdirectory(${CPP}/core core_build)
+foreach(n file_reader_test expert_layout_test cache_brake_test session_ckpt_test)
+    add_executable(${n} ${n}.cpp)
+    target_include_directories(${n} PRIVATE ${CPP}/core/src ${CPP}/core/src/io ${CPP}/core/src/engine ${CPP}/core/src/moe)
+    target_link_libraries(${n} PRIVATE bmoe_core)
+endforeach()

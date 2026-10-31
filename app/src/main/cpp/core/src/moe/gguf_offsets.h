@@ -10,6 +10,8 @@
 // (shard index, offset in that shard) instead of an offset in one file.
 #pragma once
 
+#include "bmoe/expert_layout.h"
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -27,6 +29,10 @@ struct GgufOffsets {
     // tensor name -> index into shard_paths. Always filled; 0 for every tensor of a
     // single-file model, so consumers index shard_paths unconditionally.
     std::unordered_map<std::string, int> file_by_name;
+    // Every tensor's name with the third extent of a 3-D one (0 for any other rank): the two facts
+    // that tell a routed expert weight from everything else in the file (bmoe/expert_layout.h),
+    // read off the same parse.
+    std::vector<TensorExtent> extents;
     // The files, in shard order. A single-file model is the degenerate case: one entry,
     // the path that was asked for. Never empty when ok.
     std::vector<std::string> shard_paths;

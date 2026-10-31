@@ -10,6 +10,11 @@ namespace bmoe {
 // docs/adding-a-model.md. Models that fuse gate+up into one tensor (a merged
 // `ffn_gate_up_exps`) name two expert tensors instead of three; that is still one row,
 // with the fused suffix in the first slot and a nullptr tail.
+//
+// Since the port of upstream's expert layout (#266) a row is no longer required: an architecture
+// not listed here, or a file whose tensors differ from its row, has its expert tensors read off the
+// file's shapes (bmoe/expert_layout.h). The rows stay so that every model that streamed before keeps
+// exactly its slot order.
 static const MoeRecipe k_recipes[] = {
     {"qwen3moe", {"ffn_gate_exps", "ffn_up_exps", "ffn_down_exps"}},
     {"qwen2moe", {"ffn_gate_exps", "ffn_up_exps", "ffn_down_exps"}},
