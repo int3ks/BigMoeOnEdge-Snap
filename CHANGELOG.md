@@ -2,7 +2,7 @@
 
 ## Snap fork
 
-- Mouse right-click in the chat input (also while editing a message) opens Cut / Copy / Paste / Select all at the pointer (`TextFieldWithMouseMenu`). Compose 1.6 has no such menu on Android: a right-click only moved the cursor and dropped the selection; touch selection with the system toolbar is unchanged.
+- Mouse right-click in the chat input (also while editing a message) opens Cut / Copy / Paste / Select all / Share / Search the web at the pointer (`TextFieldWithMouseMenu`). Compose 1.6 has no such menu on Android: a right-click only moved the cursor and dropped the selection; touch selection with the system toolbar is unchanged.
 - Editing a sent message happens in the input bar (with a "Editing your message … Cancel" line above it) instead of a dialog, where the text field's copy/paste menu did not appear on some devices; the unsent draft is kept. Tool results (e.g. Termux output) have a Copy button and can be selected when expanded; notices and the live command output can be copied too.
 - Loading asks only when there is a real risk (RAM, a fixed cache over 60 % of RAM, pinned weights, a suspiciously small file) or an error. The notes "regular (non-MoE) model" and "Guess ahead pauses for image turns" no longer open the dialog, so with n-gram on by default a model loads with one tap.
 - Defaults: Guess ahead is n-gram (exact at any temperature, costs nothing when nothing repeats) and "prefer cached experts" is 15 %. Existing settings are kept.

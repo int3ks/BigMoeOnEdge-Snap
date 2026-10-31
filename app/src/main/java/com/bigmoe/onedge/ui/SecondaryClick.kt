@@ -106,6 +106,49 @@ fun TextFieldWithMouseMenu(
                 enabled = text.isNotEmpty(),
                 onClick = { onValueChange(value.copy(selection = androidx.compose.ui.text.TextRange(0, text.length))); menu.close() }
             )
+            val context = androidx.compose.ui.platform.LocalContext.current
+            androidx.compose.material3.DropdownMenuItem(
+                text = { androidx.compose.material3.Text("Share") },
+                enabled = selected.isNotBlank(),
+                onClick = { menu.close(); shareText(context, selected) }
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { androidx.compose.material3.Text("Search the web") },
+                enabled = selected.isNotBlank(),
+                onClick = { menu.close(); searchWeb(context, selected) }
+            )
+        }
+    }
+}
+
+/** Android's share sheet for [text]. */
+fun shareText(context: android.content.Context, text: String) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(android.content.Intent.EXTRA_TEXT, text)
+    runCatching {
+        context.startActivity(android.content.Intent.createChooser(send, null).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
+/**
+ * Searches [text] with the device's web-search app; without one (no app handles ACTION_WEB_SEARCH, as on some
+ * firmwares) it opens a search page in the default browser.
+ */
+fun searchWeb(context: android.content.Context, text: String) {
+    val query = text.trim().take(500)
+    val search = android.content.Intent(android.content.Intent.ACTION_WEB_SEARCH)
+        .putExtra(android.app.SearchManager.QUERY, query)
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(search)
+    } catch (_: Exception) {
+        val url = "https://www.google.com/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")
+        runCatching {
+            context.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
         }
     }
 }
