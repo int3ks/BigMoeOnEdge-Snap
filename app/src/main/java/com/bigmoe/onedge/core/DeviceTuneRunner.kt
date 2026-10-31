@@ -52,7 +52,9 @@ class DeviceTuneRunner(
         start: EngineSettings,
         params: List<TuneParam>,
         onStatus: (TuneStatus) -> Unit,
-        onResult: (TuneResult) -> Unit
+        onResult: (TuneResult) -> Unit,
+        /** What the previous model is loaded with again at the end: the user's own settings. */
+        restore: EngineSettings = start
     ): String? {
         val previous = engine.loadedModel()
         var cur = start.copy(spec = SpecSource.OFF, contextLength = maxOf(start.contextLength, 4096))
@@ -128,10 +130,10 @@ class DeviceTuneRunner(
                 onStatus(TuneStatus(0, 0, null, null, "Restoring your model and settings…", startedAtMs = began))
                 riskyPoint(null, null)
                 engine.unload()
-                engine.setCpuMasks(CpuTopology.effective(start.cpuMask), CpuTopology.effective(start.cpuMaskPrefill))
+                engine.setCpuMasks(CpuTopology.effective(restore.cpuMask), CpuTopology.effective(restore.cpuMaskPrefill))
                 if (previous != null) {
                     delay(1000)
-                    engine.loadModel(previous.path, start.toLoadConfig(), previous.mmprojPath, previous.draftModelPath)
+                    engine.loadModel(previous.path, restore.toLoadConfig(), previous.mmprojPath, previous.draftModelPath)
                 }
                 loadedWith = null
             }
@@ -198,7 +200,9 @@ class DeviceTuneRunner(
         val prefillMask = CpuTopology.effective(s.cpuMaskPrefill)
         val loaded = loadedWith
         val path = engine.loadedModel()?.path
-        if (loaded != null && path != null && reloadKey(loaded) == reloadKey(s)) {
+        // A cache that is off has no LRU buffers to grow live; switching it on or off needs a load.
+        val cacheOnOff = loaded != null && (loaded.cacheMb == 0) != (s.cacheMb == 0)
+        if (loaded != null && path != null && reloadKey(loaded) == reloadKey(s) && !cacheOnOff) {
             engine.setCpuMasks(decodeMask, prefillMask)
             val cacheChanged = loaded.cacheMb != s.cacheMb
             val ok = engine.tuneLive(
@@ -308,7 +312,7 @@ class DeviceTuneRunner(
 
         fun display(param: TuneParam, v: Int): String = when (param) {
             TuneParam.DECODE_CORES, TuneParam.PREFILL_CORES -> "$v core${if (v == 1) "" else "s"}"
-            TuneParam.CACHE -> "$v MiB"
+            TuneParam.CACHE -> if (v < 0) "Auto" else if (v == 0) "off" else "$v MiB"
             TuneParam.IO_LANES -> "$v lane${if (v == 1) "" else "s"}"
             TuneParam.UBATCH -> "$v tokens"
             TuneParam.NPU -> if (v == 1) "on" else "off"

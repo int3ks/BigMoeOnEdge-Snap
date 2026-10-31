@@ -266,8 +266,14 @@ object DeviceTuner {
         append("\n\nQuestion: Which component releases the energy of the mainspring in small, equal steps? Answer with one word.")
     }
 
-    /** Short prompts of roughly [tokens] tokens for the NPU threshold (about four characters per token). */
-    fun shortPrompt(tokens: Int): String = LONG_TEXT.take((tokens * 4).coerceAtMost(LONG_TEXT.length)) + "\nSummarise this in one word."
+    /**
+     * Short prompts of roughly [tokens] tokens for the NPU threshold, the chat template and the run's first line
+     * included (about [TEMPLATE_TOKENS] of them; four characters per token for the text).
+     */
+    fun shortPrompt(tokens: Int): String =
+        LONG_TEXT.take(((tokens - TEMPLATE_TOKENS) * 4).coerceIn(8, LONG_TEXT.length)) + "\nSummarise this in one word."
+
+    private const val TEMPLATE_TOKENS = 24
 
     private const val LONG_TEXT = """For most of history people told the time by the sun. A stick in the ground, a gnomon, threw a shadow that moved through the day, and the length and direction of that shadow divided daylight into rough portions. Water clocks, in which water dripped from one vessel into another at a steady rate, worked at night and indoors, and the best of them, in China and in the Islamic world, drove elaborate displays of moving figures and ringing bells. Yet all of these devices drifted with the weather, the season and the skill of their keepers, and none of them could be carried.
 

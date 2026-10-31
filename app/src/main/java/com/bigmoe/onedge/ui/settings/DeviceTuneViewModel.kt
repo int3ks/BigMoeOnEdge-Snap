@@ -80,7 +80,10 @@ class DeviceTuneViewModel(
         }
     }
 
-    private fun currentValues(s: EngineSettings): Map<TuneParam, Int> = TuneParam.values().associateWith { DeviceTuner.valueOf(it, s) }
+    /** The settings' values; an Auto cache as -1 (shown as "Auto"; the test starts it at 2000 MiB). */
+    private fun currentValues(s: EngineSettings): Map<TuneParam, Int> = TuneParam.values().associateWith {
+        if (it == TuneParam.CACHE && s.cacheMb == com.bigmoe.onedge.data.local.datastore.CACHE_AUTO_MB) -1 else DeviceTuner.valueOf(it, s)
+    }
 
     fun dismissMessage() = _ui.update { it.copy(message = null) }
     private fun say(text: String) = _ui.update { it.copy(message = text) }
@@ -140,7 +143,8 @@ class DeviceTuneViewModel(
                         current = current.copy(results = current.results + (r.param to r), updatedAt = System.currentTimeMillis())
                         _ui.update { it.copy(report = current) }
                         viewModelScope.launch { store.save(current) }
-                    }
+                    },
+                    restore = global
                 )
                 current = current.copy(driftNote = drift, updatedAt = System.currentTimeMillis())
                 store.save(current)
