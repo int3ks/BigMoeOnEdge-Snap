@@ -87,8 +87,8 @@ class DeviceTuneRunner(
                 } else {
                     val values = DeviceTuner.candidates(param, cores)
                     val loadedCache = { DeviceTuner.valueOf(TuneParam.CACHE, loadedWith ?: cur) }
-                    val points = DeviceTuner.climb(
-                        values, startValue,
+                    val points = DeviceTuner.search(
+                        values, DeviceTuner.fineCandidates(param), startValue,
                         allowed = { v ->
                             // A bigger cache must fit: what it adds on top of the current one, plus 1.5 GB for the rest.
                             param != TuneParam.CACHE || v <= loadedCache() || availRamMb() - (v - loadedCache()) >= 1536

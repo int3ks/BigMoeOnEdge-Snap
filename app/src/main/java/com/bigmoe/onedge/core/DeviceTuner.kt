@@ -99,6 +99,19 @@ object DeviceTuner {
         TuneParam.NPU_MIN_TOKENS -> NPU_MIN_STEPS
     }
 
+    /**
+     * The fine grid a parameter is refined on after the coarse search found its best value: every value between the
+     * coarse steps (I/O lanes 3, 5, 6, 7; cache in 250 MiB; ubatch in 64; NPU loaders one by one). Null when the coarse
+     * list is already every value (threads) or there is nothing in between (NPU on/off, the NPU threshold).
+     */
+    fun fineCandidates(param: TuneParam): List<Int>? = when (param) {
+        TuneParam.IO_LANES -> (1..8).toList()
+        TuneParam.CACHE -> (1..32).map { it * 250 }
+        TuneParam.UBATCH -> (1..16).map { it * 64 } // up to 1024, the coarse maximum: wider graphs cost compute memory
+        TuneParam.NPU_LOADERS -> (1..16).toList()
+        else -> null
+    }
+
     /** Prompt lengths at which the NPU threshold is decided: the smallest one where the NPU is faster wins. */
     val NPU_MIN_STEPS = listOf(16, 32, 64, 128, 256)
 
@@ -140,9 +153,12 @@ object DeviceTuner {
         values: List<Int>,
         start: Int,
         allowed: (Int) -> Boolean = { true },
+        /** Values already measured (the coarse search before a fine one): reused, not measured again. */
+        seed: List<TunePoint> = emptyList(),
         measure: suspend (Int) -> TunePoint
     ): List<TunePoint> {
         val points = LinkedHashMap<Int, TunePoint>()
+        seed.forEach { points[it.value] = it }
         suspend fun at(i: Int): TunePoint? {
             if (i !in values.indices || !allowed(values[i])) return null
             return points[values[i]] ?: measure(values[i]).also { points[values[i]] = it }
@@ -167,6 +183,24 @@ object DeviceTuner {
             if (walked) break
         }
         return points.values.toList()
+    }
+
+    /**
+     * Coarse, then fine: [climb] over [coarse] from [start], and then once more over [fine] from the best value found,
+     * so the steps in between are tried too (best 4 of 2, 4, 8: then 5, and 6 while each step is faster, or 3 when 5 is
+     * not). Points measured in the first pass are not measured again.
+     */
+    suspend fun search(
+        coarse: List<Int>,
+        fine: List<Int>?,
+        start: Int,
+        allowed: (Int) -> Boolean = { true },
+        measure: suspend (Int) -> TunePoint
+    ): List<TunePoint> {
+        val first = climb(coarse, start, allowed, measure = measure)
+        if (fine == null) return first
+        val from = best(first, start) ?: return first
+        return climb(fine, from, allowed, seed = first, measure = measure)
     }
 
     /**

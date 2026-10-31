@@ -44,6 +44,26 @@ class DeviceTunerTest {
     }
 
     @Test
+    fun fineSearchTriesTheStepsInBetween() {
+        // Coarse 2, 4, 8 finds 4; the fine pass then tries 5 (faster), 6 (faster), 7 (slower): 6 wins, 3 is never needed.
+        val speed = mapOf(1 to 2.0, 2 to 4.0, 3 to 4.5, 4 to 5.0, 5 to 5.6, 6 to 6.2, 7 to 6.0, 8 to 4.8)
+        val pts = runBlocking {
+            DeviceTuner.search(listOf(1, 2, 4, 8), (1..8).toList(), 2) { v -> TunePoint(v, speed[v]) }
+        }
+        assertEquals(6, DeviceTuner.best(pts, 2))
+        assertEquals(setOf(2, 4, 8, 5, 6, 7), pts.map { it.value }.toSet())
+    }
+
+    @Test
+    fun fineSearchGoesDownWhenTheNextStepUpIsSlower() {
+        val speed = mapOf(2 to 4.0, 3 to 5.5, 4 to 5.0, 5 to 4.9, 8 to 3.0)
+        val pts = runBlocking {
+            DeviceTuner.search(listOf(1, 2, 4, 8), (1..8).toList(), 4) { v -> TunePoint(v, speed[v]) }
+        }
+        assertEquals(3, DeviceTuner.best(pts, 4))
+    }
+
+    @Test
     fun startBetweenCandidatesUsesTheNearest() {
         assertEquals(2, DeviceTuner.nearestIndex(listOf(64, 128, 256, 512), 300))
     }
