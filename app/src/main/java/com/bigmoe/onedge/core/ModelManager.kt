@@ -160,8 +160,47 @@ class ModelManager(
         return if (loras) folder.toSet() else registeredPaths() + folder
     }
 
+    /** A model was loaded: it moves to the top of the list (most recently used first). */
+    suspend fun markUsed(modelPath: String) = withContext(io) {
+        val props = modelOptions()
+        props.setProperty(encodePath(canonicalPath(modelPath)) + USED_SUFFIX, System.currentTimeMillis().toString())
+        saveModelOptions(props)
+    }
+
+    private fun lastUsed(props: java.util.Properties, path: String): Long =
+        props.getProperty(encodePath(path) + USED_SUFFIX)?.toLongOrNull() ?: 0L
+
+    /**
+     * Drops registered paths and attachments (drafter, projector, LoRA) whose file is gone, so the lists do not show
+     * files that no longer exist. Only when the file's folder can still be read: a folder that is just not reachable
+     * right now (storage access withdrawn, SD card out) keeps its entries.
+     */
+    private fun pruneDangling() {
+        fun gone(path: String): Boolean {
+            val f = File(path)
+            if (f.exists()) return false
+            val parent = f.parentFile ?: return false
+            return parent.isDirectory && parent.canRead()
+        }
+        val registered = registeredPaths()
+        val kept = registered.filterNot(::gone).toSet()
+        if (kept.size != registered.size) saveRegisteredPaths(kept)
+        fun pruneLinks(props: java.util.Properties, save: (java.util.Properties) -> Unit) {
+            val dead = props.stringPropertyNames().filter { k ->
+                val modelPath = decodePath(k.substringBefore('.'))
+                val target = props.getProperty(k)?.let(::decodePath).orEmpty()
+                (modelPath.isNotEmpty() && gone(modelPath)) || (!k.contains('.') && target.isNotEmpty() && gone(target))
+            }
+            if (dead.isNotEmpty()) { dead.forEach(props::remove); save(props) }
+        }
+        pruneLinks(draftLinks(), ::saveDraftLinks)
+        pruneLinks(mmprojLinks(), ::saveMmprojLinks)
+        pruneLinks(loraLinks(), ::saveLoraLinks)
+    }
+
     suspend fun listModels(): List<ModelFile> = withContext(io) {
         cleanupStaleSingleFileImportTemps()
+        runCatching { pruneDangling() }
         val displayNames = completedDisplayNames()
         val internal = modelsDir.listFiles { f ->
             f.isFile && f.name.endsWith(".gguf", ignoreCase = true) && !isLaterShard(f.name) && !isDraftName(f.name) &&
@@ -175,7 +214,9 @@ class ModelManager(
                 ModelFile(canonical, f.name, logicalModelSize(f), false, displayNames[canonical])
             } else null
         }
-        (internal + external).distinctBy { it.path }.sortedBy { it.name.lowercase() }
+        val used = modelOptions()
+        (internal + external).distinctBy { it.path }
+            .sortedWith(compareByDescending<ModelFile> { lastUsed(used, it.path) }.thenBy { it.name.lowercase() })
     }
 
     suspend fun listDrafts(): List<ModelFile> = withContext(io) {
@@ -1398,6 +1439,7 @@ class ModelManager(
         const val DEFAULT_LORA_SCALE = 1.75f
         private const val SCALE_SUFFIX = ".scale"
         private const val KV_SUFFIX = ".kv"
+        private const val USED_SUFFIX = ".used"
         private val LORA_MARK = "adapter.type".toByteArray(Charsets.US_ASCII)
 
         fun isLoraName(fileName: String): Boolean {
@@ -1502,7 +1544,6 @@ class ModelManager(
                 warnings.add("The file is very small (${formatBytes(size)}). Is it a complete download?")
             }
             if (config.spec != SpecSource.OFF) {
-                warnings.add("Guess ahead decodes greedily: the temperature setting is ignored (treated as 0) while it is on.")
                 warnings.add("Guess ahead is disabled for image turns when a vision projector is loaded; image prompts and speculation are not combined.")
             }
             if (file.isFile && GgufInspector.inspect(file).kind == ModelKind.DENSE) {

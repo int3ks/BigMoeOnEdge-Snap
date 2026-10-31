@@ -337,7 +337,7 @@ class RunShellTool(
         private const val GRACE_MS = 15_000L
         private const val STOP_TIMEOUT_MS = 8_000L
         /** How much of a command's output the model gets: the end of stdout and stderr together. */
-        const val OUTPUT_BUDGET = 1_500
+        const val OUTPUT_BUDGET = 1_000
         /** How much of the running command's output the chat shows (the end of it). */
         private const val LIVE_OUTPUT_BYTES = 6_000
         const val HISTORY_DIR = "history"

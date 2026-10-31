@@ -55,6 +55,38 @@ class ModelManagerTest {
     }
 
     @Test
+    fun lastUsedModelsComeFirstAndVanishedFilesAreForgotten() = kotlinx.coroutines.runBlocking {
+        val appDir = File.createTempFile("bmoe-app", "").apply { delete(); mkdirs() }
+        val ext = File.createTempFile("bmoe-ext", "").apply { delete(); mkdirs() }
+        try {
+            fun gguf(name: String) = File(ext, name).apply { writeBytes("GGUF".toByteArray() + ByteArray(64)) }
+            val m = ModelManager(appDir)
+            val a = gguf("a-model.gguf"); val b = gguf("b-model.gguf"); val c = gguf("c-model.gguf")
+            val proj = gguf("mmproj-a.gguf")
+            listOf(a, b, c, proj).forEach { m.registerExistingPath(it.path) }
+            m.attachMmproj(a.path, proj.path)
+            assertEquals(listOf("a-model.gguf", "b-model.gguf", "c-model.gguf", "mmproj-a.gguf"), m.listModels().map { it.name })
+            m.markUsed(c.path); Thread.sleep(5); m.markUsed(b.path)
+            assertEquals(listOf("b-model.gguf", "c-model.gguf", "a-model.gguf", "mmproj-a.gguf"), m.listModels().map { it.name })
+
+            // The projector file is deleted: it leaves the list and the model's attachment is dropped.
+            proj.delete()
+            assertTrue(m.listModels().none { it.name == "mmproj-a.gguf" })
+            assertEquals(null, m.mmprojForModel(a.path))
+            // A folder that cannot be reached right now keeps its registrations.
+            val gone = File(ext, "sub").apply { mkdirs() }
+            val d = File(gone, "d-model.gguf").apply { writeBytes("GGUF".toByteArray() + ByteArray(64)) }
+            m.registerExistingPath(d.path)
+            gone.deleteRecursively()   // folder itself gone (like an unmounted card): parent not readable
+            m.listModels()
+            File(gone, "").mkdirs(); d.writeBytes("GGUF".toByteArray() + ByteArray(64))
+            assertTrue("registration survives an unreachable folder", m.listModels().any { it.name == "d-model.gguf" })
+        } finally {
+            appDir.deleteRecursively(); ext.deleteRecursively()
+        }
+    }
+
+    @Test
     fun sanitizeFileName() {
         assertEquals("model.gguf", ModelManager.sanitizeFileName("../../etc/model.gguf"))
         assertEquals("a_b.gguf", ModelManager.sanitizeFileName("a/b\\a_b.gguf".substringAfterLast('\\')))

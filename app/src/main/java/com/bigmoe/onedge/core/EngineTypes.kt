@@ -164,7 +164,22 @@ data class ModelInfo(
     val lora: LoraChoice? = null,
     val loadWarning: String? = null,
     /** True only when the model load successfully initialized the requested HTP prefill path. */
-    val npuPrefillReady: Boolean = false
+    val npuPrefillReady: Boolean = false,
+    /**
+     * What this load was ASKED for from the model's own settings (Models page), before any fallback: the KV cache type,
+     * the LoRA adapter, the projector and the drafter. Compared with the current settings to offer a reload, without
+     * nagging forever when a fallback (e.g. F16 instead of Q8_0) was needed.
+     */
+    val requested: RequestedAddOns = RequestedAddOns()
+)
+
+data class RequestedAddOns(
+    /** The load configuration as asked for (a fallback may have changed info.config, e.g. speculation off). */
+    val config: LoadConfig? = null,
+    val kvCacheType: KvCacheType = KvCacheType.F16,
+    val lora: LoraChoice? = null,
+    val mmprojPath: String? = null,
+    val draftPath: String? = null
 )
 
 sealed interface EngineState {

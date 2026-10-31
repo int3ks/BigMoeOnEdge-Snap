@@ -162,6 +162,8 @@ class ToolManager(
                 "Python libraries with C code (Pillow, numpy, ...) too, e.g. pkg install -y python-pillow, because pip " +
                 "would compile them for a long time; other Python libraries from pip. If pkg fails, run pkg update -y " +
                 "first. Never start interactive programs (input is closed, so a prompt fails at once). " +
+                "Keep scripts short: the smallest program that does the job, no comments, no extra features, no " +
+                "explanations inside the code; for a one-off step prefer a one-line command over a script file. " +
                 "Keep output small, it costs context: quiet options (pip install -q, pkg install -y), no whole files or " +
                 "long listings, end with a short check (e.g. && echo OK). You only get the last " +
                 "${RunShellTool.OUTPUT_BUDGET} characters of a command's output; for more, write it to a file and look at " +

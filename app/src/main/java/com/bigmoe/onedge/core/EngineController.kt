@@ -114,6 +114,7 @@ class EngineController(
             var activeConfig = config
             var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
             var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
+            val requestedAddOns = RequestedAddOns(config, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null)
             var warning: String? = null
             var error = try {
                 backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)
@@ -197,7 +198,8 @@ class EngineController(
                     draftModelPath = activeDraftPath,
                     lora = activeLora,
                     loadWarning = warning,
-                    npuPrefillReady = info["npu_prefill"] == "ready"
+                    npuPrefillReady = info["npu_prefill"] == "ready",
+                    requested = requestedAddOns
                 )
             )
             null

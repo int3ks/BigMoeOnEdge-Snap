@@ -347,9 +347,10 @@ class ModelViewModel(
     }
 
     /** Reload the current model with the current settings (used after load-time settings changed). */
+    /** Reload with the current settings AND the model's current attachments (projector, drafter, LoRA, KV cache). */
     fun reloadCurrent() {
         val ready = engineState.value as? EngineState.Ready ?: return
-        loadNow(ready.info.path, ready.info.mmprojPath, ready.info.draftModelPath)
+        viewModelScope.launch { loadNow(ready.info.path, modelManager.mmprojForModel(ready.info.path)) }
     }
 
     private fun loadNow(path: String, mmprojPath: String?, currentDraftPath: String? = null) {

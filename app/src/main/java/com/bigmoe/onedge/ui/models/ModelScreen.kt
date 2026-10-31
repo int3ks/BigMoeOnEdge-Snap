@@ -190,7 +190,21 @@ fun ModelScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item { StatusCard(engine, settings, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent) }
+            item {
+                // The loaded model's own settings (Models page) changed since it was loaded: KV cache, LoRA, projector,
+                // drafter (only while Guess ahead is MTP). Compared with what the load asked for, so a fallback the
+                // engine had to take does not keep asking for a reload.
+                val loadedInfo = (engine as? EngineState.Ready)?.info
+                val addOnsChanged = loadedInfo?.let { info ->
+                    val req = info.requested
+                    val p = info.path
+                    (ui.modelKvTypes[p] ?: com.bigmoe.onedge.core.KvCacheType.F16) != req.kvCacheType ||
+                        ui.modelLoras[p] != req.lora ||
+                        ui.modelMmprojs[p] != req.mmprojPath ||
+                        (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[p] != req.draftPath)
+                } == true
+                StatusCard(engine, settings, addOnsChanged, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent)
+            }
 
             item(key = "model_folder") {
                 ModelFolderCard(
@@ -334,20 +348,7 @@ fun ModelScreen(
 
             item(key = "guess_ahead") { GuessAheadCard(settings, viewModel) }
 
-            // Auxiliary files, each kind in its own list: attach them to a model in the model list below.
-            if (ui.drafts.isNotEmpty()) {
-                item(key = "drafts_header") { SectionHeader("MTP drafters", "Attach one to a model below; used when Guess ahead is MTP.") }
-                items(ui.drafts, key = { "draft:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
-            }
-            if (ui.loras.isNotEmpty()) {
-                item(key = "loras_header") { SectionHeader("LoRA adapters", "Attach one to a model below; applied when that model loads.") }
-                items(ui.loras, key = { "lora:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
-            }
             val projectors = ui.models.filter { ModelManager.isProjectorName(it.name) }
-            if (projectors.isNotEmpty()) {
-                item(key = "mmproj_header") { SectionHeader("Vision projectors (mmproj)", "Attach one to a model below; it loads together with that model.") }
-                items(projectors, key = { "mmproj:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
-            }
             if (ui.incompleteImports.isNotEmpty()) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -421,6 +422,19 @@ fun ModelScreen(
                     settings = settings
                 )
             }
+            // Auxiliary files below the models, each kind in its own list: attach them to a model in its card above.
+            if (ui.drafts.isNotEmpty()) {
+                item(key = "drafts_header") { SectionHeader("MTP drafters", "Attach one to a model above; used when Guess ahead is MTP.") }
+                items(ui.drafts, key = { "draft:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
+            }
+            if (ui.loras.isNotEmpty()) {
+                item(key = "loras_header") { SectionHeader("LoRA adapters", "Attach one to a model above; applied when that model loads.") }
+                items(ui.loras, key = { "lora:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
+            }
+            if (projectors.isNotEmpty()) {
+                item(key = "mmproj_header") { SectionHeader("Vision projectors (mmproj)", "Attach one to a model above; it loads together with that model.") }
+                items(projectors, key = { "mmproj:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
+            }
             // keeps the last row clear of the floating navigation bar
             item(key = "bottom_spacer") { androidx.compose.foundation.layout.Spacer(Modifier.height(112.dp)) }
         }
@@ -477,7 +491,8 @@ private fun AuxFileCard(file: ModelFile, onRemove: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(file.name, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "${ModelManager.formatBytes(file.sizeBytes)} • " + if (file.inAppStorage) "App storage" else "Registered path (no copy)",
+                    "${ModelManager.formatBytes(file.sizeBytes)} • " +
+                        if (file.inAppStorage) "copy in app storage" else "in ${file.path.substringBeforeLast('/')}",
                     style = MaterialTheme.typography.labelSmall
                 )
             }
@@ -503,6 +518,7 @@ private fun SupportedModelsCard() {
 private fun StatusCard(
     engine: EngineState,
     settings: com.bigmoe.onedge.data.local.datastore.EngineSettings,
+    addOnsChanged: Boolean,
     onUnload: () -> Unit,
     onReload: () -> Unit
 ) {
@@ -553,16 +569,19 @@ private fun StatusCard(
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
-                    if (loadConfigDiffers(info.config, settings)) {
+                    val settingsChanged = loadConfigDiffers(info.requested.config ?: info.config, settings)
+                    if (settingsChanged || addOnsChanged) {
                         Text(
-                            "Some settings changed since this model was loaded (context, sampling, cache, threads). " +
-                                "They apply after a reload.",
+                            listOfNotNull(
+                                if (settingsChanged) "settings (context, sampling, cache, threads, guess ahead)" else null,
+                                if (addOnsChanged) "this model's KV cache, LoRA, projector or drafter" else null
+                            ).joinToString(" and ", prefix = "Changed since this model was loaded: ", postfix = ". They apply after a reload."),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.tertiary
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (loadConfigDiffers(info.config, settings)) Button(onClick = onReload) { Text("Reload") }
+                        if (settingsChanged || addOnsChanged) Button(onClick = onReload) { Text("Reload model") }
                         OutlinedButton(onClick = onUnload) { Text("Unload") }
                     }
                 }

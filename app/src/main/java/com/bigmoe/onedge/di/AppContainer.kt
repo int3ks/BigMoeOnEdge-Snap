@@ -219,6 +219,15 @@ class AppContainer(private val context: Context) {
         }
     }
 
+    /** Called once from Application.onCreate: every model that finishes loading moves to the top of the model list. */
+    fun trackModelUse() {
+        appScope.launch {
+            engineController.state.collect { s ->
+                if (s is com.bigmoe.onedge.core.EngineState.Ready) runCatching { modelManager.markUsed(s.info.path) }
+            }
+        }
+    }
+
     /** Called once from Application.onCreate: honours "load the last model on app start". */
     fun autoLoadLastModelIfEnabled() {
         appScope.launch {

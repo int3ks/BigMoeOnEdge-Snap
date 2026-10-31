@@ -73,7 +73,7 @@ data class EngineSettings(
     val dropColdPct: Int = 75,
     val dropRenorm: Boolean = true,
     val dropInPrefill: Boolean = false,
-    val substitutePct: Int = 0,
+    val substitutePct: Int = 15,
     val prefetchLayers: Int = 0,
     val predictPrefetch: Boolean = false,
     val predictSpecMax: Int = 0,
@@ -82,7 +82,7 @@ data class EngineSettings(
     val rowStream: Boolean = false,
     val loadAllExpertsForBenchmark: Boolean = false,
     val releaseMmap: Boolean = false,
-    val spec: SpecSource = SpecSource.OFF,
+    val spec: SpecSource = SpecSource.NGRAM,
     val draftMax: Int = 3,
     val mtpPMinPct: Int = 0,
     /** No longer read: with MTP on, a drafter attached to the model is always used, else the model's own head. */

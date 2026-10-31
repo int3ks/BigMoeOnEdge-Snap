@@ -16,6 +16,7 @@ class OnEdgeApplication : Application() {
         HexagonRuntimeSetup.prepare(this)
         container = AppContainer(this)
         container.followCpuCoreSetting()
+        container.trackModelUse()
         container.autoLoadLastModelIfEnabled()
         container.startApiServerIfEnabled()
     }
