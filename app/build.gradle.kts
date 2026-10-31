@@ -82,8 +82,9 @@ android {
         // dependable from Android 10 (upstream uses 29); the NDK toolchain also links against this platform level.
         minSdk = 29
         targetSdk = 35
-        // CI passes -PbmoeBuildNumber (commits since the 0.6.0 baseline), so every build counts up:
-        // 0.6.1, 0.6.2, ... with a matching versionCode. Local builds without it stay 0.6.0 (versionCode 11).
+        // CI passes -PbmoeBuildNumber: one past the newest release tag (v0.6.53 -> 54), so the version moves only
+        // with a release and every build until then is the coming release's version. Local builds without it stay
+        // 0.6.0 (versionCode 11).
         versionCode = 11 + bmoeBuildNumber
         versionName = "0.6.$bmoeBuildNumber"
         manifestPlaceholders["bmoeAppCategory"] = bmoeAppCategory

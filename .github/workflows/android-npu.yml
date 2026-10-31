@@ -149,14 +149,23 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # Every build counts up: the number of commits since the 0.6.0 baseline (commit count 471) becomes the patch
-      # version, 0.6.1, 0.6.2, ..., and raises versionCode with it. Needs the full history (fetch-depth: 0).
+      # The version only moves with a release: every build carries the version the NEXT release will have, one past
+      # the newest published release tag (v0.6.53 -> 0.6.54), so all builds between two releases share it (the APK
+      # name still tells them apart by commit) and publishing one of them makes the next builds count on. Android
+      # installs an APK with the same versionCode over the installed one, only a lower one is refused. Tags come with
+      # the full history (fetch-depth: 0); with no release tag yet the commit count since the 0.6.0 baseline is used.
       - name: Build number
         run: |
-          N=$(( $(git rev-list --count HEAD) - 471 ))
+          LAST=$(git tag -l 'v0.6.*' | sed -n 's/^v0\.6\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)
+          if [ -n "$LAST" ]; then
+            N=$(( LAST + 1 ))
+          else
+            N=$(( $(git rev-list --count HEAD) - 471 ))
+          fi
           [ "$N" -ge 1 ] || N=1
           echo "BMOE_BUILD_NUMBER=$N" >> "$GITHUB_ENV"
-          echo "Version 0.6.$N (versionCode $((11 + N)))"
+          echo "Version 0.6.$N (versionCode $((11 + N))), next after release ${LAST:+v0.6.$LAST}"
+          echo "::notice title=Version::0.6.$N (versionCode $((11 + N))), the next release after ${LAST:+v0.6.$LAST}"
 
       - uses: actions/setup-java@v4
         with:
