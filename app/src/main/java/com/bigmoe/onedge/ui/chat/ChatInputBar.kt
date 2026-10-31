@@ -130,14 +130,24 @@ fun ChatInputBar(
                         color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)
                     )
                 }
-                BasicTextField(
-                    value = textValue,
-                    onValueChange = onTextChanged,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // Selection is kept here (the caller only stores the text), so the mouse menu can cut/copy/paste it.
+                var fieldValue by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(textValue, androidx.compose.ui.text.TextRange(textValue.length))) }
+                val shown = if (fieldValue.text == textValue) fieldValue
+                else fieldValue.copy(text = textValue, selection = androidx.compose.ui.text.TextRange(textValue.length), composition = null)
+                val change: (androidx.compose.ui.text.input.TextFieldValue) -> Unit = { v ->
+                    fieldValue = v
+                    if (v.text != textValue) onTextChanged(v.text)
+                }
+                com.bigmoe.onedge.ui.TextFieldWithMouseMenu(shown, change, Modifier.fillMaxWidth()) { menuModifier ->
+                    BasicTextField(
+                        value = shown,
+                        onValueChange = change,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = menuModifier.fillMaxWidth()
+                    )
+                }
             }
 
             if (chooseFromOptions) {

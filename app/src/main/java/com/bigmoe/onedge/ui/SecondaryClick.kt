@@ -61,3 +61,51 @@ fun ContextMenuAt(state: ContextMenuState, content: @Composable ColumnScope.() -
         DropdownMenu(expanded = state.expanded, onDismissRequest = { state.close() }, content = content)
     }
 }
+
+/**
+ * A text field with a mouse right-click menu (Cut, Copy, Paste, Select all) at the pointer. Compose 1.6 has no
+ * such menu on Android: a right-click only moved the cursor and so dropped the selection; with a finger the system
+ * toolbar works and is left alone. [field] gets the modifier that catches the right-click and must use [value].
+ */
+@Composable
+fun TextFieldWithMouseMenu(
+    value: androidx.compose.ui.text.input.TextFieldValue,
+    onValueChange: (androidx.compose.ui.text.input.TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier,
+    field: @Composable (Modifier) -> Unit
+) {
+    val menu = rememberContextMenuState()
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Box(modifier) {
+        field(Modifier.contextMenuTrigger(menu))
+        ContextMenuAt(menu) {
+            val sel = value.selection
+            val text = value.text
+            val selected = if (sel.collapsed) "" else text.substring(sel.min, sel.max)
+            fun replaceSelection(with: String) {
+                val newText = text.substring(0, sel.min) + with + text.substring(sel.max)
+                onValueChange(androidx.compose.ui.text.input.TextFieldValue(newText, androidx.compose.ui.text.TextRange(sel.min + with.length)))
+            }
+            androidx.compose.material3.DropdownMenuItem(
+                text = { androidx.compose.material3.Text("Cut") },
+                enabled = selected.isNotEmpty(),
+                onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(selected)); replaceSelection(""); menu.close() }
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { androidx.compose.material3.Text("Copy") },
+                enabled = selected.isNotEmpty(),
+                onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(selected)); menu.close() }
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { androidx.compose.material3.Text("Paste") },
+                enabled = clipboard.hasText(),
+                onClick = { clipboard.getText()?.text?.let(::replaceSelection); menu.close() }
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { androidx.compose.material3.Text("Select all") },
+                enabled = text.isNotEmpty(),
+                onClick = { onValueChange(value.copy(selection = androidx.compose.ui.text.TextRange(0, text.length))); menu.close() }
+            )
+        }
+    }
+}
