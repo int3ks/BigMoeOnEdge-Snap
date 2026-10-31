@@ -14,6 +14,7 @@
 #include "tool_grammar.h"
 #include "context_checkpoints.h"
 #include "cache_brake.h"
+#include "bmoe/load_progress.h"
 #include "prefill_path.h"
 #include "../moe/router_hook.h"
 #include "../moe/decide_probe.h"
@@ -823,6 +824,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     std::unique_ptr<Session> self(new Session());
     Impl & im = *self->impl_;
     im.cfg = cfg;
+    load_progress_set(LoadStep::Model, 0.0f);
 
     // llama_backend_init/free is process-global and reference counted; init here, free in ~Impl.
     llama_backend_init();
@@ -908,6 +910,11 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         mparams.kv_overrides = kv_overrides;
     }
 
+    // llama.cpp's own loading progress (tensor bytes), for the app's progress bar (bmoe/load_progress.h).
+    mparams.progress_callback = [](float p, void *) {
+        load_progress_set(LoadStep::Model, p);
+        return true;
+    };
     llama_model * model = llama_model_load_from_file(cfg.model_path.c_str(), mparams);
     if (!model) return fail("failed to load model: " + cfg.model_path);
     im.model.reset(model);
@@ -1085,6 +1092,10 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
             // llama.cpp's default, which would open the same HTP device a second time.
             static ggml_backend_dev_t cpu_only_devices[1] = {nullptr};
             if (im.prefill) draft_mparams.devices = cpu_only_devices;
+            draft_mparams.progress_callback = [](float p, void *) {
+                load_progress_set(LoadStep::Draft, p);
+                return true;
+            };
             draft_model = llama_model_load_from_file(cfg.spec.draft_model_path.c_str(), draft_mparams);
             if (!draft_model) return fail("failed to load separate MTP draft GGUF: " + cfg.spec.draft_model_path);
             im.model_dft.reset(draft_model);
@@ -1176,6 +1187,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     }
 
     if (cfg.moe.enabled) {
+        load_progress_set(LoadStep::Experts, 0.0f);
         // Capture warm-up: one mmap-resident decode so the eval-callback can harvest the expert
         // tensor pointers from the graph. Any valid token builds the same graph (the expert
         // tensor structure is prompt-independent), so use BOS; KV is wiped afterwards.
@@ -1301,6 +1313,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         }
 
         if (im.prefill) im.prefill->keep_stream_layout(layers, offs.shard_paths);
+        load_progress_set(LoadStep::Weights, 0.0f); // the dense weights' reads report by bytes from here
         if (!im.source.init(offs.shard_paths, n_expert, std::move(layers), cfg.moe))
             return fail("expert stream source init failed");
         im.hook->set_source(&im.source);
@@ -1395,9 +1408,12 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
                              (size_t) cfg.checkpoint_budget_mib << 20);
 
     if (im.prefill) {
+        load_progress_set(LoadStep::Npu, 0.0f);
         std::string perr;
         if (!im.prefill->open(ctx, im.vocab, *im.hook, cfg.prefill, cfg.moe, im.n_layer, perr)) return fail(perr);
+        load_progress_set(LoadStep::Npu, 1.0f);
     }
+    load_progress_set(LoadStep::Finish, 0.0f);
 
     // Decode traces. Outside the streaming block on purpose: the compute trace measures the graph,
     // which exists with or without the streamer, so a dense mmap baseline can be traced and
@@ -1536,6 +1552,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     }
 
     im.load_seconds = secs(t_load0, clock_t_::now());
+    load_progress_set(LoadStep::Finish, 1.0f);
     return self;
 }
 

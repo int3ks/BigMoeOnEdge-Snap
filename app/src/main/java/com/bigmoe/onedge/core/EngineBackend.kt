@@ -20,6 +20,9 @@ interface EngineBackend {
     /** CPU cores Android lets the app use (bit i = cpu i), 0 = unknown. */
     fun allowedCpus(): Long = 0L
 
+    /** How far a running [load] has got (step * 1000 + permille, see [LoadStep]); 0 = nothing reported. */
+    fun loadProgress(): Int = 0
+
     /** Why HTP prefill is or is not currently available. Fakes remain source-compatible. */
     fun npuPrefillStatus(): String = if (capabilities().npuPrefill) {
         "Available: native HTP session probe succeeded. Actual prompt execution must be confirmed after a run."
@@ -71,6 +74,8 @@ interface EngineBackend {
 class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBackend {
 
     override fun capabilities(): EngineCaps = EngineCaps.fromBits(bridge.nativeCapabilities())
+
+    override fun loadProgress(): Int = try { bridge.nativeLoadProgress() } catch (_: Throwable) { 0 }
 
     override fun npuPrefillStatus(): String = decodeUtf8(bridge.nativeNpuStatus())
 

@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include "bmoe/session.h"
+#include "bmoe/load_progress.h"
 #include "ggml-backend.h"
 #include "llama.h" // llama_set_graph_compute_hook (local patch, see patches/0007)
 #include "ggml-cpu.h" // ggml_cpu_has_* : one-time CPU feature line in the log (diagnostic only)
@@ -345,6 +346,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     jbyteArray j_mmproj_path, jbyteArray j_draft_path, jbyteArray j_lora_path, jfloat j_lora_scale)
 {
     const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
+    bmoe::load_progress_clear(); // a poll before Session::open reports must not show the last load's end
     const std::string model_path = from_bytes(env, j_model_path);
     if (model_path.empty()) return to_bytes(env, "model path is empty");
     if (j_ints == nullptr || env->GetArrayLength(j_ints) < I_COUNT ||
@@ -554,6 +556,14 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     LOGI("CPU features compiled in: neon=%d fp16_va=%d dotprod=%d i8mm=%d", ggml_cpu_has_neon(), ggml_cpu_has_fp16_va(),
          ggml_cpu_has_dotprod(), ggml_cpu_has_matmul_int8());
     return to_bytes(env, std::string());
+}
+
+// How far the running nativeLoadModel has got: step * 1000 + permille within the step (bmoe/load_progress.h),
+// 0 when no load has reported yet. One int, read lock-free from any thread while the load runs.
+JNIEXPORT jint JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadProgress(JNIEnv *, jobject) {
+    const bmoe::LoadProgress p = bmoe::load_progress_get();
+    return (jint) p.step * 1000 + (jint) (p.frac * 999.0f + 0.5f);
 }
 
 // Bit 0: libonedge-engine was built with the expert-ready hook (I/O-compute overlap possible).

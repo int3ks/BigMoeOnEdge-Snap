@@ -182,9 +182,33 @@ data class RequestedAddOns(
     val draftPath: String? = null
 )
 
+/** The steps of a model load as the engine reports them (core/include/bmoe/load_progress.h, same numbers). */
+enum class LoadStep(val code: Int, val label: String) {
+    NONE(0, "Starting"),
+    MODEL(1, "Reading the model"),
+    DRAFT(2, "Reading the MTP drafter"),
+    EXPERTS(3, "Finding the experts"),
+    WEIGHTS(4, "Loading the weights into RAM"),
+    NPU(5, "Preparing the NPU"),
+    FINISH(6, "Finishing");
+
+    companion object {
+        fun of(code: Int): LoadStep = entries.firstOrNull { it.code == code } ?: NONE
+    }
+}
+
 sealed interface EngineState {
     data object Unloaded : EngineState
-    data class Loading(val path: String, val startedAtMs: Long) : EngineState
+    /**
+     * [step] and [fraction] (0..1 within the step) are what the engine reported last; NONE until it reports.
+     * A step whose work is one call (EXPERTS, NPU) goes from 0 straight to done.
+     */
+    data class Loading(
+        val path: String,
+        val startedAtMs: Long,
+        val step: LoadStep = LoadStep.NONE,
+        val fraction: Float = 0f
+    ) : EngineState
     data class Ready(val info: ModelInfo) : EngineState
     data class Failed(val path: String?, val message: String) : EngineState
 }

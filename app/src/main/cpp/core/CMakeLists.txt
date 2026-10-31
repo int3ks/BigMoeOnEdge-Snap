@@ -11,6 +11,7 @@ add_library(bmoe_core STATIC
     src/engine/ngram_draft.cpp
     src/engine/logits.cpp
     src/engine/cache_brake.cpp
+    src/engine/load_progress.cpp
     src/engine/decide/prompt_split.cpp
     src/engine/decide/choice_scorer.cpp
     src/engine/decide/prefix_cache.cpp

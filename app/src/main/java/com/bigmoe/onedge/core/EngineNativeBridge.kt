@@ -101,6 +101,12 @@ class EngineNativeBridge {
     /** The CPU cores Android lets this app use (bit i = cpu i); 0 when it cannot be read. */
     external fun nativeAllowedCpus(): Long
 
+    /**
+     * How far the running [nativeLoadModel] has got: step * 1000 + permille within the step (steps in
+     * [LoadStep]); 0 before a load reported anything. Lock-free, safe to poll from any thread during a load.
+     */
+    external fun nativeLoadProgress(): Int
+
     /** Bit 0: expert-ready hook; bit 1: multimodal; bit 2: HTP backend runtime probe succeeded. */
     external fun nativeCapabilities(): Int
 

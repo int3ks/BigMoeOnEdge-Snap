@@ -203,7 +203,13 @@ fun ModelScreen(
                         ui.modelMmprojs[p] != req.mmprojPath ||
                         (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[p] != req.draftPath)
                 } == true
-                StatusCard(engine, settings, addOnsChanged, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent)
+                // Loading, loaded and failed are shown in the model's own card below. This card is only for a state
+                // no card in the list belongs to (a model whose file is no longer listed, a failure without a path).
+                val enginePath = engineModelPath(engine)
+                val listed = enginePath != null && ui.models.any { it.path == enginePath && !ModelManager.isProjectorName(it.name) }
+                if (engine !is EngineState.Unloaded && !listed) {
+                    StatusCard(engine, settings, addOnsChanged, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent)
+                }
             }
 
             item(key = "model_folder") {
@@ -387,10 +393,22 @@ fun ModelScreen(
                 item { Text("No models yet.", color = MaterialTheme.colorScheme.secondary) }
             }
             items(ui.models.filterNot { ModelManager.isProjectorName(it.name) }, key = { it.path }) { model ->
+                val loadedInfo = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }
+                val addOnsChanged = loadedInfo?.let { info ->
+                    val req = info.requested
+                    (ui.modelKvTypes[model.path] ?: com.bigmoe.onedge.core.KvCacheType.F16) != req.kvCacheType ||
+                        ui.modelLoras[model.path] != req.lora ||
+                        ui.modelMmprojs[model.path] != req.mmprojPath ||
+                        (settings.spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[model.path] != req.draftPath)
+                } == true
                 ModelRow(
                     model = model,
-                    isLoaded = (engine as? EngineState.Ready)?.info?.path == model.path,
+                    isLoaded = loadedInfo != null,
                     busy = engine is EngineState.Loading,
+                    engine = engine.takeIf { engineModelPath(it) == model.path },
+                    addOnsChanged = addOnsChanged,
+                    onUnload = viewModel::unload,
+                    onReload = viewModel::reloadCurrent,
                     onLoad = { viewModel.requestLoad(model.path) },
                     onDelete = { viewModel.delete(model.path) },
                     drafts = ui.drafts,
@@ -524,13 +542,63 @@ private fun StatusCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (engine is EngineState.Ready) Text("Loaded: ${engine.info.name}", style = MaterialTheme.typography.titleMedium)
+            if (engine is EngineState.Loading) Text("Loading ${engine.path.substringAfterLast('/')}…")
+            ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload)
+        }
+    }
+}
+
+/** Which model the engine state is about (loading, loaded or failed), or null. */
+private fun engineModelPath(engine: EngineState): String? = when (engine) {
+    is EngineState.Loading -> engine.path
+    is EngineState.Ready -> engine.info.path
+    is EngineState.Failed -> engine.path
+    EngineState.Unloaded -> null
+}
+
+/**
+ * The engine's state for one model: a real progress bar while it loads (the step the engine reports and how far
+ * it is within it), what was loaded with Reload / Unload, or why the load failed. Shown inside the model's card.
+ */
+@Composable
+private fun ModelStatusSection(
+    engine: EngineState,
+    settings: com.bigmoe.onedge.data.local.datastore.EngineSettings,
+    addOnsChanged: Boolean,
+    onUnload: () -> Unit,
+    onReload: () -> Unit
+) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             when (engine) {
                 EngineState.Unloaded -> Text("No model loaded")
                 is EngineState.Loading -> {
-                    Text("Loading ${engine.path.substringAfterLast('/')}…")
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+                    androidx.compose.runtime.LaunchedEffect(engine.startedAtMs) {
+                        while (true) {
+                            now = System.currentTimeMillis()
+                            kotlinx.coroutines.delay(500)
+                        }
+                    }
+                    val elapsed = ((now - engine.startedAtMs) / 1000).coerceAtLeast(0)
+                    val step = engine.step
+                    // Steps that are one call (finding the experts, the NPU) have no fraction to show: an
+                    // indeterminate bar there, a real one for reading the model and the weights.
+                    val measured = step == com.bigmoe.onedge.core.LoadStep.MODEL ||
+                        step == com.bigmoe.onedge.core.LoadStep.DRAFT ||
+                        step == com.bigmoe.onedge.core.LoadStep.WEIGHTS
                     Text(
-                        "The engine does not report progress; large models can take a few minutes.",
+                        step.label + (if (measured) " • ${(engine.fraction * 100).toInt()} %" else "…"),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (measured) {
+                        LinearProgressIndicator(progress = { engine.fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    Text(
+                        "%d:%02d elapsed".format(elapsed / 60, elapsed % 60) + " • steps: model, experts, weights" +
+                            (if (settings.npuPrefill) ", NPU" else ""),
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -540,7 +608,6 @@ private fun StatusCard(
                 }
                 is EngineState.Ready -> {
                     val info = engine.info
-                    Text("Loaded: ${info.name}", style = MaterialTheme.typography.titleMedium)
                     info.draftModelPath?.let { Text("Separate MTP draft: ${it.substringAfterLast('/')}", style = MaterialTheme.typography.bodySmall) }
                     info.lora?.let {
                         Text(
@@ -587,7 +654,6 @@ private fun StatusCard(
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -595,6 +661,10 @@ private fun ModelRow(
     model: ModelFile,
     isLoaded: Boolean,
     busy: Boolean,
+    engine: EngineState?,          // the engine's state when it is about THIS model (loading, loaded, failed), else null
+    addOnsChanged: Boolean,
+    onUnload: () -> Unit,
+    onReload: () -> Unit,
     onLoad: () -> Unit,
     onDelete: () -> Unit,
     drafts: List<ModelFile>,
@@ -618,6 +688,9 @@ private fun ModelRow(
 ) {
     // Collapsed by default so a long list stays short; the loaded model opens. Tap the name to toggle.
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(model.path) { mutableStateOf(isLoaded) }
+    // The card opens by itself when its model starts loading, is loaded or fails: that is where its status is.
+    val engineKind = engine?.let { it::class }
+    androidx.compose.runtime.LaunchedEffect(engineKind) { if (engineKind != null) expanded = true }
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember(model.path, model.displayName) { mutableStateOf(model.displayName) }
     val attachedName = drafts.firstOrNull { it.path == attachedDraftPath }?.name
@@ -649,6 +722,8 @@ private fun ModelRow(
                 }
                 if (isLoaded) {
                     Text("Loaded", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                } else if (engine is EngineState.Loading) {
+                    Text("Loading…", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                 } else {
                     TextButton(onClick = onLoad, enabled = !busy) { Text("Load") }
                 }
@@ -663,6 +738,10 @@ private fun ModelRow(
             // Guess-ahead settings apply to every model (card above the list); only the drafter file is per model. It can
             // always be attached: with Guess ahead off it simply waits until MTP is switched on.
             if (expanded) {
+                if (engine != null) {
+                    ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload)
+                    androidx.compose.material3.HorizontalDivider()
+                }
                 DrafterRow(settings, drafts, attachedName, onAttachDraft, onPickDraft)
                 MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
                 LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)

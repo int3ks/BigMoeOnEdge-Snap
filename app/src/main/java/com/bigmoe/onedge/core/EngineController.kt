@@ -110,99 +110,119 @@ class EngineController(
             val config = applyAutoMode(requested, kind).copy(kvCacheType = kvType)
             engineStateKey = null
             _state.value = EngineState.Loading(modelPath, System.currentTimeMillis())
-            val csv = if (config.metricsCsv) csvPathProvider() else null
-            var activeConfig = config
-            var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
-            var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
-            val requestedAddOns = RequestedAddOns(config, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null)
-            var warning: String? = null
-            var error = try {
-                backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)
-            } catch (e: UnsatisfiedLinkError) {
-                "Native engine library failed to load: ${e.message}"
-            } catch (e: Throwable) {
-                "Unexpected error while loading: ${e.message ?: e.javaClass.simpleName}"
+            // The engine reports how far the load has got (step + fraction); poll it while backend.load blocks
+            // this thread, on another IO thread. Cancelled below before the state turns Ready or Failed.
+            val progressPoll = this@withContext.launch {
+                var last = -1
+                while (true) {
+                    delay(250)
+                    val raw = runCatching { backend.loadProgress() }.getOrDefault(0)
+                    if (raw == last || raw <= 0) continue
+                    last = raw
+                    val current = _state.value
+                    if (current is EngineState.Loading && current.path == modelPath) {
+                        // compareAndSet: never write Loading over the Ready/Failed the load thread just set.
+                        _state.compareAndSet(current, current.copy(step = LoadStep.of(raw / 1000), fraction = (raw % 1000) / 999f))
+                    }
+                }
             }
-
-            // A quantized KV cache the backend cannot run (no flash attention for this model/device) must not brick the
-            // model: load it with the default F16 cache and say so.
-            if (error != null && activeConfig.kvCacheType != KvCacheType.F16) {
-                val f16 = activeConfig.copy(kvCacheType = KvCacheType.F16)
-                val withF16 = try {
-                    backend.load(modelPath, f16, csv, mmprojPath, activeDraftPath, activeLora)
+            try {
+                val csv = if (config.metricsCsv) csvPathProvider() else null
+                var activeConfig = config
+                var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
+                var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
+                val requestedAddOns = RequestedAddOns(config, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null)
+                var warning: String? = null
+                var error = try {
+                    backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)
+                } catch (e: UnsatisfiedLinkError) {
+                    "Native engine library failed to load: ${e.message}"
                 } catch (e: Throwable) {
-                    "Unexpected error while retrying with an F16 KV cache: ${e.message ?: e.javaClass.simpleName}"
+                    "Unexpected error while loading: ${e.message ?: e.javaClass.simpleName}"
                 }
-                if (withF16 == null) {
-                    warning = "KV cache ${activeConfig.kvCacheType.label} could not be used ($error). Loaded with F16."
-                    activeConfig = f16
-                    error = null
-                }
-            }
 
-            // A LoRA adapter made for another model must not brick the model either: load it without the adapter
-            // and say so, rather than claiming the adapter is active.
-            if (error != null && activeLora != null) {
-                val withoutLora = try {
-                    backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, null)
-                } catch (e: Throwable) {
-                    "Unexpected error while retrying without the LoRA adapter: ${e.message ?: e.javaClass.simpleName}"
+                // A quantized KV cache the backend cannot run (no flash attention for this model/device) must not brick the
+                // model: load it with the default F16 cache and say so.
+                if (error != null && activeConfig.kvCacheType != KvCacheType.F16) {
+                    val f16 = activeConfig.copy(kvCacheType = KvCacheType.F16)
+                    val withF16 = try {
+                        backend.load(modelPath, f16, csv, mmprojPath, activeDraftPath, activeLora)
+                    } catch (e: Throwable) {
+                        "Unexpected error while retrying with an F16 KV cache: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                    if (withF16 == null) {
+                        warning = "KV cache ${activeConfig.kvCacheType.label} could not be used ($error). Loaded with F16."
+                        activeConfig = f16
+                        error = null
+                    }
                 }
-                // Only blame the adapter when the model loads without it; otherwise the cause is elsewhere.
-                if (withoutLora == null) {
-                    warning = "LoRA adapter failed to load ($error). Loaded without it."
-                    activeLora = null
-                    error = null
-                }
-            }
 
-            // A broken/mismatched sidecar must not brick the target model. Retry a plain decode and
-            // surface the failure rather than claiming MTP is active.
-            if (error != null && wantsSeparateDraft) {
-                val draftError = error
-                val plainConfig = activeConfig.copy(spec = SpecSource.OFF)
-                val plainError = try {
-                    backend.load(modelPath, plainConfig, csv, mmprojPath, null, activeLora)
-                } catch (e: Throwable) {
-                    "Unexpected error while retrying without the MTP draft: ${e.message ?: e.javaClass.simpleName}"
+                // A LoRA adapter made for another model must not brick the model either: load it without the adapter
+                // and say so, rather than claiming the adapter is active.
+                if (error != null && activeLora != null) {
+                    val withoutLora = try {
+                        backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, null)
+                    } catch (e: Throwable) {
+                        "Unexpected error while retrying without the LoRA adapter: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                    // Only blame the adapter when the model loads without it; otherwise the cause is elsewhere.
+                    if (withoutLora == null) {
+                        warning = "LoRA adapter failed to load ($error). Loaded without it."
+                        activeLora = null
+                        error = null
+                    }
                 }
-                if (plainError == null) {
-                    activeConfig = plainConfig
-                    activeDraftPath = null
-                    warning = listOfNotNull(
-                        warning, "Separate MTP draft failed to load ($draftError). Loaded with normal decoding; speculation is OFF."
-                    ).joinToString("\n")
-                    error = null
-                } else {
-                    error = "Separate MTP draft failed: $draftError\nFallback without speculation also failed: $plainError"
+
+                // A broken/mismatched sidecar must not brick the target model. Retry a plain decode and
+                // surface the failure rather than claiming MTP is active.
+                if (error != null && wantsSeparateDraft) {
+                    val draftError = error
+                    val plainConfig = activeConfig.copy(spec = SpecSource.OFF)
+                    val plainError = try {
+                        backend.load(modelPath, plainConfig, csv, mmprojPath, null, activeLora)
+                    } catch (e: Throwable) {
+                        "Unexpected error while retrying without the MTP draft: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                    if (plainError == null) {
+                        activeConfig = plainConfig
+                        activeDraftPath = null
+                        warning = listOfNotNull(
+                            warning, "Separate MTP draft failed to load ($draftError). Loaded with normal decoding; speculation is OFF."
+                        ).joinToString("\n")
+                        error = null
+                    } else {
+                        error = "Separate MTP draft failed: $draftError\nFallback without speculation also failed: $plainError"
+                    }
                 }
-            }
-            if (error != null) {
-                _state.value = EngineState.Failed(modelPath, error)
-                return@withLock error
-            }
-            val info = backend.modelInfo()
-            _state.value = EngineState.Ready(
-                ModelInfo(
-                    path = modelPath,
-                    name = file.name,
-                    arch = info["arch"].orEmpty(),
-                    nCtx = info["n_ctx"]?.toIntOrNull() ?: activeConfig.nCtx,
-                    nExpertUsed = info["n_expert_used"]?.toIntOrNull() ?: 0,
-                    loadSeconds = info["load_seconds"]?.toDoubleOrNull() ?: 0.0,
-                    thinkControl = info["think_control"] ?: "template",
-                    overlapActive = info["overlap"] == "1",
-                    visionActive = info["vision"] == "1",
-                    mmprojPath = mmprojPath,
-                    config = activeConfig,
-                    draftModelPath = activeDraftPath,
-                    lora = activeLora,
-                    loadWarning = warning,
-                    npuPrefillReady = info["npu_prefill"] == "ready",
-                    requested = requestedAddOns
+                if (error != null) {
+                    _state.value = EngineState.Failed(modelPath, error)
+                    return@withLock error
+                }
+                val info = backend.modelInfo()
+                _state.value = EngineState.Ready(
+                    ModelInfo(
+                        path = modelPath,
+                        name = file.name,
+                        arch = info["arch"].orEmpty(),
+                        nCtx = info["n_ctx"]?.toIntOrNull() ?: activeConfig.nCtx,
+                        nExpertUsed = info["n_expert_used"]?.toIntOrNull() ?: 0,
+                        loadSeconds = info["load_seconds"]?.toDoubleOrNull() ?: 0.0,
+                        thinkControl = info["think_control"] ?: "template",
+                        overlapActive = info["overlap"] == "1",
+                        visionActive = info["vision"] == "1",
+                        mmprojPath = mmprojPath,
+                        config = activeConfig,
+                        draftModelPath = activeDraftPath,
+                        lora = activeLora,
+                        loadWarning = warning,
+                        npuPrefillReady = info["npu_prefill"] == "ready",
+                        requested = requestedAddOns
+                    )
                 )
-            )
-            null
+                null
+            } finally {
+                progressPoll.cancel()
+            }
         }
     }
 

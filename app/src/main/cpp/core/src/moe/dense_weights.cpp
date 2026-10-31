@@ -1,4 +1,5 @@
 #include "dense_weights.h"
+#include "bmoe/load_progress.h"
 
 #include "ggml.h"
 #include "row_stream.h"
@@ -256,6 +257,9 @@ bool DenseWeights::read_anonymous(size_t align) {
     const bool pinned = mode_ == DenseWeightsMode::Pinned;
     const uint64_t chunk = 8ull << 20;
     uint64_t total = 0;
+    uint64_t all_bytes = 0; // for the load progress only
+    for (const DenseTensorRef & d : tensors_)
+        all_bytes += d.size;
     bufs_.reserve(tensors_.size());
     buf_sz_.reserve(tensors_.size());
     if (pinned) pinned_.reserve(tensors_.size());
@@ -289,6 +293,7 @@ bool DenseWeights::read_anonymous(size_t align) {
             const uint64_t n = std::min<uint64_t>(chunk, d.size - done);
             if (readers_[(size_t) d.file_idx]->read(0, (char *) buf + done, d.file_off + done, n) < 0) return false;
             done += n;
+            if (all_bytes) load_progress_set(LoadStep::Weights, (float) ((double) (total + done) / (double) all_bytes));
         }
         d.tensor->data = buf; // rebind the model weight onto its private copy
         for (ggml_tensor * alias : d.aliases)
@@ -353,6 +358,10 @@ void DenseWeights::warm() {
     if (!buf) return;
     const auto t0 = clock_t_::now();
     uint64_t warmed = 0;
+    uint64_t all_bytes = 0; // for the load progress only
+    for (size_t s = 0; s < ranges_.size(); ++s)
+        for (const auto & r : ranges_[s])
+            all_bytes += r.second > r.first ? r.second - r.first : 0;
     bool all_ok = true; // sticky, for the report only: a failed shard must not abort the others
     for (size_t s = 0; s < paths_.size() && s < ranges_.size(); ++s) {
         pio::fd_t fd = pio::open_read(paths_[s].c_str(), false);
@@ -370,6 +379,7 @@ void DenseWeights::warm() {
                 }
                 a += (uint64_t) got;
                 warmed += (uint64_t) got;
+                if (all_bytes) load_progress_set(LoadStep::Weights, (float) ((double) warmed / (double) all_bytes));
             }
         }
         pio::close_fd(fd);

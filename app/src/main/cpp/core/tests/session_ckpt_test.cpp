@@ -14,6 +14,7 @@
 #include "bmoe/session.h"
 #include "bmoe/runtime.h"
 #include "bmoe/metrics.h"
+#include "bmoe/load_progress.h"
 
 #include <cstdio>
 #include <memory>
@@ -63,6 +64,8 @@ static void scenario(const char * path, bool moe, bool spec) {
     auto fresh = open_session(path, 4, moe, spec);
     check(fresh != nullptr, tag + "opens (expert layout read from the file)");
     if (!fresh) return;
+    const LoadProgress lp = load_progress_get();
+    check(lp.step == LoadStep::Finish && lp.frac == 1.0f, tag + "the load reports its last step as done");
     const RunResult want = ask(*fresh, R2);
     check(want.ok, tag + "fresh answer to R2");
 

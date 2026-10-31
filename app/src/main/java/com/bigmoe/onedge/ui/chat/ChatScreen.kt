@@ -533,7 +533,12 @@ private fun EngineBanner(state: EngineState, onOpenModels: () -> Unit) {
     when (state) {
         is EngineState.Ready -> Unit
         is EngineState.Loading -> BannerRow(
-            text = "Loading model… this can take a minute.",
+            text = "Loading model… " + when (state.step) {
+                com.bigmoe.onedge.core.LoadStep.NONE -> "this can take a minute."
+                com.bigmoe.onedge.core.LoadStep.MODEL, com.bigmoe.onedge.core.LoadStep.DRAFT,
+                com.bigmoe.onedge.core.LoadStep.WEIGHTS -> "${state.step.label} • ${(state.fraction * 100).toInt()} %"
+                else -> "${state.step.label}…"
+            },
             action = null,
             onAction = {},
             showSpinner = true
