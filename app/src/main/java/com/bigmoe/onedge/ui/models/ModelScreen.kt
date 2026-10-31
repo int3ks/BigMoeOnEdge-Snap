@@ -222,6 +222,102 @@ fun ModelScreen(
                     onOff = { viewModel.setModelFolder(null) },
                     onDefault = viewModel::resetModelFolder,
                     onRefresh = viewModel::refresh,
+                    addFiles = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Add a single file (model, MTP drafter or mmproj)", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "A GGUF outside the model folder is added in place: it stays where it is and nothing is copied. " +
+                                    "A storage-access permission may be requested the first time.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Button(
+                                onClick = { noCopyPicker.launch(arrayOf("*/*")) },
+                                enabled = ui.importProgress == null,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Add GGUF from storage") }
+                            OutlinedButton(
+                                onClick = { picker.launch(arrayOf("*/*")) },
+                                enabled = ui.importProgress == null,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Import GGUF file(s) (copy into the app)") }
+                            Text(
+                                "Copying needs the space twice. It can be faster when the file is on slow storage such as an SD card, " +
+                                    "and it is the way for cloud or other provider files that have no direct path.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(onClick = { showAdvancedPath = !showAdvancedPath }) {
+                                Text(if (showAdvancedPath) "Hide advanced path entry" else "Advanced: enter a path manually")
+                            }
+                            if (showAdvancedPath) {
+                                Text(
+                                    "Use this only if the picker cannot expose the original filesystem path. Split GGUFs must be registered from the first shard.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                OutlinedTextField(
+                                    value = ui.existingPathInput,
+                                    onValueChange = viewModel::setExistingPathInput,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("Existing GGUF path (no copy)") },
+                                    placeholder = { Text("/storage/emulated/0/Download/model-00001-of-00012.gguf") },
+                                    singleLine = true
+                                )
+                                val needsSharedStoragePermission = isSharedAbsolutePath(ui.existingPathInput) && !sharedPathAccessGranted
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = {
+                                        if (!isSharedAbsolutePath(ui.existingPathInput) || sharedPathAccessGranted) {
+                                            viewModel.registerExistingPath()
+                                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                            val appSettings = Intent(
+                                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                                Uri.parse("package:${context.packageName}")
+                                            )
+                                            try {
+                                                allFilesAccessLauncher.launch(appSettings)
+                                            } catch (_: Exception) {
+                                                allFilesAccessLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                            }
+                                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                            legacyStoragePermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                                        } else {
+                                            viewModel.registerExistingPath()
+                                        }
+                                    }) {
+                                        Text(if (needsSharedStoragePermission) "Grant path access" else "Register path")
+                                    }
+                                    OutlinedButton(onClick = viewModel::refresh) { Text("Refresh") }
+                                }
+                                if (needsSharedStoragePermission) {
+                                    Text(
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                                            "Android requires Allow access to manage all files for direct paths. Registration retries when you return."
+                                        else
+                                            "Allow file read access when Android asks. The file is not copied.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+                            val progress = ui.importProgress
+                            if (progress != null) {
+                                if (progress.totalBytes > 0) {
+                                    LinearProgressIndicator(
+                                        progress = { (progress.copiedBytes.toFloat() / progress.totalBytes).coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Text(
+                                        "${ModelManager.formatBytes(progress.copiedBytes)} / ${ModelManager.formatBytes(progress.totalBytes)}",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                } else {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    Text(ModelManager.formatBytes(progress.copiedBytes), style = MaterialTheme.typography.labelSmall)
+                                }
+                                OutlinedButton(onClick = viewModel::cancelImport) { Text("Cancel import") }
+                            }
+                        }
+                    },
                     onGrantAccess = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             try {
@@ -236,102 +332,6 @@ fun ModelScreen(
                         }
                     }
                 )
-            }
-
-            item { SupportedModelsCard() }
-
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Add a model / mmproj", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Choose a GGUF from Internal storage to add it in place. The model stays in its original folder, " +
-                                "so BigMoeOnEdge does not create another multi-GB copy. A storage-access permission may be " +
-                                "requested the first time. Cloud/provider files may need the copy option below.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Button(
-                            onClick = { picker.launch(arrayOf("*/*")) },
-                            enabled = ui.importProgress == null,
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("Import GGUF file(s) (copy)") }
-                        OutlinedButton(
-                            onClick = { noCopyPicker.launch(arrayOf("*/*")) },
-                            enabled = ui.importProgress == null,
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("Add GGUF from storage (no copy) may be slower") }
-                        TextButton(onClick = { showAdvancedPath = !showAdvancedPath }) {
-                            Text(if (showAdvancedPath) "Hide advanced path entry" else "Advanced: enter a path manually")
-                        }
-                        if (showAdvancedPath) {
-                            Text(
-                                "Use this only if the picker cannot expose the original filesystem path. Split GGUFs must be registered from the first shard.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                            OutlinedTextField(
-                                value = ui.existingPathInput,
-                                onValueChange = viewModel::setExistingPathInput,
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Existing GGUF path (no copy)") },
-                                placeholder = { Text("/storage/emulated/0/Download/model-00001-of-00012.gguf") },
-                                singleLine = true
-                            )
-                            val needsSharedStoragePermission = isSharedAbsolutePath(ui.existingPathInput) && !sharedPathAccessGranted
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = {
-                                    if (!isSharedAbsolutePath(ui.existingPathInput) || sharedPathAccessGranted) {
-                                        viewModel.registerExistingPath()
-                                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                        val appSettings = Intent(
-                                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                            Uri.parse("package:${context.packageName}")
-                                        )
-                                        try {
-                                            allFilesAccessLauncher.launch(appSettings)
-                                        } catch (_: Exception) {
-                                            allFilesAccessLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                                        }
-                                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                        legacyStoragePermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                                    } else {
-                                        viewModel.registerExistingPath()
-                                    }
-                                }) {
-                                    Text(if (needsSharedStoragePermission) "Grant path access" else "Register path")
-                                }
-                                OutlinedButton(onClick = viewModel::refresh) { Text("Refresh") }
-                            }
-                            if (needsSharedStoragePermission) {
-                                Text(
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                                        "Android requires Allow access to manage all files for direct paths. Registration retries when you return."
-                                    else
-                                        "Allow file read access when Android asks. The file is not copied.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                        }
-                        val progress = ui.importProgress
-                        if (progress != null) {
-                            if (progress.totalBytes > 0) {
-                                LinearProgressIndicator(
-                                    progress = { (progress.copiedBytes.toFloat() / progress.totalBytes).coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Text(
-                                    "${ModelManager.formatBytes(progress.copiedBytes)} / ${ModelManager.formatBytes(progress.totalBytes)}",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                                Text(ModelManager.formatBytes(progress.copiedBytes), style = MaterialTheme.typography.labelSmall)
-                            }
-                            OutlinedButton(onClick = viewModel::cancelImport) { Text("Cancel import") }
-                        }
-                    }
-                }
             }
 
             ui.message?.let { msg ->
@@ -515,19 +515,6 @@ private fun AuxFileCard(file: ModelFile, onRemove: () -> Unit) {
                 )
             }
             TextButton(onClick = onRemove) { Text("Remove") }
-        }
-    }
-}
-
-@Composable
-private fun SupportedModelsCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Any MoE model will work.", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Even regular (dense) models can work: they are detected automatically and loaded the ordinary way.",
-                style = MaterialTheme.typography.bodyMedium
-            )
         }
     }
 }
@@ -821,7 +808,8 @@ private fun ModelFolderCard(
     onOff: () -> Unit,
     onDefault: () -> Unit,
     onRefresh: () -> Unit,
-    onGrantAccess: () -> Unit
+    onGrantAccess: () -> Unit,
+    addFiles: @Composable () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -845,6 +833,8 @@ private fun ModelFolderCard(
                     TextButton(onClick = onDefault) { Text("Use Internal storage/Models") }
                 }
             }
+            androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            addFiles()
         }
     }
 }
