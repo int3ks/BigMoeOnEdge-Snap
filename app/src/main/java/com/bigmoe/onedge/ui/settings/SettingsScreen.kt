@@ -78,17 +78,17 @@ private const val DEBOUNCE_MS = 500L
 /** Same choice lists as the original BigMoeOnEdge Android app (AppSettings.*_CHOICES). */
 private object Choices {
     // Finer where it matters: 250 MiB steps up to 2000, 500 up to 5000, then 1000 up to 8000.
-    val CACHE = listOf(CACHE_AUTO_MB, 0, 500, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000)
+    val CACHE = listOf(CACHE_AUTO_MB, 0) + com.bigmoe.onedge.core.SettingChoices.CACHE_MB
     val CACHE_CEIL = listOf(0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
-    val IO = (1..8).toList() // the engine allows up to 8 lanes; one by one, as the device tuner tests them
+    val IO = com.bigmoe.onedge.core.SettingChoices.IO_LANES
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)
     val PREDICT_SPEC = listOf(0, 1, 2, 4)
     val ROUTE_AHEAD = listOf(0, 1, 2, 4)
     val DROP_COLD = listOf(0, 50, 75, 100)
     val SUBSTITUTE = listOf(0, 10, 15, 20, 30)
-    val BATCH_WIDTH = listOf(32, 64, 128, 256, 384, 512, 768, 1024, 1536, 2048)
-    val NPU_MIN_TOKENS = listOf(8, 16, 32, 64, 128, 256)
+    val BATCH_WIDTH = com.bigmoe.onedge.core.SettingChoices.BATCH_WIDTH
+    val NPU_MIN_TOKENS = com.bigmoe.onedge.core.SettingChoices.NPU_MIN_TOKENS
     val NPU_ROUTED_FULL_PCT = listOf(50, 70, 85, 95, 100)
     val NPREDICT = listOf(16, 32, 48, 64, 128, 256, 512, 1024, 2048, 4096, -1)
     val IMAGE_DIM = listOf(256, 384, 512, 768, 1024, 1344)
@@ -392,7 +392,7 @@ private fun SettingsContent(
             Hint(viewModel.npuPrefillStatus)
             ChoiceSetting(
                     "NPU prefill loader threads",
-                    (1..16).map { it to it.toString() }, // one by one, as the device tuner tests them
+                    com.bigmoe.onedge.core.SettingChoices.NPU_LOADERS.map { it to it.toString() },
                     settings.npuLoaders,
                     enabled = npuToggleEnabled && settings.npuPrefill
                 ) { viewModel.updateNpuLoaders(it) }

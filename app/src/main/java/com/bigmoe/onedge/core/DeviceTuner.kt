@@ -91,24 +91,27 @@ object DeviceTuner {
     /** Candidate values per parameter, ascending. [cores] is the number of CPU cores Android lets the app use. */
     fun candidates(param: TuneParam, cores: Int): List<Int> = when (param) {
         TuneParam.DECODE_CORES, TuneParam.PREFILL_CORES -> (1..cores.coerceIn(1, 16)).toList()
-        TuneParam.CACHE -> listOf(500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000)
+        // Coarse steps, each one a value the settings screen offers (SettingChoices); the fine pass fills in the rest.
+        TuneParam.CACHE -> listOf(500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
         TuneParam.IO_LANES -> listOf(1, 2, 4, 8)
-        TuneParam.UBATCH -> listOf(64, 128, 256, 384, 512, 768, 1024)
+        TuneParam.UBATCH -> listOf(64, 128, 256, 512, 1024)
         TuneParam.NPU -> listOf(0, 1)
         TuneParam.NPU_LOADERS -> listOf(2, 4, 6, 8, 12, 16)
         TuneParam.NPU_MIN_TOKENS -> NPU_MIN_STEPS
     }
 
     /**
-     * The fine grid a parameter is refined on after the coarse search found its best value: every value between the
-     * coarse steps (I/O lanes 3, 5, 6, 7; cache in 250 MiB; ubatch in 64; NPU loaders one by one). Null when the coarse
+     * The fine grid a parameter is refined on after the coarse search found its best value: the values the settings
+     * screen offers between the coarse steps (I/O lanes 3, 5, 6, 7; cache 1250, 1750, 2500, ...; ubatch 384, 768;
+     * NPU loaders one by one). Null when the coarse
      * list is already every value (threads) or there is nothing in between (NPU on/off, the NPU threshold).
      */
     fun fineCandidates(param: TuneParam): List<Int>? = when (param) {
-        TuneParam.IO_LANES -> (1..8).toList()
-        TuneParam.CACHE -> (1..32).map { it * 250 }
-        TuneParam.UBATCH -> (1..16).map { it * 64 } // up to 1024, the coarse maximum: wider graphs cost compute memory
-        TuneParam.NPU_LOADERS -> (1..16).toList()
+        // Only values the settings screen offers, so every result can also be chosen by hand.
+        TuneParam.IO_LANES -> SettingChoices.IO_LANES
+        TuneParam.CACHE -> SettingChoices.CACHE_MB
+        TuneParam.UBATCH -> SettingChoices.BATCH_WIDTH.filter { it in 64..1024 } // wider graphs cost compute memory
+        TuneParam.NPU_LOADERS -> SettingChoices.NPU_LOADERS
         else -> null
     }
 
