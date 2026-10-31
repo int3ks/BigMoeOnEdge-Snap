@@ -20,6 +20,12 @@ interface EngineBackend {
     /** CPU cores Android lets the app use (bit i = cpu i), 0 = unknown. */
     fun allowedCpus(): Long = 0L
 
+    /** Live, between generations: compute threads of the loaded session (decode, prompt graphs). */
+    fun setThreads(decode: Int, prefill: Int) {}
+
+    /** Live, between generations: expert-cache budget of the loaded session in MiB. */
+    fun setCacheBudget(mib: Int) {}
+
     /** How far a running [load] has got (step * 1000 + permille, see [LoadStep]); 0 = nothing reported. */
     fun loadProgress(): Int = 0
 
@@ -98,6 +104,10 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun setCpuMasks(decode: Long, prefill: Long) = bridge.nativeSetCpuMasks(decode, prefill)
 
     override fun allowedCpus(): Long = bridge.nativeAllowedCpus()
+
+    override fun setThreads(decode: Int, prefill: Int) = bridge.nativeSetThreads(decode, prefill)
+
+    override fun setCacheBudget(mib: Int) = bridge.nativeSetCacheBudget(mib)
 
     override fun modelInfo(): Map<String, String> =
         decodeUtf8(bridge.nativeModelInfo()).lineSequence()

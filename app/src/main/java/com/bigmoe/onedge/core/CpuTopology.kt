@@ -23,4 +23,16 @@ object CpuTopology {
 
     /** The mask the engine uses: the stored one, or the default when none is stored. */
     fun effective(mask: Long): Long = if (mask != 0L) mask else defaultMask()
+
+    /** Highest frequency of each core in kHz (0 when unreadable), index = cpu number. */
+    fun maxFreqKhz(): List<Long> = (0 until coreCount).map { i ->
+        runCatching { File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrDefault(0L)
+    }
+
+    /** The cores in [allowed] (0 = all), fastest first; equal cores in their numbering order. */
+    fun fastestFirst(allowed: Long): List<Int> {
+        val freq = maxFreqKhz()
+        return (0 until coreCount).filter { allowed == 0L || (allowed shr it) and 1L == 1L }
+            .sortedWith(compareByDescending<Int> { freq.getOrElse(it) { 0L } }.thenBy { it })
+    }
 }

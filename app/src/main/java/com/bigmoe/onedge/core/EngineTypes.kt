@@ -252,7 +252,8 @@ data class GenerationStats(
 
 sealed interface EngineEvent {
     /** [contextUsed]: prompt + tokens generated so far in this turn; 0 = unknown. */
-    data class Progress(val generatedTokens: Int, val contextUsed: Int = 0) : EngineEvent
+    /** [atNs]: System.nanoTime() when the engine produced the token (taken on the engine's thread, for timing). */
+    data class Progress(val generatedTokens: Int, val contextUsed: Int = 0, val atNs: Long = System.nanoTime()) : EngineEvent
     data class Answer(val delta: String) : EngineEvent
     data class Reasoning(val delta: String) : EngineEvent
     data class Finished(

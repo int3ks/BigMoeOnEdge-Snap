@@ -580,6 +580,15 @@ ThinkControl Session::think_control() const {
 void Session::set_cache_budget_mb(int mib) {
     impl_->source.set_cache_budget((size_t) std::max(0, mib) * 1024ull * 1024ull);
 }
+
+void Session::set_threads(int n_threads, int n_threads_batch) {
+    auto & im = *impl_;
+    if (n_threads < 1 || n_threads_batch < 1) return;
+    im.cfg.n_threads = n_threads;
+    im.cfg.n_threads_batch = n_threads_batch;
+    if (im.ctx) llama_set_n_threads(im.ctx.get(), n_threads, n_threads_batch);
+    if (im.ctx_dft) llama_set_n_threads(im.ctx_dft.get(), n_threads, n_threads_batch);
+}
 // Teacher-forced perplexity. See PplRequest for why the batch is labelled decode.
 PplResult Session::perplexity(const PplRequest & req) {
     auto & im = *impl_;

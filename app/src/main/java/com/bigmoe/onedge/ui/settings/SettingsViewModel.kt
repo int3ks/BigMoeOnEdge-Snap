@@ -96,6 +96,41 @@ class SettingsViewModel(
     fun updateLoadAllExpertsForBenchmark(v: Boolean) = launch { dataStore.updateLoadAllExpertsForBenchmark(v) }
     fun updateReleaseMmap(v: Boolean) = launch { dataStore.updateReleaseMmap(v) }
     fun updateSpec(v: SpecSource) = launch { dataStore.updateSpec(v) }
+
+    private val _backupMessage = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    /** The result of the last settings export or import, for the screen. */
+    val backupMessage: kotlinx.coroutines.flow.StateFlow<String?> = _backupMessage
+    fun dismissBackupMessage() { _backupMessage.value = null }
+
+    /** Writes all settings (without paths and API keys) to [uri]. */
+    fun exportSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) = launch {
+        _backupMessage.value = try {
+            val json = dataStore.exportJson()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                resolver.openOutputStream(uri, "wt")?.use { it.write(json.toByteArray()) } ?: error("cannot write")
+            }
+            "Settings exported."
+        } catch (e: Throwable) {
+            "Export failed: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** Reads a settings file from [uri]; settings not in it stay as they are. */
+    fun importSettings(resolver: android.content.ContentResolver, uri: android.net.Uri) = launch {
+        _backupMessage.value = try {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                resolver.openInputStream(uri)?.use { input ->
+                    val bytes = input.readBytes()
+                    require(bytes.size <= 1_000_000) { "the file is too large" }
+                    String(bytes, Charsets.UTF_8)
+                } ?: error("cannot read")
+            }
+            val n = dataStore.importJson(text)
+            "Imported $n settings. Engine settings take effect at the next model load."
+        } catch (e: Throwable) {
+            "Import failed: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
     fun updateCpuMask(v: Long) = launch { dataStore.updateCpuMask(v) }
     fun updateCpuMaskPrefill(v: Long) = launch { dataStore.updateCpuMaskPrefill(v) }
     /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */

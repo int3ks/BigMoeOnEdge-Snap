@@ -277,6 +277,10 @@ public:
     // when the cache is off. The only way the budget moves after init sizes it.
     void set_cache_budget_mb(int mib);
 
+    // Compute threads for single-token (decode) and batched (prompt) graphs, for the target and the MTP draft
+    // context, from the next graph on. PRECONDITION as above: between generations. Values below 1 are ignored.
+    void set_threads(int n_threads, int n_threads_batch);
+
     // Score a fixed text under teacher forcing. Clears the KV; leaves no conversation state behind.
     PplResult perplexity(const PplRequest & req);
 

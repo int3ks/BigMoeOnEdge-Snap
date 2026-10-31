@@ -83,6 +83,25 @@ class EngineController(
         try { backend.setCpuMasks(decode, prefill) } catch (_: Throwable) {}
     }
 
+    /**
+     * Live tuning of the loaded model between generations (the device tuner): compute threads for decode and prompt
+     * graphs and, when given, the expert-cache budget, without a reload. False while a generation runs.
+     */
+    suspend fun tuneLive(decodeThreads: Int, prefillThreads: Int, cacheMb: Int? = null): Boolean = withContext(ioDispatcher) {
+        if (loadedModel() == null || !generating.compareAndSet(false, true)) return@withContext false
+        try {
+            lifecycleMutex.withLock {
+                backend.setThreads(decodeThreads, prefillThreads)
+                if (cacheMb != null && cacheMb > 0) backend.setCacheBudget(cacheMb)
+            }
+            true
+        } catch (_: Throwable) {
+            false
+        } finally {
+            generating.set(false)
+        }
+    }
+
     /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */
     fun allowedCpus(): Long = try { backend.allowedCpus() } catch (_: Throwable) { 0L }
 

@@ -15,9 +15,11 @@ import com.bigmoe.onedge.core.DecisionPrefixCache
 import com.bigmoe.onedge.core.KvCacheType
 import com.bigmoe.onedge.core.LoadConfig
 import com.bigmoe.onedge.core.SpecSource
-import com.bigmoe.onedge.core.TunedValues
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val Context.dataStore by preferencesDataStore(name = "engine_settings")
 
@@ -31,6 +33,10 @@ enum class AgentApproval { ASK, ALLOW_ALL }
 
 /** Cache budget sentinel values (same convention as the original app's CACHE_AUTO / 0 / N MiB). */
 const val CACHE_AUTO_MB = -1
+
+private const val EXPORT_FORMAT = "bigmoeonedge2-settings"
+/** Not exported or imported: this device's file paths and secrets. */
+private val EXPORT_SKIP = setOf("last_model_path", "last_mmproj_path", "brave_api_key", "server_api_key")
 const val CACHE_OFF_MB = 0
 
 /**
@@ -396,30 +402,58 @@ class EngineSettingsDataStore(private val context: Context) {
     }
 
     // ---- engine ----
-    /** Writes every setting Auto settings owns in one DataStore transaction (used when a save is switched on). */
-    suspend fun applyTunedValues(v: TunedValues) {
-        context.dataStore.edit { p ->
-            p[Keys.CONTEXT_LENGTH] = v.contextLength.coerceAtLeast(1)
-            p[Keys.THREAD_COUNT] = v.threadCount.coerceIn(1, 32)
-            p[Keys.BATCH_THREAD_COUNT] = v.batchThreadCount.coerceIn(1, 32)
-            p[Keys.BATCH_WIDTH] = v.batchWidth.coerceIn(32, 8192)
-            p[Keys.CACHE_MB] = v.cacheMb.coerceAtLeast(CACHE_AUTO_MB)
-            p[Keys.IO_THREADS] = v.ioThreads.coerceIn(1, 8)
-            p[Keys.O_DIRECT] = v.oDirect
-            p[Keys.OVERLAP] = v.overlap
-            p[Keys.IO_TWO_WAVE] = v.ioTwoWave
-            p[Keys.N_EXPERT_USED] = v.nExpertUsed.coerceAtLeast(0)
-            p[Keys.DROP_COLD_PCT] = v.dropColdPct.coerceIn(0, 100)
-            p[Keys.DROP_RENORM] = v.dropRenorm
-            p[Keys.SUBSTITUTE_PCT] = v.substitutePct.coerceIn(0, 100)
-            p[Keys.PREFETCH_LAYERS] = v.prefetchLayers.coerceIn(0, 8)
-            p[Keys.PREDICT_PREFETCH] = v.predictPrefetch
-            p[Keys.PREDICT_SPEC_MAX] = v.predictSpecMax.coerceIn(0, 8)
-            p[Keys.ROUTE_AHEAD] = v.routeAhead.coerceIn(0, 8)
-            p[Keys.SPEC] = v.spec.name
-            p[Keys.DRAFT_MAX] = v.draftMax.coerceIn(1, 8)
-            p[Keys.NPU_PREFILL] = v.npuPrefill
+    // ---- export / import ----
+    /**
+     * Every stored setting as JSON (name, type, value), for a backup or another device. Left out: the last model and
+     * projector paths (they belong to this device's files) and the API keys (a file is easily shared).
+     */
+    suspend fun exportJson(): String {
+        val values = JSONObject()
+        for ((key, v) in context.dataStore.data.first().asMap()) {
+            if (key.name in EXPORT_SKIP) continue
+            val o = JSONObject()
+            when (v) {
+                is Boolean -> o.put("t", "b").put("v", v)
+                is Int -> o.put("t", "i").put("v", v)
+                is Long -> o.put("t", "l").put("v", v)
+                is Float -> o.put("t", "f").put("v", v.toDouble())
+                is Double -> o.put("t", "d").put("v", v)
+                is String -> o.put("t", "s").put("v", v)
+                is Set<*> -> o.put("t", "ss").put("v", JSONArray(v.map { it.toString() }))
+                else -> continue
+            }
+            values.put(key.name, o)
         }
+        return JSONObject().put("format", EXPORT_FORMAT).put("version", 1).put("settings", values).toString(2)
+    }
+
+    /** Writes the settings of an [exportJson] file; settings not in the file stay as they are. Returns how many. */
+    suspend fun importJson(text: String): Int {
+        val root = JSONObject(text)
+        require(root.optString("format") == EXPORT_FORMAT) { "This is not a BigMoeOnEdge² settings file." }
+        val values = root.getJSONObject("settings")
+        var n = 0
+        context.dataStore.edit { p ->
+            for (name in values.keys()) {
+                if (name in EXPORT_SKIP) continue
+                val o = values.optJSONObject(name) ?: continue
+                when (o.optString("t")) {
+                    "b" -> p[booleanPreferencesKey(name)] = o.getBoolean("v")
+                    "i" -> p[intPreferencesKey(name)] = o.getInt("v")
+                    "l" -> p[longPreferencesKey(name)] = o.getLong("v")
+                    "f" -> p[floatPreferencesKey(name)] = o.getDouble("v").toFloat()
+                    "d" -> p[androidx.datastore.preferences.core.doublePreferencesKey(name)] = o.getDouble("v")
+                    "s" -> p[stringPreferencesKey(name)] = o.getString("v")
+                    "ss" -> {
+                        val a = o.getJSONArray("v")
+                        p[androidx.datastore.preferences.core.stringSetPreferencesKey(name)] = (0 until a.length()).map { a.getString(it) }.toSet()
+                    }
+                    else -> continue
+                }
+                n++
+            }
+        }
+        return n
     }
 
     suspend fun updateContextLength(v: Int) = set(Keys.CONTEXT_LENGTH, v.coerceAtLeast(1))

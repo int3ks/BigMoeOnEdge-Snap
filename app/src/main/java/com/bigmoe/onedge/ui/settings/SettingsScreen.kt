@@ -34,6 +34,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -215,6 +216,8 @@ private fun SettingsContent(
         AutoSettingsEntry(onClick = onOpenAutoSettings)
         Spacer(Modifier.height(10.dp))
         AppUpdateCard()
+        Spacer(Modifier.height(10.dp))
+        SettingsBackupRow(viewModel)
         Spacer(Modifier.height(10.dp))
         // Settings are grouped in the requested order: appearance, model, engine, tools/media, diagnostics.
         SettingsFoldout(
@@ -902,6 +905,36 @@ private fun PerformanceGroup(
     }
 }
 
+/** Export all settings to a file and import them again (paths and API keys stay out of the file). */
+@Composable
+private fun SettingsBackupRow(viewModel: SettingsViewModel) {
+    val context = LocalContext.current
+    val message by viewModel.backupMessage.collectAsState()
+    val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> if (uri != null) viewModel.exportSettings(context.contentResolver, uri) }
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) viewModel.importSettings(context.contentResolver, uri) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Settings file", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { exportLauncher.launch("bigmoeonedge2-settings.json") }) { Text("Export") }
+            OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Import") }
+        }
+        Text(
+            "Saves every setting to a file, or reads one back (also from another device). The file has no model paths and no API keys.",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        message?.let { m ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(m, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = viewModel::dismissBackupMessage) { Text("OK") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AutoSettingsEntry(onClick: () -> Unit) {
     Surface(
@@ -919,7 +952,7 @@ private fun AutoSettingsEntry(onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    "Best settings for your phone and model: Fastest, Balanced or Most accurate, with saves you can switch between",
+                    "Measures the best threads, expert cache, I/O lanes, prompt batch width and NPU settings for this device with a model you pick",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }

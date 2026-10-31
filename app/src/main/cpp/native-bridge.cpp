@@ -972,6 +972,20 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCpuMasks(JNIEnv *, jobje
     std::call_once(hook_once, [] { llama_set_graph_compute_hook(&on_graph_compute); });
 }
 
+// Live tuning between generations (the device tuner): compute threads and the expert-cache budget of the loaded
+// session, without a reload. No-ops without a session. Must not be called while a generation runs.
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetThreads(JNIEnv *, jobject, jint decode, jint prefill) {
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (s) s->set_threads(decode, prefill);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCacheBudget(JNIEnv *, jobject, jint mib) {
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (s && mib > 0) s->set_cache_budget_mb(mib);
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeAllowedCpus(JNIEnv *, jobject) {
     return static_cast<jlong>(allowed_cpu_mask());

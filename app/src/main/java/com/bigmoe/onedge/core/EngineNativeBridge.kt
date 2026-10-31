@@ -98,6 +98,12 @@ class EngineNativeBridge {
      */
     external fun nativeSetCpuMasks(decode: Long, prefill: Long)
 
+    /** Compute threads of the loaded session (decode, prompt), from the next graph on. Only between generations. */
+    external fun nativeSetThreads(decode: Int, prefill: Int)
+
+    /** Expert-cache budget of the loaded session in MiB (evicts down to it now). Only between generations. */
+    external fun nativeSetCacheBudget(mib: Int)
+
     /** The CPU cores Android lets this app use (bit i = cpu i); 0 when it cannot be read. */
     external fun nativeAllowedCpus(): Long
 

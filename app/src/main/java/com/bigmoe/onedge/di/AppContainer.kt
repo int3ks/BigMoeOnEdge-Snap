@@ -164,6 +164,14 @@ class AppContainer(private val context: Context) {
         return File(dir, "session-$stamp.csv").absolutePath
     }
 
+    /** RAM Android reports as available right now, in MiB. */
+    fun availRamMb(): Long {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return 0L
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        return info.availMem / (1024L * 1024L)
+    }
+
     fun totalRamBytes(): Long {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return 0L
         val info = ActivityManager.MemoryInfo()
@@ -171,12 +179,8 @@ class AppContainer(private val context: Context) {
         return info.totalMem
     }
 
-    val autoSaveStore: com.bigmoe.onedge.data.local.AutoSaveStore by lazy {
-        com.bigmoe.onedge.data.local.AutoSaveStore(File(context.applicationContext.filesDir, "auto-saves"))
-    }
-
-    val deviceScanner: com.bigmoe.onedge.core.DeviceScanner by lazy {
-        com.bigmoe.onedge.core.DeviceScanner(context.applicationContext)
+    val deviceTuneStore: com.bigmoe.onedge.data.local.DeviceTuneStore by lazy {
+        com.bigmoe.onedge.data.local.DeviceTuneStore(File(context.applicationContext.filesDir, "device-tune"))
     }
 
     val contentResolver: android.content.ContentResolver get() = context.applicationContext.contentResolver

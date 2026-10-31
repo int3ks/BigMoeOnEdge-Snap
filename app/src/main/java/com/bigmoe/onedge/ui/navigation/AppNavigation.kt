@@ -44,8 +44,8 @@ import com.bigmoe.onedge.ui.home.HomeScreen
 import com.bigmoe.onedge.ui.home.ChatHistoryPanel
 import com.bigmoe.onedge.ui.models.ModelScreen
 import com.bigmoe.onedge.ui.models.ModelViewModel
-import com.bigmoe.onedge.ui.settings.AutoSettingsScreen
-import com.bigmoe.onedge.ui.settings.AutoTuneViewModel
+import com.bigmoe.onedge.ui.settings.DeviceTuneScreen
+import com.bigmoe.onedge.ui.settings.DeviceTuneViewModel
 import com.bigmoe.onedge.ui.settings.SettingsScreen
 import com.bigmoe.onedge.ui.settings.SettingsViewModel
 
@@ -75,7 +75,7 @@ fun AppNavigation(
     historyViewModel: HistoryViewModel,
     settingsViewModel: SettingsViewModel,
     modelViewModel: ModelViewModel,
-    autoTuneViewModel: AutoTuneViewModel,
+    autoTuneViewModel: DeviceTuneViewModel,
     fileViewModel: FileViewModel,
     initialSessionId: String? = null,
     modifier: Modifier = Modifier,
@@ -157,7 +157,7 @@ fun AppNavigation(
                 )
             }
             composable(route = Screen.AutoSettings.route) {
-                AutoSettingsScreen(
+                DeviceTuneScreen(
                     viewModel = autoTuneViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
