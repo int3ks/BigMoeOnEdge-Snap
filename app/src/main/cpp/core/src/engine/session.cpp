@@ -207,6 +207,39 @@ StopScan scan_stops(const std::string & text, const std::vector<std::string> & s
     return r;
 }
 
+// True when any of the penalty stages would change a logit.
+bool penalties_active(const SamplingConfig & s) {
+    return s.repeat_last_n != 0 &&
+           (s.repeat_penalty != 1.0f || s.freq_penalty != 0.0f || s.presence_penalty != 0.0f);
+}
+
+// The sampler chain for one set of sampling settings, public llama_sampler_* API only (from BigMoeOnEdge+ 0.6.5):
+//   [penalties] -> top_k -> top_p -> [min_p] -> temp -> dist          (temp > 0)
+//   penalties -> greedy                                               (temp <= 0 with penalties)
+// nullptr when nothing is asked for, which leaves the decode loop on plain argmax (the deterministic default).
+// `allow_penalties` is false while guess ahead is on: the penalty stages carry token history, and a draft group
+// would have to replay it exactly; kept off there as upstream does.
+llama_sampler * build_sampler_chain(const SamplingConfig & s, int n_vocab, int n_ctx, bool allow_penalties) {
+    const bool penalties = allow_penalties && penalties_active(s);
+    if (s.temp <= 0.0f && !penalties) return nullptr;
+    llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    if (penalties) {
+        const int32_t last_n = s.repeat_last_n < 0 ? std::max(1, n_ctx) : s.repeat_last_n;
+        llama_sampler_chain_add(chain, llama_sampler_init_penalties(n_vocab, last_n, s.repeat_penalty,
+                                                                    s.freq_penalty, s.presence_penalty));
+    }
+    if (s.temp > 0.0f) {
+        llama_sampler_chain_add(chain, llama_sampler_init_top_k(s.top_k));
+        llama_sampler_chain_add(chain, llama_sampler_init_top_p(s.top_p, /*min_keep*/ 1));
+        if (s.min_p > 0.0f) llama_sampler_chain_add(chain, llama_sampler_init_min_p(s.min_p, /*min_keep*/ 1));
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(s.temp));
+        llama_sampler_chain_add(chain, llama_sampler_init_dist(s.seed));
+    } else {
+        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
+    }
+    return chain;
+}
+
 llama_token argmax(const float * logits, int n_vocab) {
     llama_token best = 0;
     float best_v = logits[0];
@@ -527,6 +560,16 @@ struct Session::Impl {
     bool info_sent = false;
 
     std::atomic<bool> cancel_requested{false};
+    // The current generate()'s caller-owned stop flag (GenerateRequest::stop_flag); borrowed only while it runs.
+    std::atomic<const std::atomic<bool> *> caller_stop{nullptr};
+    bool cancelled() const {
+        if (cancel_requested.load(std::memory_order_relaxed)) return true;
+        const std::atomic<bool> * f = caller_stop.load(std::memory_order_relaxed);
+        return f && f->load(std::memory_order_relaxed);
+    }
+    // The image encoder has no abort hook; its scheduler's eval callback is the one way in (upstream #486). Asking
+    // for one node in every k makes the graph k-node pieces, each followed by one question that can end it.
+    unsigned encoder_asked = 0;
 
     ~Impl() {
         // Deterministic teardown order: stop the I/O pool (it holds fds into the mmap and its
@@ -1077,6 +1120,15 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         mp.print_timings = false;
         mp.warmup = false;
         mp.n_threads = cfg.n_threads;
+        // Stop during an image's encoder (upstream #486): it has no decode boundary for the abort callback, so
+        // without this a Stop waited for the whole encode. An encode ended early yields an output no one reads:
+        // the decode that follows is aborted by the same flags and the turn ends as cancelled.
+        mp.cb_eval = [](ggml_tensor *, bool ask, void * user) -> bool {
+            auto * p = static_cast<Impl *>(user);
+            if (ask) return ++p->encoder_asked % 16u == 0;
+            return !p->cancelled();
+        };
+        mp.cb_eval_user_data = &im;
         im.mtmd.reset(mtmd_init_from_file(cfg.mmproj_path.c_str(), model, mp));
         if (!im.mtmd) return fail("failed to load the vision projector (mmproj): " + cfg.mmproj_path);
         if (!mtmd_support_vision(im.mtmd.get())) return fail("the mmproj has no vision encoder");
@@ -1147,13 +1199,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     // public llama_sampler_* API (hard rule 1): common_sampler lives in the non-stable common layer.
     static_assert(SamplingConfig{}.seed == LLAMA_DEFAULT_SEED,
                   "SamplingConfig::seed default must mirror LLAMA_DEFAULT_SEED");
-    if (cfg.sampling.temp > 0.0f) {
-        im.smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-        llama_sampler_chain_add(im.smpl, llama_sampler_init_top_k(cfg.sampling.top_k));
-        llama_sampler_chain_add(im.smpl, llama_sampler_init_top_p(cfg.sampling.top_p, /*min_keep*/ 1));
-        llama_sampler_chain_add(im.smpl, llama_sampler_init_temp(cfg.sampling.temp));
-        llama_sampler_chain_add(im.smpl, llama_sampler_init_dist(cfg.sampling.seed));
-    }
+    im.smpl = build_sampler_chain(cfg.sampling, im.n_vocab, cfg.n_ctx, /*allow_penalties*/ !cfg.spec.enabled());
 
     // One abort callback for the session's whole life, checking two independent predicates:
     // an explicit cancel() request (any mode) and a fatal streaming I/O error (overlap only).
@@ -1162,7 +1208,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         ctx,
         [](void * ud) -> bool {
             auto * p = static_cast<Impl *>(ud);
-            return p->cancel_requested.load(std::memory_order_relaxed) || p->source.fatal();
+            return p->cancelled() || p->source.fatal();
         },
         &im);
 
@@ -1419,7 +1465,13 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     if (im.prefill) {
         load_progress_set(LoadStep::Npu, 0.0f);
         std::string perr;
-        if (!im.prefill->open(ctx, im.vocab, *im.hook, cfg.prefill, cfg.moe, im.n_layer, perr)) return fail(perr);
+        bool opened_dev = false;
+        try {
+            opened_dev = im.prefill->open(ctx, im.vocab, *im.hook, cfg.prefill, cfg.moe, im.n_layer, perr);
+        } catch (const std::exception & e) {
+            perr = std::string("prefill device open threw: ") + e.what();
+        }
+        if (!opened_dev) return fail(perr);
         load_progress_set(LoadStep::Npu, 1.0f);
     }
     load_progress_set(LoadStep::Finish, 0.0f);
@@ -1581,6 +1633,12 @@ RunResult Session::generate(const GenerateRequest & req,
     // Fresh cancel latch for this generation; a stale request from a prior aborted call must
     // not carry over. (cancel() sets it; the abort callback reads it.)
     im.cancel_requested.store(false, std::memory_order_relaxed);
+    // The caller's own stop flag is read with the latch for this call only (the abort callback outlives it).
+    im.caller_stop.store(req.stop_flag, std::memory_order_relaxed);
+    struct CallerStopGuard {
+        Impl & im;
+        ~CallerStopGuard() { im.caller_stop.store(nullptr, std::memory_order_relaxed); }
+    } caller_stop_guard{im};
 
     // A kept decide() prefix is worth its RAM only while decisions follow one another. Back in a
     // conversation it would sit, until close, in the memory the expert cache lives in, so it goes
@@ -1605,16 +1663,8 @@ RunResult Session::generate(const GenerateRequest & req,
     std::unique_ptr<llama_sampler, void (*)(llama_sampler *)> smpl_req(nullptr, llama_sampler_free);
     llama_sampler * smpl_use = im.smpl;
     if (req.sampling_override) {
-        if (req.sampling.temp > 0.0f) {
-            smpl_req.reset(llama_sampler_chain_init(llama_sampler_chain_default_params()));
-            llama_sampler_chain_add(smpl_req.get(), llama_sampler_init_top_k(req.sampling.top_k));
-            llama_sampler_chain_add(smpl_req.get(), llama_sampler_init_top_p(req.sampling.top_p, /*min_keep*/ 1));
-            llama_sampler_chain_add(smpl_req.get(), llama_sampler_init_temp(req.sampling.temp));
-            llama_sampler_chain_add(smpl_req.get(), llama_sampler_init_dist(req.sampling.seed));
-            smpl_use = smpl_req.get();
-        } else {
-            smpl_use = nullptr;
-        }
+        smpl_req.reset(build_sampler_chain(req.sampling, im.n_vocab, im.cfg.n_ctx, /*allow_penalties*/ !im.cfg.spec.enabled()));
+        smpl_use = smpl_req.get(); // null = plain greedy argmax
     }
 
     // Tool-call grammar (app chat path only). It wraps smpl_use (or argmax) and, while active, is the ONLY thing the
@@ -2034,7 +2084,7 @@ RunResult Session::generate(const GenerateRequest & req,
         const int32_t erc = mtmd_helper_eval_chunks(im.mtmd.get(), ctx, img_chunks.get(), 0, 0,
                                                     im.cfg.n_batch, true, &new_n_past);
         if (erc != 0) {
-            if (im.cancel_requested.load(std::memory_order_relaxed)) {
+            if (im.cancelled()) {
                 rollback_turn();
                 res.ok = true;
                 res.cancelled = true;
@@ -2079,7 +2129,7 @@ RunResult Session::generate(const GenerateRequest & req,
         }
         trace_begin(i, chunk, /*phase*/ 0);
         if (im.decode_placed(ctx, pf) != 0) {
-            if (im.cancel_requested.load(std::memory_order_relaxed)) {
+            if (im.cancelled()) {
                 rollback_turn();
                 res.ok = true;
                 res.cancelled = true;
@@ -2327,7 +2377,7 @@ RunResult Session::generate(const GenerateRequest & req,
         const uint64_t f1 = pio::major_faults();
         const double c1 = pio::process_cpu_seconds();
         if (dec != 0) {
-            if (im.cancel_requested.load(std::memory_order_relaxed)) {
+            if (im.cancelled()) {
                 res.cancelled = true;
                 break;
             }

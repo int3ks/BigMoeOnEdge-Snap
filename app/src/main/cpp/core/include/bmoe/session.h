@@ -19,6 +19,7 @@
 #include "bmoe/metrics.h"
 #include "bmoe/runtime.h"
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -123,6 +124,9 @@ struct GenerateRequest {
     std::vector<ChatTurn> history;
     // Images for THIS turn; requires SessionConfig::mmproj_path and chat mode.
     std::vector<ImageRGB> images;
+    // Optional caller-owned stop flag, read alongside cancel()'s latch for this call only and never reset by the
+    // session. It must outlive generate(); the caller may raise it from another thread (upstream #495).
+    const std::atomic<bool> * stop_flag = nullptr;
     bool think = true;
     bool clear_kv = true;
     // Populate TokenMetrics::text / ::reasoning on every token. Building them means parsing the

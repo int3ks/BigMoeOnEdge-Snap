@@ -23,6 +23,14 @@ struct SamplingConfig {
     int top_k = 40;              // 0 disables the top-k stage (llama.cpp convention)
     float top_p = 0.95f;         // nucleus cutoff, in (0, 1]
     uint32_t seed = 0xFFFFFFFFu; // == LLAMA_DEFAULT_SEED (random per run); static_assert'd in session.cpp
+
+    // Extra sampler stages (from BigMoeOnEdge+ 0.6.5). Every default is neutral, so a caller that sets nothing
+    // gets the exact chain it always got and the byte-identity gates stay meaningful.
+    float min_p = 0.0f;            // drop tokens below min_p * p(best). 0 = off. Only used when temp > 0.
+    float repeat_penalty = 1.0f;   // > 1 discourages tokens already generated. 1 = off.
+    int repeat_last_n = 64;        // tokens the penalties look at. 0 = penalties off, < 0 = whole context.
+    float freq_penalty = 0.0f;     // subtracted per occurrence of a token. 0 = off.
+    float presence_penalty = 0.0f; // subtracted once if the token appeared at all. 0 = off.
 };
 
 // How the dense (non-expert) model weights are kept resident. See MoeStreamConfig::dense_weights and

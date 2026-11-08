@@ -186,9 +186,10 @@ enum IntIdx {
     I_DROP_RENORM, I_DROP_IN_PREFILL, I_PREDICTION_PROBE, I_LOAD_ALL_EXPERTS,
     I_DECIDE_PREFIX_CACHE, I_FORCE_CACHE,
     I_KV_CACHE_TYPE,   // 0 f16, 1 q8_0, 2 q4_0 (per model)
+    I_REPEAT_LAST_N,   // repetition-penalty window: 0 off, < 0 whole context
     I_COUNT
 };
-enum FloatIdx { F_TEMPERATURE = 0, F_TOP_P, F_COUNT };
+enum FloatIdx { F_TEMPERATURE = 0, F_TOP_P, F_MIN_P, F_REPEAT_PENALTY, F_FREQ_PENALTY, F_PRESENCE_PENALTY, F_COUNT };
 
 namespace {
 
@@ -417,6 +418,11 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     cfg.sampling.top_p = fv[F_TOP_P];
     cfg.sampling.top_k = std::max<int>(0, iv[I_TOP_K]);
     cfg.sampling.seed = static_cast<uint32_t>(iv[I_SEED]); // -1 == random per run (UINT32_MAX)
+    cfg.sampling.min_p = fv[F_MIN_P];
+    cfg.sampling.repeat_penalty = fv[F_REPEAT_PENALTY];
+    cfg.sampling.repeat_last_n = iv[I_REPEAT_LAST_N];
+    cfg.sampling.freq_penalty = fv[F_FREQ_PENALTY];
+    cfg.sampling.presence_penalty = fv[F_PRESENCE_PENALTY];
 
     const bool streaming = iv[I_MMAP_BASELINE] == 0;
     if (streaming) {
@@ -520,7 +526,15 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
          cfg.n_expert_used, static_cast<int>(iv[I_SPEC_SOURCE]));
 
     std::string error;
-    std::unique_ptr<bmoe::Session> opened = bmoe::Session::open(cfg, error);
+    std::unique_ptr<bmoe::Session> opened;
+    try {
+        opened = bmoe::Session::open(cfg, error);
+    } catch (const std::exception & e) {
+        // Last line of defence: an exception must never cross the JNI boundary (it aborts the process).
+        error = std::string("model load threw: ") + e.what();
+    } catch (...) {
+        error = "model load threw an unknown exception";
+    }
     if (!opened) {
         LOGE("Session::open failed: %s", error.c_str());
         return to_bytes(env, error.empty() ? std::string("Session::open failed (no message)") : error);
@@ -598,8 +612,15 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeModelInfo(JNIEnv * env, job
 // Generation
 // ---------------------------------------------------------------------------------------------
 
+// Raised by nativeStopGeneration, cleared when a generate call enters the bridge. The session's own cancel latch is
+// reset when generate() starts, so a Stop that came between the call's entry and that reset (waiting for the
+// generation lock, rendering the template, reading images) was lost and the turn ran to the end. The session reads
+// this flag alongside its latch (GenerateRequest::stop_flag; upstream #495).
+static std::atomic<bool> g_stop_requested{false};
+
 JNIEXPORT void JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeStopGeneration(JNIEnv *, jobject) {
+    g_stop_requested.store(true, std::memory_order_relaxed);
     std::shared_ptr<bmoe::Session> s = current_session();
     if (s) s->cancel();
 }
@@ -615,8 +636,12 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
     jint max_tokens, jboolean clear_kv, jboolean think,
     jintArray j_image_dims, jobjectArray j_image_data,
     jbyteArray j_tool_grammar, jbyteArray j_tool_grammar_trigger,
+    jboolean override_sampling, jfloat temperature, jfloat top_p, jint top_k, jint seed,
+    jfloat min_p, jfloat repeat_penalty, jint repeat_last_n, jfloat freq_penalty, jfloat presence_penalty,
     jobject callback)
 {
+    // A Stop from here on belongs to this call (see g_stop_requested).
+    g_stop_requested.store(false, std::memory_order_relaxed);
     const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
     if (callback == nullptr) return JNI_FALSE;
 #ifdef BMOE_PIN_FAST_CORES
@@ -662,6 +687,20 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerate(
     // Lazy tool-call grammar (parser/ToolGrammar.kt); empty = none. The engine decides whether it applies this turn.
     if (j_tool_grammar != nullptr) req.tool_grammar = from_bytes(env, j_tool_grammar);
     if (j_tool_grammar_trigger != nullptr) req.tool_grammar_trigger = from_bytes(env, j_tool_grammar_trigger);
+    req.stop_flag = &g_stop_requested;
+    // Per-request sampling: the app sends its current values with every chat turn, so changing them needs no reload.
+    req.sampling_override = (override_sampling == JNI_TRUE);
+    if (req.sampling_override) {
+        req.sampling.temp = static_cast<float>(temperature);
+        req.sampling.top_p = static_cast<float>(top_p);
+        req.sampling.top_k = std::max<int>(0, static_cast<int>(top_k));
+        req.sampling.seed = static_cast<uint32_t>(seed); // -1 = random per generation
+        req.sampling.min_p = std::clamp<float>(static_cast<float>(min_p), 0.0f, 1.0f);
+        req.sampling.repeat_penalty = repeat_penalty > 0.0f ? static_cast<float>(repeat_penalty) : 1.0f;
+        req.sampling.repeat_last_n = static_cast<int>(repeat_last_n);
+        req.sampling.freq_penalty = static_cast<float>(freq_penalty);
+        req.sampling.presence_penalty = static_cast<float>(presence_penalty);
+    }
     if (req.clear_kv) {
         req.system_prompt = from_bytes(env, j_system);
         if (j_history_flat != nullptr) {
@@ -756,8 +795,10 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerateChat(
     jbyteArray j_messages_json, jbyteArray j_tools_json, jbyteArray j_tool_choice,
     jobjectArray j_stop, jint max_tokens, jboolean think,
     jboolean override_sampling, jfloat temperature, jfloat top_p, jint top_k, jint seed,
+    jfloat min_p, jfloat repeat_penalty, jint repeat_last_n, jfloat freq_penalty, jfloat presence_penalty,
     jobject callback)
 {
+    g_stop_requested.store(false, std::memory_order_relaxed);
     const ScopedCpuMask cpu_mask_scope; // the cores chosen in Settings, for this call's threads
     if (callback == nullptr) return JNI_FALSE;
 #ifdef BMOE_PIN_FAST_CORES
@@ -833,12 +874,18 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeGenerateChat(
             if (!st.empty()) req.stop.push_back(std::move(st));
         }
     }
+    req.stop_flag = &g_stop_requested;
     req.sampling_override = (override_sampling == JNI_TRUE);
     if (req.sampling_override) {
         req.sampling.temp = static_cast<float>(temperature);
         req.sampling.top_p = static_cast<float>(top_p);
         req.sampling.top_k = static_cast<int>(top_k);
         req.sampling.seed = static_cast<uint32_t>(seed); // -1 -> LLAMA_DEFAULT_SEED (random)
+        req.sampling.min_p = std::clamp<float>(static_cast<float>(min_p), 0.0f, 1.0f);
+        req.sampling.repeat_penalty = repeat_penalty > 0.0f ? static_cast<float>(repeat_penalty) : 1.0f;
+        req.sampling.repeat_last_n = static_cast<int>(repeat_last_n);
+        req.sampling.freq_penalty = static_cast<float>(freq_penalty);
+        req.sampling.presence_penalty = static_cast<float>(presence_penalty);
     }
 
     std::string sent_answer;

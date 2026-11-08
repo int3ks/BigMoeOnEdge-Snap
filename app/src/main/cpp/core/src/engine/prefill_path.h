@@ -87,6 +87,9 @@ public:
     uint64_t arena_routed_demand() const { return arena_ ? arena_->routed_demand() : 0; }
 
 private:
+    // What the last device graph threw, if it did (e.g. Hexagon's "fastrpc_mmap failed"); "" otherwise.
+    std::string last_error_;
+
     bool open_arena(const PrefillDeviceConfig & cfg,
                     const MoeStreamConfig & moe,
                     const std::vector<std::vector<ggml_tensor *>> & dense_per_layer,
