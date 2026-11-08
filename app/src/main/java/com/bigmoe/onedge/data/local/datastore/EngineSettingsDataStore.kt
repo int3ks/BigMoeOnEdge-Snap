@@ -38,7 +38,8 @@ const val CACHE_AUTO_MB = -1
 
 private const val EXPORT_FORMAT = "bigmoeonedge2-settings"
 /** Not exported or imported: this device's file paths and secrets. */
-private val EXPORT_SKIP = setOf("last_model_path", "last_mmproj_path", "brave_api_key", "server_api_key")
+// The external-tools list is left out too: its headers may hold API keys.
+private val EXPORT_SKIP = setOf("last_model_path", "last_mmproj_path", "brave_api_key", "server_api_key", "external_tools_json")
 const val CACHE_OFF_MB = 0
 
 /**
@@ -298,11 +299,6 @@ class EngineSettingsDataStore(private val context: Context) {
         val FREQUENCY_PENALTY = floatPreferencesKey("frequency_penalty")
         val PRESENCE_PENALTY = floatPreferencesKey("presence_penalty")
         val SEED = intPreferencesKey("sampling_seed")
-        val MIN_P = floatPreferencesKey("min_p")
-        val REPEAT_PENALTY = floatPreferencesKey("repeat_penalty")
-        val REPEAT_LAST_N = intPreferencesKey("repeat_last_n")
-        val FREQUENCY_PENALTY = floatPreferencesKey("frequency_penalty")
-        val PRESENCE_PENALTY = floatPreferencesKey("presence_penalty")
         val CACHE_MB = intPreferencesKey("cache_mb_v2")
         val CACHE_CEIL_MB = intPreferencesKey("cache_ceil_mb")
         val CACHE_FLOOR_MB = intPreferencesKey("cache_floor_mb")
@@ -395,11 +391,6 @@ class EngineSettingsDataStore(private val context: Context) {
             frequencyPenalty = p[Keys.FREQUENCY_PENALTY] ?: d.frequencyPenalty,
             presencePenalty = p[Keys.PRESENCE_PENALTY] ?: d.presencePenalty,
             seed = p[Keys.SEED] ?: d.seed,
-            minP = p[Keys.MIN_P] ?: d.minP,
-            repeatPenalty = p[Keys.REPEAT_PENALTY] ?: d.repeatPenalty,
-            repeatLastN = p[Keys.REPEAT_LAST_N] ?: d.repeatLastN,
-            frequencyPenalty = p[Keys.FREQUENCY_PENALTY] ?: d.frequencyPenalty,
-            presencePenalty = p[Keys.PRESENCE_PENALTY] ?: d.presencePenalty,
             cacheMb = p[Keys.CACHE_MB] ?: d.cacheMb,
             cacheCeilMb = p[Keys.CACHE_CEIL_MB] ?: d.cacheCeilMb,
             cacheFloorMb = p[Keys.CACHE_FLOOR_MB] ?: d.cacheFloorMb,
@@ -549,11 +540,6 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateFrequencyPenalty(v: Float) = set(Keys.FREQUENCY_PENALTY, v.coerceIn(-2f, 2f))
     suspend fun updatePresencePenalty(v: Float) = set(Keys.PRESENCE_PENALTY, v.coerceIn(-2f, 2f))
     suspend fun updateSeed(v: Int) = set(Keys.SEED, v.coerceAtLeast(-1))
-    suspend fun updateMinP(v: Float) = set(Keys.MIN_P, v.coerceIn(0f, 1f))
-    suspend fun updateRepeatPenalty(v: Float) = set(Keys.REPEAT_PENALTY, v.coerceIn(0.5f, 2f))
-    suspend fun updateRepeatLastN(v: Int) = set(Keys.REPEAT_LAST_N, v.coerceIn(-1, 8192))
-    suspend fun updateFrequencyPenalty(v: Float) = set(Keys.FREQUENCY_PENALTY, v.coerceIn(-2f, 2f))
-    suspend fun updatePresencePenalty(v: Float) = set(Keys.PRESENCE_PENALTY, v.coerceIn(-2f, 2f))
     suspend fun updateCacheMb(v: Int) = set(Keys.CACHE_MB, v.coerceAtLeast(CACHE_AUTO_MB))
     suspend fun updateCacheCeilMb(v: Int) = set(Keys.CACHE_CEIL_MB, v.coerceAtLeast(0))
     suspend fun updateCacheFloorMb(v: Int) = set(Keys.CACHE_FLOOR_MB, v.coerceAtLeast(0))
