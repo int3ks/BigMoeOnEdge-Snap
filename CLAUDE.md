@@ -26,7 +26,7 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
 * Engine core: `app/src/main/cpp/core` = upstream BigMoeOnEdge **0.28 baseline + local patches + ported pieces**
   (engine version `0.28.1` in `app/src/main/cpp/CMakeLists.txt`). It is NOT upstream 0.38/0.39 — upstream rebuilt a
   lot after 0.29 (planner, `--auto`, server library); we port single features. See `docs/UPSTREAM_WATCH.md`.
-* llama.cpp: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-2810` (396b6c4), local changes `patches/0007`.
+* llama.cpp: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-0411` (7ac98f4, upstream v0.9.0), local changes `patches/0007`.
 * JNI: `app/src/main/cpp/native-bridge.cpp` ↔ `core/EngineNativeBridge.kt` ↔ `core/EngineBackend.kt` ↔
   `core/EngineController.kt` (load/generate/state; `EngineState`, `LoadConfig`, `ModelInfo` in `core/EngineTypes.kt`).
 
@@ -80,4 +80,8 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
 * MTP drafters in the model folder are recognised by name only (`mtp-…`, `-mtp-`, `_mtp_`, `-shared-mtp`);
   size-based detection was suggested.
 * Notion wiki (DE + EN pages "BigMoeOnEdge²") is not updated with the features since ~v0.6.30.
-* Upstream watch: last reviewed Helldez/BigMoeOnEdge `cb78bfe` (after 0.39.0), BigMoeOnEdge+ `b1e52c6` (0.6.0).
+* Upstream watch: last reviewed Helldez/BigMoeOnEdge `00ab372` (0.40.2), BigMoeOnEdge+ `5d5aa97` (0.6.5), llama.cpp
+  `bmoe/expert-ready-hook-0411`. Plus 0.6.5 was merged by a 3-way merge per file (base 0.6.0); not taken: AutoSaveStore
+  per-model saves, response_format/JSON schema, nativeTelemetry. CI only assembles; unit tests are not run there.
+* Not ported yet from upstream: `image-max-tokens` (Snap scales pictures to Settings → image size instead), the
+  checkpoint after an image (Snap clears the KV around image turns).

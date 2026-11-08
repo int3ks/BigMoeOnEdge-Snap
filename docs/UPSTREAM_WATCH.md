@@ -6,9 +6,9 @@ moves the "last reviewed" commits forward. Nothing is taken over without the own
 
 | Upstream | Where | Last reviewed | Taken over |
 | --- | --- | --- | --- |
-| BigMoeOnEdge (engine + app) | https://github.com/Helldez/BigMoeOnEdge, default branch | `cb78bfe` (2026-10-31, after 0.39.0) | chat_parse / thinking_control / llama_backend / to_common_batch API adaptations; MTP head from a file of its own for any architecture; #446 prediction-worker teardown fix; context checkpoints (0.36); expert layout read from the file (#266, 0.34; registry kept for known architectures); cache brake (0.34); #348 read past end of file |
-| Helldez llama.cpp (expert-ready hook fork) | https://github.com/Helldez/llama.cpp, branches `bmoe/*` | `bmoe/expert-ready-hook-2810` @ `396b6c4` | vendored in `app/src/main/cpp/third_party/llama.cpp` (local changes: `patches/0007`) |
-| BigMoeOnEdge+ (the app this fork is built from) | https://github.com/hamodexd217/BigMoeOnEdge-plus, default branch | `b1e52c6` (0.6.0) | everything up to this commit |
+| BigMoeOnEdge (engine + app) | https://github.com/Helldez/BigMoeOnEdge, default branch | `00ab372` (2026-11-08, 0.40.2) | chat_parse / thinking_control / llama_backend / to_common_batch API adaptations; MTP head from a file of its own for any architecture; #446 prediction-worker teardown fix; context checkpoints (0.36); expert layout read from the file (#266, 0.34; registry kept for known architectures); cache brake (0.34); #348 read past end of file; #495 Stop before the first token (as a bridge-owned stop flag); #486 Stop inside the image encoder |
+| Helldez llama.cpp (expert-ready hook fork) | https://github.com/Helldez/llama.cpp, branches `bmoe/*` | `bmoe/expert-ready-hook-0411` @ `7ac98f4` | vendored in `app/src/main/cpp/third_party/llama.cpp` (local changes: `patches/0007-llama-cpp-local-on-0411.patch`) |
+| BigMoeOnEdge+ (the app this fork is built from) | https://github.com/hamodexd217/BigMoeOnEdge-plus, default branch | `5d5aa97` (0.6.5) | everything up to 0.6.0; from 0.6.5 everything except the per-model auto-tune saves (AutoSaveStore / ModelProfileIdentity), response_format / JSON schema on the API, the telemetry JNI and the minimal live row |
 
 ## Notes for the check
 
@@ -23,4 +23,6 @@ The engine in `app/src/main/cpp/core` is upstream 0.28.0 plus this fork's patche
 (engine version `0.28.1` in `app/src/main/cpp/CMakeLists.txt`). Upstream rebuilt large parts after 0.29 (planner and
 `--auto`, measured planning, device expert cache, server as a library), so newer upstream work is ported piece by
 piece, not merged. Not taken over (not useful on the tablet or not applicable without the planner): the planner,
-GPU/CUDA/ROCm/Metal device caches, the desktop app, the server agent and web UI, thinking off by default.
+GPU/CUDA/ROCm/Metal device caches, the desktop app, the server agent and web UI, thinking off by default, the
+knob trial (#492), `devices=all` op placement (#491; Snap lists only the prefill device). Open: `image-max-tokens` and
+the checkpoint after an image (#486; Snap scales pictures in the app and clears the KV around image turns).
