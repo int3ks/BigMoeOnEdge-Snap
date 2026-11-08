@@ -1,0 +1,40 @@
+name: Unit tests
+
+# JVM unit tests of the app (app/src/test). Not part of the APK build; run on demand (or when this file changes).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/unit-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew --no-daemon :app:testDebugUnitTest -PbmoePrebuiltNative=true 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+            grep -E '^e: |error:|What went wrong|FAILED|Exception' -A2 "$RUNNER_TEMP/gradle.log" | head -60 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
+      - name: Test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
