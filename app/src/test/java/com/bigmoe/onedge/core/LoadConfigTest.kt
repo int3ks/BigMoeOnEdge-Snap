@@ -157,7 +157,7 @@ class LoadConfigTest {
         val fake = FakeEngineBackend()
         var asked = 0
         val file = java.io.File.createTempFile("m", ".gguf").apply { deleteOnExit() }
-        val c = EngineController({ fake }, kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) { asked++; "/x/session.csv" }
+        val c = EngineController({ fake }, kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler), csvPathProvider = { asked++; "/x/session.csv" })
         c.loadModel(file.path, d.copy(metricsCsv = false))
         assertEquals(0, asked)
         assertEquals(null, fake.lastCsvPath)

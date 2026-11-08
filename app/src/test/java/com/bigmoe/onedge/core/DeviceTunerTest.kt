@@ -8,7 +8,7 @@ import org.junit.Test
 
 class DeviceTunerTest {
 
-    private fun climb(values: List<Int>, start: Int, speed: (Int) -> Double?, allowed: (Int) -> Boolean = { true }): List<TunePoint> =
+    private fun climb(values: List<Int>, start: Int, allowed: (Int) -> Boolean = { true }, speed: (Int) -> Double?): List<TunePoint> =
         runBlocking { DeviceTuner.climb(values, start, allowed) { v -> TunePoint(v, speed(v)) } }
 
     @Test
@@ -38,7 +38,7 @@ class DeviceTunerTest {
 
     @Test
     fun climbStopsAtFailuresAndNotAllowedValues() {
-        val pts = climb(listOf(500, 1000, 2000, 4000), 1000, { if (it == 500) null else it / 1000.0 }, allowed = { it <= 2000 })
+        val pts = climb(listOf(500, 1000, 2000, 4000), 1000, allowed = { it <= 2000 }) { if (it == 500) null else it / 1000.0 }
         assertEquals(2000, DeviceTuner.best(pts, 1000))
         assertTrue(pts.none { it.value == 4000 })
     }

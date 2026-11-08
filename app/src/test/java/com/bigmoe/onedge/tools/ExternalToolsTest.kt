@@ -2,7 +2,7 @@ package com.bigmoe.onedge.tools
 
 import com.bigmoe.onedge.core.AgentController
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
-import com.sun.net.httpserver.HttpServer
+import com.bigmoe.onedge.testutil.HttpServer
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
