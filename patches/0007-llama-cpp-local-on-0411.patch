@@ -1,10 +1,8 @@
-diff --git a/common/speculative.cpp b/common/speculative.cpp
-index 4305ac6a..a4fb0a83 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
-@@ -1577,7 +1577,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
-         llama_set_embeddings_nextn(ctx_tgt, true, /*masked*/ false);
-         llama_set_embeddings_nextn(ctx_dft, true, /*masked*/ true);
+@@ -1613,7 +1613,9 @@
+             }
+         }
  
 -        is_mem_shared = llama_get_ctx_other(ctx_dft) == ctx_tgt;
 +        char arch[64] = {0};
@@ -12,12 +10,10 @@ index 4305ac6a..a4fb0a83 100644
 +        is_mem_shared = llama_get_ctx_other(ctx_dft) == ctx_tgt && std::strcmp(arch, "gemma4-assistant") == 0;
          chain_heads   = n_mtp_layers > 1 && !is_mem_shared;
  
-         if (chain_heads) {
-diff --git a/conversion/bailingmoe3.py b/conversion/bailingmoe3.py
-index 36b93156..6f016d12 100644
+         llama_set_embeddings_nextn(ctx_tgt, true, /*masked*/ is_mem_shared);
 --- a/conversion/bailingmoe3.py
 +++ b/conversion/bailingmoe3.py
-@@ -123,9 +123,9 @@ class BailingMoeV3Model(TextModel):
+@@ -123,9 +123,9 @@
  
          if is_mtp and cls.no_mtp:
              return None
@@ -29,11 +25,9 @@ index 36b93156..6f016d12 100644
              return None
  
          return super().filter_tensors((name, gen))
-diff --git a/conversion/base.py b/conversion/base.py
-index d8420eb3..cea91836 100644
 --- a/conversion/base.py
 +++ b/conversion/base.py
-@@ -121,6 +121,7 @@ class ModelBase:
+@@ -122,6 +122,7 @@
      supports_mtp_export: bool = False
      mtp_only: bool = False
      no_mtp: bool = False
@@ -41,11 +35,9 @@ index d8420eb3..cea91836 100644
  
      def __init__(self, dir_model: Path, ftype: gguf.LlamaFileType, fname_out: Path, *, is_big_endian: bool = False,
                   use_temp_file: bool = False, eager: bool = False,
-diff --git a/conversion/command_r.py b/conversion/command_r.py
-index 0db6eb68..e8dca186 100644
 --- a/conversion/command_r.py
 +++ b/conversion/command_r.py
-@@ -131,9 +131,9 @@ class Cohere2MoeModel(TextModel):
+@@ -131,9 +131,9 @@
              is_mtp = (m := re.match(r"model\.layers\.(\d+)\.", name)) is not None and int(m.group(1)) >= cls._n_main_layers
              if is_mtp and cls.no_mtp:
                  return None
@@ -57,11 +49,9 @@ index 0db6eb68..e8dca186 100644
                  return None
  
          return name, gen
-diff --git a/conversion/dots3.py b/conversion/dots3.py
-index c7ac2319..e8d3f350 100644
 --- a/conversion/dots3.py
 +++ b/conversion/dots3.py
-@@ -99,9 +99,9 @@ class Dots3NoteModel(DeepseekV2Model):
+@@ -99,9 +99,9 @@
          # --no-mtp: drop the NextN/MTP block; --mtp: keep only that block plus the shared embeddings/norm/lm_head
          if is_mtp and cls.no_mtp:
              return None
@@ -73,11 +63,9 @@ index c7ac2319..e8d3f350 100644
              return None
  
          return name, gen
-diff --git a/conversion/glm.py b/conversion/glm.py
-index 10f3ef11..45a93abc 100644
 --- a/conversion/glm.py
 +++ b/conversion/glm.py
-@@ -138,9 +138,9 @@ class Glm4MoeModel(TextModel):
+@@ -138,9 +138,9 @@
  
          if is_mtp and cls.no_mtp:
              return None
@@ -89,7 +77,7 @@ index 10f3ef11..45a93abc 100644
              return None
  
          return name, gen
-@@ -292,9 +292,9 @@ class Glm4MoeLiteModel(DeepseekV2Model):
+@@ -292,9 +292,9 @@
              is_mtp = match is not None and int(match.group(1)) >= cls._n_main_layers
              if is_mtp and cls.no_mtp:
                  return None
@@ -101,7 +89,7 @@ index 10f3ef11..45a93abc 100644
                  return None
  
          return name, gen
-@@ -352,9 +352,9 @@ class GlmMoeDsaModel(DeepseekV2Model):
+@@ -352,9 +352,9 @@
              return None
          # --mtp: keep ONLY NextN-block tensors plus the shared embeddings/
          # norm/lm_head (so the resulting GGUF carries just the draft head).
@@ -113,11 +101,9 @@ index 10f3ef11..45a93abc 100644
              return None
  
          return name, gen
-diff --git a/conversion/qwen.py b/conversion/qwen.py
-index 5ec4ab43..8e0f8920 100644
 --- a/conversion/qwen.py
 +++ b/conversion/qwen.py
-@@ -300,6 +300,7 @@ class _QwenMtpMixin:
+@@ -309,6 +309,7 @@
      tensor_map: gguf.TensorNameMap
      no_mtp: bool
      mtp_only: bool
@@ -125,7 +111,7 @@ index 5ec4ab43..8e0f8920 100644
      _original_block_count: int | None = None
      opt_num_mtp_layers: int = 0
  
-@@ -348,7 +349,7 @@ class _QwenMtpMixin:
+@@ -357,7 +358,7 @@
              elif len(parts) == 3 and parts[1] in remapper:
                  name = f"model.layers.{cls._original_block_count}.{remapper[parts[1]]}.{parts[2]}"
          elif cls.mtp_only:
@@ -134,22 +120,20 @@ index 5ec4ab43..8e0f8920 100644
                  "model.embed_tokens.weight", "model.norm.weight", "lm_head.weight",
                  "embed_tokens.weight", "norm.weight",
              )
-diff --git a/convert_hf_to_gguf.py b/convert_hf_to_gguf.py
-index 5e263fd1..be715474 100755
 --- a/convert_hf_to_gguf.py
 +++ b/convert_hf_to_gguf.py
-@@ -125,6 +125,10 @@ def parse_args() -> argparse.Namespace:
-         "--no-nextn", "--no-mtp", dest="no_mtp", action="store_true",
+@@ -126,6 +126,10 @@
          help="Exclude NextN speculative draft tensors from the converted GGUF. Pair with --mtp or --dspark on a second run to publish target and draft as two files.",
      )
-+    parser.add_argument(
+     parser.add_argument(
 +        "--mtp-shared-embd", action="store_true",
 +        help="With --mtp, leave the token embeddings, output norm and LM head out of the draft and take them from the target model at load time. Much smaller draft, but it needs a llama.cpp new enough to read it.",
 +    )
-     parser.add_argument(
++    parser.add_argument(
          "--dspark", action="store_true",
-         help="Export only the DeepSeek-V4 DSpark draft tensors as a separate GGUF.",
-@@ -286,6 +290,12 @@ def main() -> None:
+         help="Export only the DeepSeek-V4 or Mistral Large 4 DSpark draft tensors as a separate GGUF.",
+     )
+@@ -295,6 +299,12 @@
              if args.mtp:
                  model_class.mtp_only = True
  
@@ -162,11 +146,9 @@ index 5e263fd1..be715474 100755
          model_instance = model_class(dir_model, output_type, fname_out,
                                       is_big_endian=args.bigendian, use_temp_file=args.use_temp_file,
                                       eager=args.no_lazy,
-diff --git a/include/llama.h b/include/llama.h
-index ae54e661..6889ea59 100644
 --- a/include/llama.h
 +++ b/include/llama.h
-@@ -503,6 +503,10 @@ extern "C" {
+@@ -504,6 +504,10 @@
  
      LLAMA_API void llama_detach_threadpool(struct llama_context * ctx);
  
@@ -177,11 +159,9 @@ index ae54e661..6889ea59 100644
      typedef void (*llama_model_set_tensor_data_t)(struct ggml_tensor * tensor, void * userdata);
  
      // Create a new model from GGUF metadata as well as a function to set the tensor data
-diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index 33ad7845..b15c9ab8 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
-@@ -245,7 +245,7 @@ llama_context::llama_context(
+@@ -253,7 +253,7 @@
          cparams.ctx_other = params.ctx_other;
      }
  
@@ -190,7 +170,7 @@ index 33ad7845..b15c9ab8 100644
          if (model.tok_embd == nullptr || model.output == nullptr) {
              if (params.ctx_other == nullptr) {
                  throw std::runtime_error(model.arch_name() + " requires ctx_other to be set (this warning is normal during memory fitting)");
-@@ -2751,9 +2751,20 @@ void llama_context::sched_graph_realloc(ggml_backend_sched_t sched, ggml_cgraph
+@@ -2951,9 +2951,20 @@
              lctx->n_reallocs_same, lctx->n_reallocs_diff);
  }
  
