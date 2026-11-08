@@ -1,6 +1,6 @@
 package com.bigmoe.onedge.tools
 
-import com.sun.net.httpserver.HttpServer
+import com.bigmoe.onedge.testutil.HttpServer
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
