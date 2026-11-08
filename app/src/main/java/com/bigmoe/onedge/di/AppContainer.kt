@@ -61,7 +61,8 @@ class AppContainer(private val context: Context) {
             // for generation/model metadata so existing v2 chats remain intact.
             .addMigrations(
                 com.bigmoe.onedge.data.local.MIGRATION_2_3,
-                com.bigmoe.onedge.data.local.MIGRATION_3_4
+                com.bigmoe.onedge.data.local.MIGRATION_3_4,
+                com.bigmoe.onedge.data.local.MIGRATION_4_5
             )
             .fallbackToDestructiveMigration()
             .build()

@@ -9,6 +9,9 @@ import com.bigmoe.onedge.tools.ToolManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+/** What the running turn is doing right now (drives the live status line). */
+enum class GenerationPhase { PROMPT, THINKING, ANSWERING, TOOL }
+
 /** Application-owned owner of the single active agent generation. */
 class GenerationManager(
     private val context: Context,
@@ -52,7 +55,20 @@ class GenerationManager(
         /** Cancel was pressed; the chat shows "Stopping…" until the tool has ended. */
         val toolCancelling: Boolean = false,
         /** "Termux: pip install …" of the running call, shown again once a pending approval is given. */
-        val toolLabel: String? = null
+        val toolLabel: String? = null,
+        // ---- live timing from BigMoeOnEdge+ (see AgentEvent.RoundStats / ToolsFinished) ----
+        val phase: GenerationPhase = GenerationPhase.PROMPT,
+        /** Wall clock (ms) when [phase] began; the UI ticks the elapsed time from it. */
+        val phaseStartedAt: Long = 0L,
+        /** Names of the tools running while [phase] is TOOL. */
+        val toolNames: List<String> = emptyList(),
+        /** Prompt tokens read and time taken by the last finished round (0 = none finished yet). */
+        val prefillTokens: Int = 0,
+        val prefillMs: Long = 0L,
+        /** How long the model reasoned in this turn (null = it did not, or not finished yet). */
+        val thinkingMs: Long? = null,
+        /** How long the last tool round took. */
+        val toolMs: Long? = null
     ) {
         /** The new token count, with the live rate measured from the first generated token. */
         fun withTokens(tokens: Int, now: Long = System.currentTimeMillis()): State {
@@ -107,7 +123,7 @@ class GenerationManager(
         val total = (engineController.state.value as? EngineState.Ready)?.info?.nCtx ?: 0
         terminalState = "FINISHED"
         lastAssistantMessageId = null
-        _state.value = State(session.id, session.title, true, null, contextTotal = total)
+        _state.value = State(session.id, session.title, true, null, contextTotal = total, phaseStartedAt = started)
         generationJob = scope.launch {
             GenerationForegroundService.start(context, session.id)
             // Batch streaming UI snapshots to roughly 30 Hz. Text was previously concatenated and
@@ -143,10 +159,12 @@ class GenerationManager(
                     agentController.runAgentLoop(request, sink).collect { event ->
                         when (event) {
                             is AgentEvent.Text -> {
+                                if (_state.value.phase != GenerationPhase.ANSWERING) { flushPending(); enterPhase(GenerationPhase.ANSWERING) }
                                 pendingText.append(event.delta)
                                 flushIfDue()
                             }
                             is AgentEvent.Reasoning -> {
+                                if (_state.value.phase != GenerationPhase.THINKING) { flushPending(); enterPhase(GenerationPhase.THINKING) }
                                 pendingReasoning.append(event.delta)
                                 flushIfDue()
                             }
@@ -158,7 +176,11 @@ class GenerationManager(
                                 // Keep status, tool and persistence boundaries ordered after all pending text.
                                 flushPending()
                                 when (event) {
-                                    AgentEvent.GenerationStarted -> update { copy(startedAt = startedAt ?: System.currentTimeMillis()) }
+                                    AgentEvent.GenerationStarted -> update {
+                                        val now = System.currentTimeMillis()
+                                        // A new round: reading the prompt again.
+                                        copy(startedAt = startedAt ?: now, phase = GenerationPhase.PROMPT, phaseStartedAt = now, toolNames = emptyList())
+                                    }
                                     is AgentEvent.ToolStarted -> update {
                                         val now = System.currentTimeMillis()
                                         val label = toolManager.describeCall(event.name, event.arguments) + "…"
@@ -169,7 +191,10 @@ class GenerationManager(
                                             liveDetail = null, liveOutput = null, toolRunning = true,
                                             toolStartedAt = now, toolElapsedMs = 0L, lastOutputAt = now, toolQuietMs = 0L,
                                             toolLimitMs = toolManager.limitSecondsOf(event.name, event.arguments)?.let { it * 1000L },
-                                            toolCancelling = false
+                                            toolCancelling = false,
+                                            phase = GenerationPhase.TOOL,
+                                            phaseStartedAt = if (phase == GenerationPhase.TOOL) phaseStartedAt else now,
+                                            toolNames = if (phase == GenerationPhase.TOOL) (toolNames + event.name).distinct() else listOf(event.name)
                                         )
                                     }
                                     is AgentEvent.ToolOutput -> update {
@@ -181,14 +206,19 @@ class GenerationManager(
                                         if (toolCancelling) copy(liveDetail = lines.getOrNull(1))
                                         else copy(liveStatus = lines[0], liveDetail = lines.getOrNull(1))
                                     }
-                                    AgentEvent.ToolsFinished -> update {
+                                    is AgentEvent.ToolsFinished -> update {
                                         copy(
+                                            toolMs = event.ms, phase = GenerationPhase.PROMPT,
+                                            phaseStartedAt = System.currentTimeMillis(), toolNames = emptyList(),
                                             liveStatus = "Reading the result…",
                                             liveDetail = null, liveOutput = null, toolRunning = false, toolStartedAt = null,
                                             toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false
                                         )
                                     }
                                     is AgentEvent.ToolWriting -> update { copy(liveStatus = event.label, liveDetail = null) }
+                                    is AgentEvent.RoundStats -> update {
+                                        copy(prefillTokens = event.prefillTokens, prefillMs = event.prefillMs, thinkingMs = event.thinkingMs ?: thinkingMs)
+                                    }
                                     is AgentEvent.Notice -> {
                                         terminalState = when {
                                             event.text == AgentController.NOTE_STOPPED -> "CANCELLED"
@@ -271,6 +301,16 @@ class GenerationManager(
             }
         }
         return true
+    }
+
+    /** Moves to [next], remembering how long the reasoning phase lasted when it ends. */
+    private fun enterPhase(next: GenerationPhase) = update {
+        val now = System.currentTimeMillis()
+        copy(
+            thinkingMs = if (phase == GenerationPhase.THINKING && next != GenerationPhase.THINKING) now - phaseStartedAt else thinkingMs,
+            phase = next,
+            phaseStartedAt = now
+        )
     }
 
     fun updateTokenProgress(generatedTokens: Int, contextUsed: Int? = null) = update {

@@ -99,7 +99,13 @@ data class LoadConfig(
     /** Retains BigMoeOnEdge+ legacy support for small, potentially thrashing cache budgets. */
     val forceCache: Boolean = true,
     /** Per model (Models page), filled in by EngineController at load; not an app-wide setting. */
-    val kvCacheType: KvCacheType = KvCacheType.F16
+    val kvCacheType: KvCacheType = KvCacheType.F16,
+    // Extra sampler stages (neutral defaults = exactly the old chain). Wire format: F_MIN_P.. / I_REPEAT_LAST_N.
+    val minP: Float = 0f,
+    val repeatPenalty: Float = 1f,
+    val repeatLastN: Int = 64,
+    val frequencyPenalty: Float = 0f,
+    val presencePenalty: Float = 0f
 ) {
     /** One-batch prefill for any prompt that fits the context, like the engine's own session_config_from. */
     val nBatch: Int get() = nCtx
@@ -131,16 +137,21 @@ data class LoadConfig(
         if (dropRenorm) 1 else 0, if (dropInPrefill) 1 else 0,
         if (predictionProbe) 1 else 0, if (loadAllExpertsForBenchmark) 1 else 0,
         decisionPrefixCache.code, if (forceCache) 1 else 0,
-        kvCacheType.code
+        kvCacheType.code,
+        repeatLastN.coerceIn(-1, 8192)
     )
 
-    fun toFloatArray(): FloatArray = floatArrayOf(temperature, topP)
+    fun toFloatArray(): FloatArray = floatArrayOf(
+        temperature, topP,
+        minP.coerceIn(0f, 1f), repeatPenalty.coerceIn(0.5f, 2f),
+        frequencyPenalty.coerceIn(-2f, 2f), presencePenalty.coerceIn(-2f, 2f)
+    )
 
     companion object {
         const val UBATCH = 512
         /** Length of [toIntArray]; must equal I_COUNT in native-bridge.cpp. */
-        const val INT_COUNT = 45
-        const val FLOAT_COUNT = 2
+        const val INT_COUNT = 46
+        const val FLOAT_COUNT = 6
     }
 }
 
@@ -287,7 +298,9 @@ data class GenerationRequest(
      * "" = none. The engine ignores it on turns where reasoning is expected (think on, or a model that always reasons).
      */
     val toolGrammar: String = "",
-    val toolGrammarTrigger: String = ""
+    val toolGrammarTrigger: String = "",
+    /** The chat's current sampling, sent with every turn so a change needs no reload; null = the load-time sampler. */
+    val sampling: SamplingOverride? = null
 )
 
 

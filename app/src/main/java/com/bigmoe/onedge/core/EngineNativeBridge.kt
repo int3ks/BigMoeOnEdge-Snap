@@ -139,6 +139,17 @@ class EngineNativeBridge {
         toolGrammar: ByteArray,
         /** UTF-8 literal word that switches the lazy grammar on (e.g. "<tool_call>"). */
         toolGrammarTrigger: ByteArray,
+        /** false = the sampler fixed at load; true = the values below for this turn. */
+        overrideSampling: Boolean,
+        temperature: Float,
+        topP: Float,
+        topK: Int,
+        seed: Int,
+        minP: Float,
+        repeatPenalty: Float,
+        repeatLastN: Int,
+        frequencyPenalty: Float,
+        presencePenalty: Float,
         callback: NativeGenerationCallback
     ): Boolean
 
@@ -160,6 +171,11 @@ class EngineNativeBridge {
         topP: Float,
         topK: Int,
         seed: Int,
+        minP: Float,
+        repeatPenalty: Float,
+        repeatLastN: Int,
+        frequencyPenalty: Float,
+        presencePenalty: Float,
         callback: NativeChatCallback
     ): Boolean
 

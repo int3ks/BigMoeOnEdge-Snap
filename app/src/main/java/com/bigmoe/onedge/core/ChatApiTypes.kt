@@ -6,7 +6,15 @@ data class SamplingOverride(
     val topP: Float,
     val topK: Int,
     /** -1 = random. */
-    val seed: Int = -1
+    val seed: Int = -1,
+    /** Drop tokens below this fraction of the best one's probability. 0 = off. */
+    val minP: Float = 0f,
+    /** > 1 discourages repeating recent tokens. 1 = off. */
+    val repeatPenalty: Float = 1f,
+    /** Tokens the penalties look at. 0 = off, -1 = the whole context. */
+    val repeatLastN: Int = 64,
+    val frequencyPenalty: Float = 0f,
+    val presencePenalty: Float = 0f
 )
 
 /**

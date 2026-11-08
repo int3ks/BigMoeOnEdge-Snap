@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +65,8 @@ import com.bigmoe.onedge.ui.theme.AppTheme
 import com.bigmoe.onedge.ui.ContextMenuAt
 import com.bigmoe.onedge.ui.contextMenuTrigger
 import com.bigmoe.onedge.ui.rememberContextMenuState
+import com.bigmoe.onedge.ui.theme.appSurfaceModifier
+import com.bigmoe.onedge.data.local.datastore.AppVisualStyle
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -74,12 +77,18 @@ fun ChatMessageBubble(
     isStreaming: Boolean = false,
     reasoning: String? = null,
     isReasoningStreaming: Boolean = false,
+    /** How long the reasoning took (known once it ended), shown as "Thought for 18 s". */
+    thinkingMs: Long? = null,
+    /** While the model is still thinking: when it started, so the header can count up. */
+    thinkingStartedAt: Long? = null,
     toolCalls: List<String> = emptyList(),
     artifacts: List<ArtifactModel> = emptyList(),
     onOpenArtifact: (ArtifactModel) -> Unit = {},
     stats: String? = null,
     note: String? = null,
     onOpenCodeArtifact: (language: String, code: String) -> Unit = { _, _ -> },
+    nativeUiEnabled: Boolean = false,
+    onNativeUiAction: (String) -> Unit = {},
     /** Long-press menu: Edit (user messages only). Null hides the entry. */
     onEdit: (() -> Unit)? = null,
     /** Long-press menu and the Copy button under assistant messages. Copies the complete raw message. */
@@ -124,6 +133,8 @@ fun ChatMessageBubble(
             ThinkingBlock(
                 reasoning = reasoning,
                 isStreaming = isReasoningStreaming,
+                thinkingMs = thinkingMs,
+                thinkingStartedAt = thinkingStartedAt,
                 modifier = Modifier.padding(bottom = 6.dp)
             )
         }
@@ -140,7 +151,7 @@ fun ChatMessageBubble(
             ) {
               Surface(
                 shape = bubbleShape,
-                color = bubbleColor,
+                color = if (AppTheme.visualStyle == AppVisualStyle.SOLID) bubbleColor else Color.Transparent,
                 modifier = Modifier
                     .then(
                         if (isUser) {
@@ -153,6 +164,7 @@ fun ChatMessageBubble(
                                 .wrapContentHeight(Alignment.Top)
                         }
                     )
+                    .then(if (AppTheme.visualStyle == AppVisualStyle.SOLID) Modifier else appSurfaceModifier(bubbleShape, bubbleColor, strong = true))
                     .then(if (hasMenu) Modifier.contextMenuTrigger(menu).combinedClickable(onClick = {}, onLongClick = { menu.open() }) else Modifier)
               ) {
                // The menu opens where the bubble was right-clicked or long-pressed; this Box shares the bubble's origin.
@@ -166,7 +178,9 @@ fun ChatMessageBubble(
                         text = text,
                         textColor = textColor,
                         isStreaming = isStreaming,
-                        onOpenAsArtifact = onOpenCodeArtifact
+                        onOpenAsArtifact = onOpenCodeArtifact,
+                        nativeUiEnabled = nativeUiEnabled,
+                        onNativeUiAction = onNativeUiAction
                     )
                     // No separate block cursor: it appeared on its own line beneath short streamed replies.
                     // Live text updates already indicate progress without adding a stray rectangle.
@@ -234,7 +248,7 @@ fun ChatMessageBubble(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surface)
+                            .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
                             .clickable(onClick = onCopy)
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
@@ -257,7 +271,7 @@ fun ChatMessageBubble(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surface)
+                            .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Icon(
@@ -340,7 +354,7 @@ private fun sourceLabel(url: String): String = runCatching {
 
 /** A tool result fed back to the model. Collapsed to a few lines by default. */
 @Composable
-fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
+fun ToolResultCard(body: String, modifier: Modifier = Modifier, toolMs: Long? = null) {
     var expanded by remember { mutableStateOf(false) }
     val title = remember(body) { toolResultTitle(body) }
     Column(
@@ -349,10 +363,14 @@ fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.Start
     ) {
+        val toolShape = RoundedCornerShape(14.dp)
+        val toolStyled = AppTheme.visualStyle != AppVisualStyle.SOLID
         Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.widthIn(max = 320.dp)
+            shape = toolShape,
+            color = if (toolStyled) Color.Transparent else MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .then(if (toolStyled) appSurfaceModifier(toolShape, MaterialTheme.colorScheme.surface) else Modifier)
         ) {
             Column(
                 modifier = Modifier
@@ -371,7 +389,7 @@ fun ToolResultCard(body: String, modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = title,
+                        text = if (toolMs != null && toolMs > 0L) "$title · ${formatDuration(toolMs)}" else title,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -444,7 +462,7 @@ private fun InfoChip(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .then(appSurfaceModifier(RoundedCornerShape(12.dp), MaterialTheme.colorScheme.surface))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
@@ -470,14 +488,20 @@ private fun InfoChip(
 private fun ThinkingBlock(
     reasoning: String,
     isStreaming: Boolean,
+    thinkingMs: Long? = null,
+    thinkingStartedAt: Long? = null,
     modifier: Modifier = Modifier
 ) {
+    val liveElapsed = if (isStreaming) rememberElapsedSince(thinkingStartedAt) else null
     var isExpanded by remember(isStreaming) { mutableStateOf(isStreaming) }
 
+    val thinkShape = RoundedCornerShape(14.dp)
+    val thinkStyled = AppTheme.visualStyle != AppVisualStyle.SOLID
     Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
+        shape = thinkShape,
+        color = if (thinkStyled) Color.Transparent else MaterialTheme.colorScheme.surface,
         modifier = modifier.widthIn(max = 320.dp)
+            .then(if (thinkStyled) appSurfaceModifier(thinkShape, MaterialTheme.colorScheme.surface) else Modifier)
     ) {
         Column(
             modifier = Modifier
@@ -493,7 +517,12 @@ private fun ThinkingBlock(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (isStreaming) "Thinking…" else "Thinking",
+                    text = when {
+                        isStreaming && liveElapsed != null -> "Thinking… ${formatDuration(liveElapsed)}"
+                        isStreaming -> "Thinking…"
+                        thinkingMs != null && thinkingMs > 0L -> "Thought for ${formatDuration(thinkingMs)}"
+                        else -> "Thinking"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary
                 )

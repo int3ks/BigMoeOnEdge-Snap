@@ -96,7 +96,13 @@ object RequestResolver {
                         temperature = (p.temperature ?: (loaded?.temperature ?: 0.7f).toDouble()).toFloat().coerceIn(0f, 2f),
                         topP = (p.topP ?: (loaded?.topP ?: 0.95f).toDouble()).toFloat().coerceIn(0.01f, 1f),
                         topK = (p.topK ?: loaded?.topK ?: 40).coerceIn(0, 200),
-                        seed = p.seed ?: -1
+                        seed = p.seed ?: -1,
+                        // The API has no penalty fields of its own here: keep the ones set in the app.
+                        minP = loaded?.minP ?: 0f,
+                        repeatPenalty = loaded?.repeatPenalty ?: 1f,
+                        repeatLastN = loaded?.repeatLastN ?: 64,
+                        frequencyPenalty = loaded?.frequencyPenalty ?: 0f,
+                        presencePenalty = loaded?.presencePenalty ?: 0f
                     )
                 }
             }

@@ -51,7 +51,9 @@ interface EngineBackend {
         callback: NativeGenerationCallback,
         /** See GenerationRequest.toolGrammar; "" = no grammar. */
         toolGrammar: String = "",
-        toolGrammarTrigger: String = ""
+        toolGrammarTrigger: String = "",
+        /** See GenerationRequest.sampling; null = the sampler fixed at load. */
+        sampling: SamplingOverride? = null
     )
 
     /**
@@ -126,8 +128,10 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
         images: List<ImageData>,
         callback: NativeGenerationCallback,
         toolGrammar: String,
-        toolGrammarTrigger: String
+        toolGrammarTrigger: String,
+        sampling: SamplingOverride?
     ) {
+        val s = sampling
         val flat = ArrayList<ByteArray>(historyFlat.size * 2)
         for (t in historyFlat) {
             flat.add(encodeUtf8(t.role))
@@ -144,6 +148,16 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
             imageData = Array(images.size) { images[it].rgb },
             toolGrammar = encodeUtf8(toolGrammar),
             toolGrammarTrigger = encodeUtf8(toolGrammarTrigger),
+            overrideSampling = s != null,
+            temperature = s?.temperature ?: 0f,
+            topP = s?.topP ?: 1f,
+            topK = s?.topK ?: 0,
+            seed = s?.seed ?: -1,
+            minP = s?.minP ?: 0f,
+            repeatPenalty = s?.repeatPenalty ?: 1f,
+            repeatLastN = s?.repeatLastN ?: 0,
+            frequencyPenalty = s?.frequencyPenalty ?: 0f,
+            presencePenalty = s?.presencePenalty ?: 0f,
             callback = callback
         )
     }
@@ -162,6 +176,11 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
             topP = s?.topP ?: 1f,
             topK = s?.topK ?: 0,
             seed = s?.seed ?: -1,
+            minP = s?.minP ?: 0f,
+            repeatPenalty = s?.repeatPenalty ?: 1f,
+            repeatLastN = s?.repeatLastN ?: 0,
+            frequencyPenalty = s?.frequencyPenalty ?: 0f,
+            presencePenalty = s?.presencePenalty ?: 0f,
             callback = callback
         )
     }

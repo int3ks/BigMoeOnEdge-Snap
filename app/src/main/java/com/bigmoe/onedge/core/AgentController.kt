@@ -49,7 +49,13 @@ data class NewMessage(
     val reasoning: String? = null,
     val stats: GenerationStats? = null,
     /** Shown under the bubble: "Stopped", an engine error, ... */
-    val note: String? = null
+    val note: String? = null,
+    /** Tokens the prompt processing had to read for this turn. */
+    val prefillTokens: Int? = null,
+    /** How long the model spent in its reasoning span. */
+    val thinkingMs: Long? = null,
+    /** Wall-clock time the tools of this round took (tool-result messages). */
+    val toolMs: Long? = null
 )
 
 /** Persists a message and returns its id. */
@@ -68,10 +74,16 @@ sealed interface AgentEvent {
     data class ToolProgress(val text: String) : AgentEvent
     /** The running command's output so far (its end), shown folded under the status line. */
     data class ToolOutput(val text: String) : AgentEvent
-    /** All tools of this round have finished (or were cancelled); the cancel button can go. */
-    data object ToolsFinished : AgentEvent
+    /** All tools of this round have finished (or were cancelled); the cancel button can go. [ms] is the wall-clock
+     *  time of the round (parallel calls overlap). */
+    data class ToolsFinished(val names: List<String> = emptyList(), val ms: Long = 0L) : AgentEvent
     /** The model is writing a tool call right now (the call itself is hidden from the chat), e.g. "Writing create_file: a.py". */
     data class ToolWriting(val label: String) : AgentEvent
+    /**
+     * One generation round ended: how many prompt tokens it had to read and how long that took, the decode speed,
+     * and how long the model reasoned (null when it did not).
+     */
+    data class RoundStats(val prefillTokens: Int, val prefillMs: Long, val tokensPerSecond: Double, val thinkingMs: Long?) : AgentEvent
     /** A visible, non-fatal problem (malformed call, limit reached, engine error). */
     data class Notice(val text: String) : AgentEvent
     /** The live buffers of the message that was just persisted can be cleared. */
@@ -80,7 +92,8 @@ sealed interface AgentEvent {
 }
 
 /**
- * One user turn = 1..(1+EngineSettings.agentMaxSteps) engine generations. Talks to the engine ONLY through
+ * One user turn = 1..(1+EngineSettings.agentMaxSteps) engine generations, and a model that repeats one identical call
+ * round after round is stopped early. Talks to the engine ONLY through
  * [EngineController.generate]; never builds a prompt string. See docs/prompt-and-kv-design.md and
  * docs/tool-calling.md.
  */
@@ -119,7 +132,8 @@ class AgentController(
         //           with small models that never call tools.
         val searchOn = settings.isWebSearchEnabled && toolManager.getTool("web_search") != null
         val alwaysSearch = searchOn && settings.webSearchMode == WebSearchMode.ALWAYS
-        val enabledNames = enabledToolNames(settings, toolManager.toolNames())
+        toolManager.syncExternalTools(settings.externalToolsJson)
+        val enabledNames = enabledToolNames(settings, toolManager.toolNames(), toolManager.externalToolNames())
         val toolsEnabled = enabledNames.isNotEmpty()
         (toolManager.getTool("web_search") as? WebSearchTool)?.let {
             it.braveApiKey = settings.braveApiKey
@@ -147,6 +161,8 @@ class AgentController(
         var prompt = request.prompt
         if (request.contextText.isNotBlank()) prompt += "\n\n" + request.contextText
         var toolRounds = 0
+        var lastCallSignature: String? = null
+        var identicalRounds = 0
         var engineRound = 0
         var generatedTotal = 0
 
@@ -157,14 +173,29 @@ class AgentController(
             val generatedQuery = generateSearchQuery(request, turns)
             val query = searchQueryFrom(generatedQuery).ifBlank { searchQueryFrom(request.prompt) }
             val args = org.json.JSONObject().put("query", query).toString()
+            val searchStarted = System.currentTimeMillis()
             emit(AgentEvent.ToolStarted("web_search", args))
             val result = toolManager.executeToolCall("web_search", args)
+            val searchMs = System.currentTimeMillis() - searchStarted
+            emit(AgentEvent.ToolsFinished(listOf("web_search"), searchMs))
             val wrapped = ToolProtocol.wrapResult("web_search", "Query: $query\n$result")
             // Stored as a TOOL message right after the user's message; replay merges the two user-side turns
             // with the same "\n\n" join used below, so a replayed chat looks exactly like the live one.
-            val id = sink.save(NewMessage(MessageRole.TOOL, wrapped))
+            val id = sink.save(NewMessage(MessageRole.TOOL, wrapped, toolMs = searchMs))
             emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
             prompt = prompt + "\n\n" + wrapped
+            if (settings.imageSearchEnabled && settings.autoImageSearchAfterWebSearch && !stopRequested) {
+                val imageArgs = org.json.JSONObject().put("query", query).toString()
+                val imageStarted = System.currentTimeMillis()
+                emit(AgentEvent.ToolStarted("image_search", imageArgs))
+                val imageResult = toolManager.executeToolCall("image_search", imageArgs)
+                val imageMs = System.currentTimeMillis() - imageStarted
+                emit(AgentEvent.ToolsFinished(listOf("image_search"), imageMs))
+                val imageWrapped = ToolProtocol.wrapResult("image_search", "Query: $query\n$imageResult")
+                val imageId = sink.save(NewMessage(MessageRole.TOOL, imageWrapped, toolMs = imageMs))
+                emit(AgentEvent.MessageSaved(imageId, MessageRole.TOOL))
+                prompt = prompt + "\n\n" + imageWrapped
+            }
             if (stopRequested) { // Stop pressed while searching: nothing is running in the engine to cancel
                 emit(AgentEvent.Notice(NOTE_STOPPED))
                 emit(AgentEvent.Done)
@@ -183,6 +214,9 @@ class AgentController(
             // those. Everything from there on is dropped and the generation is stopped, so an invented result
             // (e.g. "/usr/bin/python3: can't open /root/x.pdf") never reaches the chat or the next round.
             var cutFakeResponse = false
+            // How long the model reasoned: from its first reasoning token to its first answer token (or the end).
+            var thinkStartedAt = 0L
+            var thinkingMs: Long? = null
 
             suspend fun show(chunks: List<ParsedChunk>) {
                 for (c in chunks) when (c) {
@@ -207,7 +241,8 @@ class AgentController(
                     toolGrammar = toolGrammar,
                     // Also without the grammar: from this word on the engine writes the call greedily (temperature 0),
                     // whatever the chat's temperature is, so a call's name and JSON are the model's most likely tokens.
-                    toolGrammarTrigger = if (toolsEnabled) com.bigmoe.onedge.parser.ToolGrammar.TRIGGER else ""
+                    toolGrammarTrigger = if (toolsEnabled) com.bigmoe.onedge.parser.ToolGrammar.TRIGGER else "",
+                    sampling = settings.samplingOverride()
                 )
             ).collect { ev ->
                 when (ev) {
@@ -223,6 +258,7 @@ class AgentController(
                     is EngineEvent.Answer -> {
                         if (cutFakeResponse) return@collect
                         val before = rawAnswer.length
+                        if (thinkStartedAt != 0L && thinkingMs == null) thinkingMs = System.currentTimeMillis() - thinkStartedAt
                         rawAnswer.append(ev.delta)
                         val fake = rawAnswer.indexOf(ToolProtocol.RESPONSE_OPEN, maxOf(0, before - ToolProtocol.RESPONSE_OPEN.length))
                         if (fake >= 0) {
@@ -237,6 +273,7 @@ class AgentController(
                         callWatch.update(rawAnswer)?.let { emit(AgentEvent.ToolWriting(it)) }
                     }
                     is EngineEvent.Reasoning -> {
+                        if (thinkStartedAt == 0L) thinkStartedAt = System.currentTimeMillis()
                         reasoning.append(ev.delta)
                         emit(AgentEvent.Reasoning(ev.delta))
                     }
@@ -244,9 +281,18 @@ class AgentController(
                 }
             }
             show(parser.flush())
+            if (thinkStartedAt != 0L && thinkingMs == null) thinkingMs = System.currentTimeMillis() - thinkStartedAt
 
             val fin = finished
             if (fin != null) {
+                emit(
+                    AgentEvent.RoundStats(
+                        prefillTokens = fin.stats.nPrompt,
+                        prefillMs = (fin.stats.prefillSeconds * 1000.0).toLong(),
+                        tokensPerSecond = fin.stats.tokensPerSecond,
+                        thinkingMs = thinkingMs
+                    )
+                )
                 generatedTotal += fin.stats.nGenerated
                 emit(AgentEvent.GenerationProgress(generatedTotal, fin.stats.nPast.takeIf { it > 0 })) // 0 = unknown: never overwrite a good value
             }
@@ -272,7 +318,11 @@ class AgentController(
             val content = if (cutFakeResponse) rawAnswer.toString().trimEnd() else fin.answer.ifBlank { rawAnswer.toString() }
             val reasoningText = (if (cutFakeResponse) reasoning.toString() else fin.reasoning.ifBlank { reasoning.toString() }).ifBlank { null }
             val assistantId = sink.save(
-                NewMessage(MessageRole.ASSISTANT, content, reasoningText, fin.stats)
+                NewMessage(
+                    MessageRole.ASSISTANT, content, reasoningText, fin.stats,
+                    prefillTokens = fin.stats.nPrompt.takeIf { it > 0 },
+                    thinkingMs = thinkingMs.takeIf { reasoningText != null }
+                )
             )
             emit(AgentEvent.MessageSaved(assistantId, MessageRole.ASSISTANT))
             // The engine now holds exactly: ... + this prompt + this answer. After a turn with pictures it does
@@ -315,6 +365,22 @@ class AgentController(
                     is ToolCallParseResult.Ok -> calls.add(parsed.call.name to parsed.call.arguments)
                 }
             }
+            // The steps limit above caps a long chain; this stops a model that is stuck sooner: the exact same call
+            // (same tool, same arguments) round after round never gets anywhere new.
+            val signature = calls.joinToString("\n") { it.first + "\u0000" + it.second }
+            if (signature.isNotEmpty() && signature == lastCallSignature) identicalRounds++ else identicalRounds = 0
+            lastCallSignature = signature.ifEmpty { null }
+            if (identicalRounds >= MAX_IDENTICAL_ROUNDS) {
+                val text = "The model made the same tool call ${identicalRounds + 1} times in a row, so it was stopped. " +
+                    "Send a message (for example \"continue\") to let it try again."
+                emit(AgentEvent.Notice(text))
+                val id = sink.save(NewMessage(MessageRole.TOOL, text))
+                emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
+                emit(AgentEvent.Done)
+                return@flow
+            }
+
+            val toolsStartedAt = System.currentTimeMillis()
             // Status events from the tools (which call starts, live progress) arrive on this channel and are emitted by
             // the loop below while the tools run, so the chat shows what is happening instead of a frozen line.
             val live = Channel<AgentEvent>(Channel.UNLIMITED)
@@ -352,8 +418,24 @@ class AgentController(
                 work.await()
             }
             live.close()
-            if (calls.isNotEmpty()) emit(AgentEvent.ToolsFinished)
+            if (calls.isNotEmpty()) emit(AgentEvent.ToolsFinished(calls.map { it.first }, System.currentTimeMillis() - toolsStartedAt))
             for (i in calls.indices) results.add(calls[i].first to outputs[i])
+
+            // In AUTO mode, follow a successful/attempted web search with image results only when explicitly enabled.
+            // Reuse the model's web query rather than spending another generation just to formulate an image query.
+            if (settings.isWebSearchEnabled && settings.imageSearchEnabled && settings.autoImageSearchAfterWebSearch &&
+                calls.any { it.first == "web_search" } && calls.none { it.first == "image_search" } &&
+                "image_search" in enabledNames && !stopRequested
+            ) {
+                val webCall = calls.first { it.first == "web_search" }
+                val query = runCatching { org.json.JSONObject(webCall.second).optString("query") }.getOrNull()
+                    ?.takeIf { it.isNotBlank() } ?: searchQueryFrom(request.prompt)
+                val imageArgs = org.json.JSONObject().put("query", query).toString()
+                emit(AgentEvent.ToolStarted("image_search", imageArgs))
+                results.add("image_search" to toolManager.executeToolCall("image_search", imageArgs, toolCtx))
+            }
+
+            val toolMs = System.currentTimeMillis() - toolsStartedAt
 
             prompt = when {
                 results.isEmpty() -> {
@@ -366,7 +448,7 @@ class AgentController(
                 }
                 else -> ToolProtocol.wrapResults(results)
             }
-            val toolId = sink.save(NewMessage(MessageRole.TOOL, prompt))
+            val toolId = sink.save(NewMessage(MessageRole.TOOL, prompt, toolMs = toolMs))
             emit(AgentEvent.MessageSaved(toolId, MessageRole.TOOL))
             if (stopRequested) {
                 emit(AgentEvent.Notice(NOTE_STOPPED))
@@ -439,7 +521,9 @@ ${request.prompt}""".trim()
     }
 
     companion object {
-        const val MAX_CALLS_PER_ROUND = 4
+        /** Identical consecutive tool rounds after which the model is considered stuck. */
+        const val MAX_IDENTICAL_ROUNDS = 8
+        const val MAX_CALLS_PER_ROUND = 16
         const val NOTE_STOPPED = "Stopped"
 
         /**
@@ -464,18 +548,44 @@ ${request.prompt}""".trim()
             alwaysSearch: Boolean = false
         ): String {
             val base = settings.systemPrompt.trim()
-            val extra = when {
-                toolsEnabled && toolPrompt.isNotBlank() -> toolPrompt
-                alwaysSearch -> ALWAYS_SEARCH_HINT
-                else -> ""
+            val extras = buildList {
+                when {
+                    toolsEnabled && toolPrompt.isNotBlank() -> add(toolPrompt)
+                    alwaysSearch -> add(ALWAYS_SEARCH_HINT)
+                }
+                if (settings.interactiveUiEnabled) add(INTERACTIVE_UI_HINT)
             }
-            return if (extra.isEmpty()) base else "$base\n\n$extra".trim()
+            return (listOf(base).filter { it.isNotBlank() } + extras).joinToString("\n\n").trim()
         }
 
         const val ALWAYS_SEARCH_HINT =
             "Web search results for the user's latest message are attached after it inside <tool_response> tags. " +
                 "Use them when they are relevant and mention the source URLs you rely on. " +
                 "If they are empty, irrelevant or an error, say so and answer from your own knowledge."
+
+        /**
+         * System-prompt text for Native UI. It is part of the cached prompt prefix, so it is short and never
+         * changes per message: the model has to decide on its own, from the request, when a visual card fits.
+         */
+        const val INTERACTIVE_UI_HINT =
+            "Native UI cards are ON. Use one WITHOUT being asked whenever the answer is a comparison (X vs Y, \"compare\", \"difference between\"), pros and cons, a table, a ranking, a timeline, steps or a plan, key numbers, a summary card, or slides: " +
+                "write one short sentence, then ONE fenced ```bmoe-ui block. For normal chat, explanations, code and maths answer in plain text with no block. " +
+                "The block is rendered with native Jetpack Compose; never use HTML, CSS or JavaScript, and never say you cannot make visuals.\n" +
+                "Block = one compact, valid JSON object with short text. title is required, other fields optional: " +
+                "{\"type\":\"rich\",\"title\":\"..\",\"description\":\"..\"," +
+                "\"badges\":[{\"label\":\"..\",\"tone\":\"success|warning|danger|info|neutral\"}]," +
+                "\"metrics\":[{\"label\":\"..\",\"value\":\"..\",\"detail\":\"..\"}]," +
+                "\"comparison\":{\"leftTitle\":\"A\",\"rightTitle\":\"B\",\"rows\":[{\"label\":\"..\",\"left\":\"..\",\"right\":\"..\",\"highlight\":false}]}," +
+                "\"slides\":[{\"title\":\"..\",\"subtitle\":\"..\",\"body\":\"..\"}]," +
+                "\"lists\":[{\"title\":\"..\",\"style\":\"bullet|ordered\",\"items\":[{\"title\":\"..\",\"detail\":\"..\"}]}]," +
+                "\"cards\":[{\"title\":\"..\",\"subtitle\":\"..\",\"body\":\"..\"}]," +
+                "\"bars\":[{\"label\":\"..\",\"value\":70,\"valueLabel\":\"..\"}]," +
+                "\"timeline\":[{\"time\":\"..\",\"title\":\"..\",\"detail\":\"..\",\"status\":\"done|current|upcoming\"}]," +
+                "\"sections\":[{\"title\":\"..\",\"body\":\"..\"}]," +
+                "\"actions\":[{\"label\":\"..\",\"prompt\":\"..\"}]}.\n" +
+                "Example, \"compare cats and dogs\":\n```bmoe-ui\n" +
+                "{\"type\":\"rich\",\"title\":\"Cats vs Dogs\",\"comparison\":{\"leftTitle\":\"Cats\",\"rightTitle\":\"Dogs\",\"rows\":[{\"label\":\"Care\",\"left\":\"Low\",\"right\":\"High\"},{\"label\":\"Exercise\",\"left\":\"Little\",\"right\":\"Daily walks\"}]}}\n```\n" +
+                "Limits: 8 metrics/cards/slides, 12 rows/items/badges, 10 bars (0-100), 5 lists, 8 sections, 6 actions. Never invent measurements; label estimates. Actions send their prompt as a new user message."
 
         /** The user's message as a search query: first 200 characters, one line. */
         fun searchQueryFrom(message: String): String {
@@ -490,16 +600,17 @@ ${request.prompt}""".trim()
          * whenever web search is on (plus web_search itself in AUTO mode, in ALWAYS mode the app searches).
          * Only tools that are registered count.
          */
-        fun enabledToolNames(settings: EngineSettings, registered: Set<String>): Set<String> {
+        fun enabledToolNames(settings: EngineSettings, registered: Set<String>, external: Set<String> = emptySet()): Set<String> {
             val names = HashSet<String>()
+            if (settings.toolsExternalEnabled) names.addAll(external)
             if (settings.toolsFilesEnabled) names.addAll(FILE_TOOL_NAMES)
             if (settings.toolsCodeEnabled) names.addAll(CODE_TOOL_NAMES)
             if (settings.toolsUtilitiesEnabled) names.addAll(UTILITY_TOOL_NAMES)
             if (settings.toolsTermuxEnabled) names.addAll(TERMUX_TOOL_NAMES)
             if (settings.isWebSearchEnabled) {
                 names.addAll(WEB_PAGE_TOOL_NAMES)
-                // Image search shares the explicit Web Search switch and stays unavailable by default.
-                names.add("image_search")
+                // Image search is independently switchable so it can be removed from the model's tool list.
+                if (settings.imageSearchEnabled) names.add("image_search")
                 if (settings.webSearchMode == WebSearchMode.AUTO) names.add("web_search")
             }
             return names.intersect(registered)

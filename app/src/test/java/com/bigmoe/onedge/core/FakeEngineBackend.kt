@@ -81,7 +81,7 @@ class FakeEngineBackend(
     override fun generate(
         system: String, historyFlat: List<ChatTurn>, prompt: String, maxTokens: Int,
         clearKv: Boolean, think: Boolean, images: List<ImageData>, callback: NativeGenerationCallback,
-        toolGrammar: String, toolGrammarTrigger: String
+        toolGrammar: String, toolGrammarTrigger: String, sampling: SamplingOverride?
     ) {
         calls.add(RecordedCall(system, historyFlat, prompt, maxTokens, clearKv, think, images.size, toolGrammar))
         val turn = script.removeFirstOrNull() ?: ScriptedTurn(ok = false, error = "script exhausted")

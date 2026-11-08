@@ -90,6 +90,20 @@ class LoadConfigTest {
         assertEquals(0, v[44])                // I_KV_CACHE_TYPE (F16)
         assertEquals(1, c.copy(kvCacheType = KvCacheType.Q8_0).toIntArray()[44])
         assertEquals(2, c.copy(kvCacheType = KvCacheType.Q4_0).toIntArray()[44])
+        assertEquals(64, v[45])               // I_REPEAT_LAST_N (default window)
+        assertEquals(-1, c.copy(repeatLastN = -5).toIntArray()[45])
+    }
+
+    @Test
+    fun samplingExtrasFollowTheFloatWireFormat() {
+        val f = d.copy(minP = 0.05f, repeatPenalty = 1.1f, frequencyPenalty = 0.2f, presencePenalty = -0.3f).toFloatArray()
+        assertEquals(0.05f, f[2], 1e-6f)      // F_MIN_P
+        assertEquals(1.1f, f[3], 1e-6f)       // F_REPEAT_PENALTY
+        assertEquals(0.2f, f[4], 1e-6f)       // F_FREQ_PENALTY
+        assertEquals(-0.3f, f[5], 1e-6f)      // F_PRESENCE_PENALTY
+        val neutral = d.toFloatArray()
+        assertEquals(0f, neutral[2], 0f)
+        assertEquals(1f, neutral[3], 0f)
     }
 
     @Test

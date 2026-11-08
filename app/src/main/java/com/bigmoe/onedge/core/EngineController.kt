@@ -226,6 +226,7 @@ class EngineController(
                     }
                 }
                 if (error != null) {
+                    error = ModelFamilies.explainLoadError(error)
                     _state.value = EngineState.Failed(modelPath, error)
                     return@withLock error
                 }
@@ -547,6 +548,7 @@ class EngineController(
                         images = request.images,
                         toolGrammar = request.toolGrammar,
                         toolGrammarTrigger = request.toolGrammarTrigger,
+                        sampling = request.sampling,
                         callback = object : NativeGenerationCallback {
                             private var generated = 0
                             override fun onToken(answerDelta: ByteArray, reasoningDelta: ByteArray, contextUsed: Int): Boolean {

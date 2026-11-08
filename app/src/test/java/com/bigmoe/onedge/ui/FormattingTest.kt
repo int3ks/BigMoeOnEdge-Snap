@@ -35,10 +35,14 @@ class FormattingTest {
         val loaded = s.toLoadConfig()
         assertFalse(loadConfigDiffers(loaded, s))
         assertFalse("per-request settings never need a reload", loadConfigDiffers(loaded, s.copy(maxTokens = 99, systemPrompt = "x", thinkingEnabled = false)))
+        assertFalse("temperature is applied per request", loadConfigDiffers(loaded, s.copy(temperature = 0.1f)))
+        assertFalse("top-p is applied per request", loadConfigDiffers(loaded, s.copy(topP = 0.65f)))
+        assertFalse("top-k is applied per request", loadConfigDiffers(loaded, s.copy(topK = 20)))
+        assertFalse("seed is applied per request", loadConfigDiffers(loaded, s.copy(seed = 42)))
         assertTrue(loadConfigDiffers(loaded, s.copy(contextLength = 8192)))
         assertTrue(loadConfigDiffers(loaded, s.copy(dropColdPct = 0)))
         assertTrue(loadConfigDiffers(loaded, s.copy(overlap = false)))
-        assertTrue(loadConfigDiffers(loaded, s.copy(temperature = 0.1f)))
+        assertFalse("sampling is sent per turn", loadConfigDiffers(loaded, s.copy(temperature = 0.1f, repeatPenalty = 1.2f, minP = 0.05f)))
         assertTrue(loadConfigDiffers(loaded, s.copy(cacheMb = 0)))
     }
 }
