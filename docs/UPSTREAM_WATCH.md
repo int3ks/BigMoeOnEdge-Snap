@@ -10,6 +10,8 @@ moves the "last reviewed" commits forward. Nothing is taken over without the own
 | Helldez llama.cpp (expert-ready hook fork) | https://github.com/Helldez/llama.cpp, branches `bmoe/*` | `bmoe/expert-ready-hook-0411` @ `7ac98f4` | vendored in `app/src/main/cpp/third_party/llama.cpp` (local changes: `patches/0007-llama-cpp-local-on-0411.patch`) |
 | BigMoeOnEdge+ (the app this fork is built from) | https://github.com/hamodexd217/BigMoeOnEdge-plus, default branch | `5d5aa97` (0.6.5) | everything up to 0.6.0; from 0.6.5 everything except the per-model auto-tune saves (AutoSaveStore / ModelProfileIdentity), response_format / JSON schema on the API, the telemetry JNI and the minimal live row |
 
+**Policy since 2026-11-09:** BigMoeOnEdge+ is no longer a source for UI/app features. Watch only the engine (Helldez) and llama.cpp, for speed-ups and real bug fixes.
+
 ## Notes for the check
 
 * Worth reporting: new model architectures or MoE recipes, engine/streaming/MTP/NPU fixes, crash fixes, speed

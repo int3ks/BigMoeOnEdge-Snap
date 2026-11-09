@@ -1,7 +1,7 @@
 # CLAUDE.md — BigMoeOnEdge² (BigMoeOnEdge-Snap)
 
 Read this first. It is the working memory of the project for a new Claude session (chat or Claude Code).
-Last updated: 2026-11-01 (release v0.6.58).
+Last updated: 2026-11-09 (release v0.6.59).
 
 ## Owner and how to work with him
 
@@ -72,6 +72,12 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
 * **Settings export/import** (Settings top, `EngineSettingsDataStore.exportJson/importJson`; no paths, no API keys).
 * Right-click menu in text fields (`ui/SecondaryClick.kt`, Compose 1.6 has none), edit message in the input bar,
   per-chat toggles (tools/thinking/web) in `ChatComposerDataStore`.
+
+## Upstream policy (since 2026-11-09, after v0.6.59)
+
+* The UI is considered good as it is and is developed here. **No more UI/app features from BigMoeOnEdge+.**
+* Upstream merges only for the engine (Helldez/BigMoeOnEdge) or llama.cpp, and only when something makes it faster
+  (or fixes a real bug). Report findings, Tom decides.
 
 ## Open ideas / not done
 

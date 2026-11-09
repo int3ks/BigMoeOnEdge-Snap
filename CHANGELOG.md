@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- Settings → Sampling: every parameter has a short explanation under its slider (what it does, typical values, what "off" is).
 - Taken over from BigMoeOnEdge+ 0.6.5 (hamodexd217, 2026-11-03), merged into this fork so that its own features stay (Termux agent with its live status row, agent step limit, per-chat switches, device tuner, per-model options):
   - **Sampling extras:** Min P, repetition penalty with a repeat window, frequency and presence penalty (Settings, under Top K; all off by default). Sampling (temperature, Top P/K, seed and these) is now sent with every chat message, so changing it no longer asks for a reload. The penalties carry token history and are left out by the engine while a model runs with Guess ahead (`build_sampler_chain` in `session.cpp`, `LoadConfig` wire format `INT_COUNT` 46 / `FLOAT_COUNT` 6, `EngineSettings.samplingOverride()`). The API server keeps the app's penalty values.
   - **Editor tools** for the agent: `edit_lines` (replace / insert / delete by line number, several edits per call), `replace_in_files` (project-wide find & replace, plain or regex, one diff to approve), `undo_edit` (up to 10 steps per file, in memory); `rename_file` can copy, `search_files` shows context lines.

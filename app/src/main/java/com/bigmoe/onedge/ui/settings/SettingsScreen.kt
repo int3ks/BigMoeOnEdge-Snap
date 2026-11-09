@@ -701,20 +701,28 @@ private fun SettingsContent(
             Spacer(Modifier.height(8.dp))
             Text("Temperature: ${"%.2f".format(java.util.Locale.US, temp)}")
             Slider(value = temp, onValueChange = { temp = it }, onValueChangeFinished = { viewModel.updateTemperature(temp) }, valueRange = 0f..2f)
+            Hint("How random the choice of the next token is. 0 = always the most likely token (greedy, repeatable, good for code and tool calls). 0.6 to 0.8 = natural chat. Above 1 = more surprising, but more mistakes. Top P, Top K and Min P only matter above 0.")
             Text("Top P: ${"%.2f".format(java.util.Locale.US, topP)}")
             Slider(value = topP, onValueChange = { topP = it }, onValueChangeFinished = { viewModel.updateTopP(topP) }, valueRange = 0.05f..1f)
+            Hint("Keeps only the most likely tokens whose probabilities add up to this share, the rest is never picked. 0.9 = the top 90 % of the probability. 1 = off. Lower = safer, more predictable wording.")
             Text("Top K: ${topK.toInt()}")
             Slider(value = topK, onValueChange = { topK = it }, onValueChangeFinished = { viewModel.updateTopK(topK.toInt()) }, valueRange = 0f..100f)
+            Hint("Keeps only the K most likely tokens before drawing. 40 is common. 0 = off (no limit). A hard cap; Top P and Min P adapt to how sure the model is.")
             Text("Min P: ${if (minP <= 0f) "off" else "%.2f".format(java.util.Locale.US, minP)}")
             Slider(value = minP, onValueChange = { minP = Math.round(it * 100f) / 100f }, onValueChangeFinished = { viewModel.updateMinP(minP) }, valueRange = 0f..0.5f)
+            Hint("Drops every token that is less likely than this fraction of the best token. 0.05 = a token needs at least 5 % of the favourite's probability. Cuts the nonsense tail when the model is sure, keeps choice when it is not. 0 = off.")
             Text("Repetition penalty: ${if (repeatPenalty == 1f) "off" else "%.2f".format(java.util.Locale.US, repeatPenalty)}")
             Slider(value = repeatPenalty, onValueChange = { repeatPenalty = Math.round(it * 20f) / 20f }, onValueChangeFinished = { viewModel.updateRepeatPenalty(repeatPenalty) }, valueRange = 1f..1.5f)
+            Hint("Makes every token that already appeared in the repeat window less likely, by this factor. Against loops (the same sentence over and over). 1 = off, 1.05 to 1.15 is typical; higher bends wording and can break code, names and JSON.")
             Text("Repeat window: ${if (repeatLastN <= 0f) "off" else "${repeatLastN.toInt()} tokens"}")
             Slider(value = repeatLastN, onValueChange = { repeatLastN = (Math.round(it / 16f) * 16f).coerceIn(0f, 1024f) }, onValueChangeFinished = { viewModel.updateRepeatLastN(repeatLastN.toInt()) }, valueRange = 0f..1024f)
+            Hint("How many of the most recent tokens the three penalties look at. 64 = roughly the last sentence or two. 0 = all penalties off.")
             Text("Frequency penalty: ${if (frequencyPenalty == 0f) "off" else "%.2f".format(java.util.Locale.US, frequencyPenalty)}")
             Slider(value = frequencyPenalty, onValueChange = { frequencyPenalty = Math.round(it * 20f) / 20f }, onValueChangeFinished = { viewModel.updateFrequencyPenalty(frequencyPenalty) }, valueRange = 0f..1.5f)
+            Hint("Lowers a token more the more often it appeared in the window (each repeat counts). Against overused words. 0 = off, 0.1 to 0.5 is gentle.")
             Text("Presence penalty: ${if (presencePenalty == 0f) "off" else "%.2f".format(java.util.Locale.US, presencePenalty)}")
             Slider(value = presencePenalty, onValueChange = { presencePenalty = Math.round(it * 20f) / 20f }, onValueChangeFinished = { viewModel.updatePresencePenalty(presencePenalty) }, valueRange = 0f..1.5f)
+            Hint("Lowers a token by a fixed amount once it appeared at all in the window, however often. Nudges towards new words and topics. 0 = off, 0.1 to 0.5 is gentle.")
             OutlinedTextField(
                 value = seedText,
                 onValueChange = { input -> seedText = input.filterIndexed { i, c -> c.isDigit() || (i == 0 && c == '-') } },
@@ -724,7 +732,7 @@ private fun SettingsContent(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 modifier = Modifier.fillMaxWidth()
             )
-            Hint("Sampling is sent with every chat message, so changes need no reload. Temperature 0 = greedy decoding (always the most likely token). Min P drops very unlikely tokens relative to the best one (needs temperature above 0). Repetition penalty above 1 makes tokens from the last \"Repeat window\" tokens less likely (1 = off; 1.05 to 1.15 is typical, higher can make answers odd). Frequency penalty grows with each repeat, presence penalty applies once. The penalties also work at temperature 0, but the engine leaves them out while the model runs with Guess ahead.")
+            Hint("Order in the engine: penalties, then Top K, Top P, Min P, then temperature and the draw. Sampling is sent with every chat message, so changes need no reload. The penalties also work at temperature 0, but the engine leaves them out while the model runs with Guess ahead.")
             Divider()
             } // compute group
 
