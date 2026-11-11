@@ -68,6 +68,7 @@ fun LogScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
     val bridge = remember { EngineNativeBridge() }
     val settings by viewModel.settingsState.collectAsState()
     val recording = settings?.logCapture == true
+    val toFile = settings?.logToFile == true
     var lines by remember { mutableStateOf<List<String>>(emptyList()) }
     var filter by remember { mutableStateOf("") }
     var follow by remember { mutableStateOf(true) }
@@ -113,16 +114,29 @@ fun LogScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
                 Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Record log", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Off by default. While on, what llama.cpp and the engine print is kept here and written to a file in the " +
-                            "workspace (.bigmoe/logs), so it is still there after a crash. It is cheap, but if the tablet ever stalls " +
-                            "with it on, switch it off. Starts with the app, so switch it on before loading a model to see the load.",
+                        "Off by default. While on, what llama.cpp and the engine print is kept here. It is cheap, but if the " +
+                            "tablet ever stalls with it on, switch it off. Starts with the app, so switch it on before loading a model " +
+                            "to see the load.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Switch(checked = recording, onCheckedChange = { viewModel.updateLogCapture(it) })
             }
+            if (recording) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text("Write to file", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Also append every line to a file in the workspace (.bigmoe/logs), one file per start, newest 10 " +
+                                "kept. The file is written line by line, so it is still there after a crash.",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = toFile, onCheckedChange = { viewModel.updateLogToFile(it) })
+                }
+            }
             val logFile = com.bigmoe.onedge.core.LogFiles.currentPath
-            if (recording && logFile != null) {
+            if (recording && toFile && logFile != null) {
                 Text(
                     "Also written to: $logFile",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -12,8 +12,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The log file next to the Log page. While "Record log" is on, every line llama.cpp and the engine print is also
- * appended to `<workspace>/.bigmoe/logs/bigmoe-<date>-<time>.log` by the native reader (see `nativeLogStart`), so the
+ * The log file next to the Log page. While "Record log" and "Write to file" are on, every line llama.cpp and the
+ * engine print is also appended to `<workspace>/.bigmoe/logs/bigmoe-<date>-<time>.log` by the native reader (see `nativeLogStart`), so the
  * text before a crash is still there after the app died. One file per recording start; the newest [KEEP_FILES] are kept.
  * The header says why the previous process of the app ended (Android 11+), which tells a crash from a kill for memory.
  */
@@ -32,9 +32,9 @@ object LogFiles {
         this.workspaceRoot = workspaceRoot
     }
 
-    /** Starts the native recording together with a new log file. Call off the main thread. */
-    fun startRecording(bridge: EngineNativeBridge) {
-        val path = runCatching { createFile() }.getOrNull()
+    /** Starts the native recording, with a new log file when [toFile]. Call off the main thread. */
+    fun startRecording(bridge: EngineNativeBridge, toFile: Boolean) {
+        val path = if (toFile) runCatching { createFile() }.getOrNull() else null
         currentPath = path
         bridge.nativeLogStart(path)
     }

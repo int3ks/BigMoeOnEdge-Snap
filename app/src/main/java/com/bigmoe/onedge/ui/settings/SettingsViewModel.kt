@@ -63,10 +63,26 @@ class SettingsViewModel(
     /** Switches the log recording on or off right now and remembers it for the next start. */
     fun updateLogCapture(v: Boolean) = launch {
         dataStore.updateLogCapture(v)
+        val toFile = dataStore.settingsFlow.first().logToFile
         withContext(Dispatchers.IO) {
             runCatching {
                 val bridge = com.bigmoe.onedge.core.EngineNativeBridge()
-                if (v) com.bigmoe.onedge.core.LogFiles.startRecording(bridge) else com.bigmoe.onedge.core.LogFiles.stopRecording(bridge)
+                if (v) com.bigmoe.onedge.core.LogFiles.startRecording(bridge, toFile)
+                else com.bigmoe.onedge.core.LogFiles.stopRecording(bridge)
+            }
+        }
+    }
+
+    /** Log file on/off; while recording, restarts the recording so the change applies at once (the kept lines stay). */
+    fun updateLogToFile(v: Boolean) = launch {
+        dataStore.updateLogToFile(v)
+        val recording = dataStore.settingsFlow.first().logCapture
+        if (!recording) return@launch
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bridge = com.bigmoe.onedge.core.EngineNativeBridge()
+                com.bigmoe.onedge.core.LogFiles.stopRecording(bridge)
+                com.bigmoe.onedge.core.LogFiles.startRecording(bridge, v)
             }
         }
     }

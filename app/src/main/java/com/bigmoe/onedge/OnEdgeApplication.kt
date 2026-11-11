@@ -22,8 +22,8 @@ class OnEdgeApplication : Application() {
         // (Log page, off by default). Off the main thread: it reads the setting and loads the native library.
         Thread {
             runCatching {
-                val on = kotlinx.coroutines.runBlocking { container.settingsDataStore.settingsFlow.first().logCapture }
-                if (on) LogFiles.startRecording(com.bigmoe.onedge.core.EngineNativeBridge())
+                val s = kotlinx.coroutines.runBlocking { container.settingsDataStore.settingsFlow.first() }
+                if (s.logCapture) LogFiles.startRecording(com.bigmoe.onedge.core.EngineNativeBridge(), s.logToFile)
             }
         }.start()
         container.followCpuCoreSetting()

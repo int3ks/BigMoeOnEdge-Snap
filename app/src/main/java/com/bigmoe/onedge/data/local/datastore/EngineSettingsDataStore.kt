@@ -186,6 +186,8 @@ data class EngineSettings(
     val systemPromptId: String = "",
     /** Record llama.cpp's and the engine's log for the Log page (off: stderr is left alone). */
     val logCapture: Boolean = false,
+    /** While [logCapture] is on, also append every line to a file in `<workspace>/.bigmoe/logs` (survives a crash). */
+    val logToFile: Boolean = false,
     /** All named system prompts, and the one new chats start with. */
     val systemPrompts: List<SystemPromptProfile> = emptyList(),
     val defaultSystemPromptId: String = "",
@@ -401,6 +403,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val SYSTEM_PROMPTS_JSON = stringPreferencesKey("system_prompts_json")
         val DEFAULT_SYSTEM_PROMPT_ID = stringPreferencesKey("default_system_prompt_id")
         val LOG_CAPTURE = booleanPreferencesKey("log_capture")
+        val LOG_TO_FILE = booleanPreferencesKey("log_to_file")
         val WEB_SEARCH = booleanPreferencesKey("is_web_search_enabled")
         val WEB_SEARCH_MODE = stringPreferencesKey("web_search_mode")
         val INTERACTIVE_UI = booleanPreferencesKey("interactive_ui_enabled")
@@ -497,6 +500,7 @@ class EngineSettingsDataStore(private val context: Context) {
             systemPromptId = SystemPromptProfile.pick(profiles, p[Keys.DEFAULT_SYSTEM_PROMPT_ID])?.id ?: "",
             systemPrompts = profiles,
             logCapture = p[Keys.LOG_CAPTURE] ?: d.logCapture,
+            logToFile = p[Keys.LOG_TO_FILE] ?: d.logToFile,
             defaultSystemPromptId = p[Keys.DEFAULT_SYSTEM_PROMPT_ID] ?: "",
             isWebSearchEnabled = p[Keys.WEB_SEARCH] ?: d.isWebSearchEnabled,
             webSearchMode = enumOrDefault(p[Keys.WEB_SEARCH_MODE], d.webSearchMode),
@@ -668,6 +672,7 @@ class EngineSettingsDataStore(private val context: Context) {
 
     suspend fun updateDefaultSystemPromptId(id: String) = set(Keys.DEFAULT_SYSTEM_PROMPT_ID, id)
     suspend fun updateLogCapture(v: Boolean) = set(Keys.LOG_CAPTURE, v)
+    suspend fun updateLogToFile(v: Boolean) = set(Keys.LOG_TO_FILE, v)
     suspend fun updateWebSearchEnabled(v: Boolean) = set(Keys.WEB_SEARCH, v)
     suspend fun updateWebSearchMode(v: WebSearchMode) = set(Keys.WEB_SEARCH_MODE, v.name)
     suspend fun updateInteractiveUiEnabled(v: Boolean) = set(Keys.INTERACTIVE_UI, v)
