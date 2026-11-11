@@ -121,6 +121,7 @@ fun SettingsScreen(
     onOpenModels: () -> Unit,
     onOpenWorkspace: () -> Unit,
     onOpenAutoSettings: () -> Unit,
+    onOpenLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val loaded by viewModel.settingsState.collectAsState()
@@ -149,6 +150,7 @@ fun SettingsScreen(
                 onOpenModels = onOpenModels,
                 onOpenWorkspace = onOpenWorkspace,
                 onOpenAutoSettings = onOpenAutoSettings,
+                onOpenLog = onOpenLog,
                 modifier = Modifier.fillMaxSize().padding(innerPadding)
             )
         }
@@ -164,6 +166,7 @@ private fun SettingsContent(
     onOpenModels: () -> Unit,
     onOpenWorkspace: () -> Unit,
     onOpenAutoSettings: () -> Unit,
+    onOpenLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -187,7 +190,6 @@ private fun SettingsContent(
     var cacheFloorText by remember { mutableStateOf(settings.cacheFloorMb.toString()) }
     var contextText by remember { mutableStateOf(settings.contextLength.toString()) }
     val contextValid = ContextInput.parse(contextText) != null
-    var experimental by remember { mutableStateOf(false) }
     var performanceExpanded by remember { mutableStateOf(true) }
     var toolsMediaExpanded by remember { mutableStateOf(false) }
     var appearanceExpanded by remember { mutableStateOf(false) }
@@ -403,7 +405,7 @@ private fun SettingsContent(
                 Choices.CACHE.map { it to (if (it == CACHE_AUTO_MB) "Auto" else if (it == 0) "off" else "$it MiB") },
                 selected = settings.cacheMb, enabled = stream
             ) { viewModel.updateCacheMb(it) }
-            Hint("A resident expert costs no read, so a bigger cache means less waiting on flash, paid for in RAM. Auto sizes it once at load. The smallest rungs sit below the engine's floor and only churn.")
+            Hint("A resident expert costs no read, so a bigger cache means less waiting on flash, paid for in RAM. Auto sizes it once at load. The smallest rungs sit below the engine's floor and only churn. Speed tip: every reply shows its cache hit rate (\"cache NN%\") in its stats line. A low rate means waiting on flash is what slows you down: give the cache more RAM, or run Auto settings with this model.")
             if (settings.cacheMb in 1 until 1500) {
                 SwitchRow(
                     "Allow a small expert cache (<1500 MiB)",
@@ -417,7 +419,7 @@ private fun SettingsContent(
                 Choices.CACHE_CEIL.map { it to if (it == 0) "no cap" else "$it MiB" },
                 selected = settings.cacheCeilMb, enabled = stream && settings.cacheMb == CACHE_AUTO_MB
             ) { viewModel.updateCacheCeilMb(it) }
-            Hint("Caps what Auto may claim. The system counts our own mapped weights as free, so uncapped it can ask for more than exists.")
+            Hint("Caps what Auto may claim. The system counts our own mapped weights as free, so uncapped it can ask for more than exists. Speed tip (RAM): the expert cache, the context's KV memory and, for a model with a big n-gram table such as Qwen3.8 Flash Next, the pages of that table read from flash all compete for the same RAM. A smaller context and closed background apps leave more for the cache.")
             if (settings.cacheMb == CACHE_AUTO_MB) {
                 OutlinedTextField(
                     value = cacheFloorText,
@@ -433,7 +435,7 @@ private fun SettingsContent(
             ChoiceSetting("Parallel I/O lanes", Choices.IO.map { it to it.toString() }, settings.ioThreads, enabled = stream) {
                 viewModel.updateIoThreads(it)
             }
-            Hint("Expert reads in flight at once. Helps only until the flash saturates.")
+            Hint("Expert reads in flight at once. Helps only until the flash saturates. Speed tip: Auto settings tests every value from 1 to 8 on your device and picks the fastest.")
             SwitchRow(
                 "Direct I/O (O_DIRECT)",
                 "Bypass the page cache, so the system keeps no second copy of what the cache already holds. Falls back where unsupported.",
@@ -465,7 +467,7 @@ private fun SettingsContent(
             Hint("RAM window used to keep recently accessed rows. Larger windows reduce repeated reads but leave less RAM for experts and the OS.")
             SwitchRow(
                 "Release the model mapping",
-                "Once every weight has been copied into the app's own memory, the model file does not need to stay mapped. Lossless - the output is identical. Needs Dense weights on Anon or Pinned.",
+                "Once every weight has been copied into the app's own memory, the model file does not need to stay mapped. Lossless - the output is identical. Needs Dense weights on Anon or Pinned. Leave it off for a model with a lazily read n-gram table (Qwen3.8 Flash Next): that table is read through the mapping.",
                 settings.releaseMmap,
                 enabled = stream && (settings.denseWeights == DenseWeights.ANONYMOUS || settings.denseWeights == DenseWeights.PINNED)
             ) { viewModel.updateReleaseMmap(it) }
@@ -488,7 +490,7 @@ private fun SettingsContent(
                 },
                 settings.dropColdPct, enabled = cacheOn
             ) { viewModel.updateDropColdPct(it) }
-            Hint("Skips a routed expert only when it is a cache miss and the router barely wanted it, so quality is spent only where it buys a read. A resident expert always runs and the top one is never dropped. Changes the reply, and not the same way twice: it depends on what the cache held.")
+            Hint("Skips a routed expert only when it is a cache miss and the router barely wanted it, so quality is spent only where it buys a read. A resident expert always runs and the top one is never dropped. Changes the reply, and not the same way twice: it depends on what the cache held. Speed tip: for a big model that streams a lot from flash this is a strong lever, because reads dominate. Try 50% first, then 75%, and check the answers.")
             val topkNow = readyInfo?.nExpertUsed ?: 0
             if (settings.dropColdPct > 0 && topkNow in 1..4) {
                 Text(
@@ -499,15 +501,26 @@ private fun SettingsContent(
             ChoiceSetting("Active experts (top-k)", Choices.TOPK.map { it to if (it == 0) "model default" else "$it" }, settings.nExpertUsed) {
                 viewModel.updateNExpertUsed(it)
             }
-            Hint("Consult fewer experts per token than the model asks for. Cuts compute and reads together, and changes the reply.")
+            Hint("Consult fewer experts per token than the model asks for. Cuts compute and reads together, and changes the reply. Speed tip: fewer experts means fewer flash reads per token. Lower it one step at a time (a model that routes 10 can try 6) and compare the answers with the model default.")
 
             Spacer(Modifier.height(8.dp))
             GuessAheadSettings(settings, viewModel)
 
             Spacer(Modifier.height(8.dp))
-            ExperimentalHeader(expanded = experimental) { experimental = !experimental }
-            if (experimental) {
-                Spacer(Modifier.height(8.dp))
+            // Always visible, framed in red. The scored-choice, quality-control and A/B diagnostics switches were
+            // removed from the screen (their stored values stay as they are).
+            Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                color = Color.Transparent,
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        "EXPERIMENTAL", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.height(8.dp))
                 Section("I/O scheduling")
                 SwitchRow(
                     "Start reads in two waves",
@@ -544,7 +557,7 @@ private fun SettingsContent(
                     Choices.SUBSTITUTE.map { it to if (it == 0) "off" else "$it%" },
                     settings.substitutePct, enabled = stream && cacheOn
                 ) { viewModel.updateSubstitutePct(it) }
-                Hint("When two experts score close, picks the one already in RAM. Same number of experts, fewer flash reads, faster decode. Changes the reply; 15% is the measured sweet spot.")
+                Hint("When two experts score close, picks the one already in RAM. Same number of experts, fewer flash reads, faster decode. Changes the reply; 15% is the measured sweet spot. Speed tip: it raises the cache hit rate without reading fewer experts, so try 10-15% before Drop cold experts or a lower top-k.")
                 if (settings.substitutePct >= 20) {
                     Text(
                         "Past 15% the model degrades faster than its replies show. Judge it on answers you can check.",
@@ -558,46 +571,7 @@ private fun SettingsContent(
                     enabled = stream && settings.prefetchLayers == 0 && !settings.predictPrefetch && settings.spec == SpecSource.OFF
                 ) { viewModel.updateRouteAhead(it) }
                 Hint("Commits each layer's routing that many layers early, so its reads start early and can never be wasted. Lossy: some slots route differently. Excludes the prefetchers and Guess ahead.")
-                Spacer(Modifier.height(8.dp))
-                Section("Scored-choice API")
-                ChoiceSetting(
-                    "Decision prefix cache",
-                    listOf(
-                        DecisionPrefixCache.AUTO to "Auto",
-                        DecisionPrefixCache.ON to "On",
-                        DecisionPrefixCache.OFF to "Off"
-                    ),
-                    settings.decisionPrefixCache
-                ) { viewModel.updateDecisionPrefixCache(it) }
-                Hint("Controls prefix-state reuse for the app's scored-choice / decision API only; it does not change normal chat generation. Auto chooses the best policy for the current backend.")
-                Spacer(Modifier.height(8.dp))
-                Section("Quality controls")
-                SwitchRow(
-                    "Renormalise expert weights after dropping",
-                    "Rescales the surviving expert weights after cold experts are skipped. Usually keep this enabled; disabling it can shift the layer output more.",
-                    settings.dropRenorm,
-                    enabled = stream && cacheOn && settings.dropColdPct > 0
-                ) { viewModel.updateDropRenorm(it) }
-                SwitchRow(
-                    "Drop cold experts during prompt prefill",
-                    "Applies cache-aware expert dropping while the prompt is being processed. Off is recommended: the cache is cold during prefill, so many experts may be skipped and answer quality can fall.",
-                    settings.dropInPrefill,
-                    enabled = stream && cacheOn && settings.dropColdPct > 0
-                ) { viewModel.updateDropInPrefill(it) }
-                Spacer(Modifier.height(8.dp))
-                Section("Diagnostics / A-B only")
-                SwitchRow(
-                    "Prediction probe",
-                    "Measures how well next-layer routing can be predicted. Adds a router GEMV per layer per token and can slow generation; do not use for normal speed benchmarks.",
-                    settings.predictionProbe,
-                    enabled = stream && settings.routeAhead == 0 && !settings.predictPrefetch && settings.prefetchLayers == 0
-                ) { viewModel.updatePredictionProbe(it) }
-                SwitchRow(
-                    "Load all experts (A/B baseline)",
-                    "Reads every expert each token instead of only the selected experts. Very slow and I/O-heavy for large MoE models; use only for controlled comparisons.",
-                    settings.loadAllExpertsForBenchmark,
-                    enabled = stream
-                ) { viewModel.updateLoadAllExpertsForBenchmark(it) }
+                }
             }
             Divider()
             } // speed / quality group
@@ -628,7 +602,7 @@ private fun SettingsContent(
                 modifier = Modifier.fillMaxWidth()
             )
             Hint(
-                if (contextValid) "Type any number, there is no limit. Prompt plus reply the session can hold. Also memory: the KV cache is sized for it at open, so a very large value needs a lot of RAM and the model may fail to load; lower it if that happens."
+                if (contextValid) "Type any number, there is no limit. Prompt plus reply the session can hold. Also memory: the KV cache is sized for it at open, so a very large value needs a lot of RAM and the model may fail to load; lower it if that happens. Speed tip: a smaller context also leaves more RAM for the expert cache."
                 else "Enter a whole number greater than 0. The last valid value (${settings.contextLength}) stays in use."
             )
             Spacer(Modifier.height(8.dp))
@@ -859,6 +833,8 @@ private fun SettingsContent(
                 settings.metricsCsv
             ) { viewModel.updateMetricsCsv(it) }
             OutlinedButton(onClick = { shareLatestCsv(context) }) { Text("Share latest metrics CSV") }
+            Hint("Log: what llama.cpp and the engine print while loading and generating (timings, cache, I/O, errors), kept since the app started. Filter it, copy it or share it as a file.")
+            OutlinedButton(onClick = onOpenLog) { Text("Open log") }
             Divider()
 
             // ------------------------------------------------------------ workspace (private or shared folder)
@@ -1041,27 +1017,6 @@ internal fun Divider() {
     Spacer(Modifier.height(20.dp))
     HorizontalDivider()
     Spacer(Modifier.height(20.dp))
-}
-
-@Composable
-private fun ExperimentalHeader(expanded: Boolean, onToggle: () -> Unit) {
-    Surface(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.errorContainer,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle)
-    ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "EXPERIMENTAL", modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer
-            )
-            Text(if (expanded) "hide" else "show", color = MaterialTheme.colorScheme.onErrorContainer)
-            Icon(
-                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer
-            )
-        }
-    }
 }
 
 @Composable

@@ -116,6 +116,17 @@ class EngineNativeBridge {
     /** Bit 0: expert-ready hook; bit 1: multimodal; bit 2: HTP backend runtime probe succeeded. */
     external fun nativeCapabilities(): Int
 
+    /** Copies stderr (llama.cpp's log, the engine's "bmoe:" lines) into an in-memory ring for the Log page. Idempotent. */
+    external fun nativeLogStart()
+
+    /**
+     * UTF-8 text: first line = number of the newest log line, then every line after [after] (0 = all that are kept),
+     * one per line.
+     */
+    external fun nativeLogRead(after: Long): ByteArray
+
+    external fun nativeLogClear()
+
     /** Detailed runtime diagnosis; Available does not by itself prove model operations ran on HTP. */
     external fun nativeNpuStatus(): ByteArray
 

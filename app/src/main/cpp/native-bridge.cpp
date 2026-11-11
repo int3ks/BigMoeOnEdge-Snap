@@ -1037,3 +1037,108 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeAllowedCpus(JNIEnv *, jobject) {
     return static_cast<jlong>(allowed_cpu_mask());
 }
+
+// ---- In-app log ------------------------------------------------------------------------------------------------
+// llama.cpp's default logger and the engine's "bmoe: ..." lines write to stderr, which an Android app does not see
+// anywhere. nativeLogStart() points stderr at a pipe; a reader thread cuts it into lines, stamps them with the time
+// and keeps the newest kLogMaxLines in memory for the Log page (and copies each to logcat, tag BigMoeLog).
+// Lines are numbered; the page asks for everything after the number it already has.
+#include <cerrno>
+#include <ctime>
+#include <deque>
+#include <thread>
+#include <sys/time.h>
+
+namespace {
+constexpr size_t kLogMaxLines = 6000;
+constexpr size_t kLogMaxLineChars = 2000;
+std::mutex g_log_mu;
+std::deque<std::string> g_log_lines; // oldest first; the newest has sequence number g_log_next_seq - 1
+uint64_t g_log_next_seq = 1;
+std::once_flag g_log_once;
+
+void log_push_line(const std::string & line) {
+    if (line.empty()) return;
+    timeval tv{};
+    gettimeofday(&tv, nullptr);
+    time_t sec = tv.tv_sec;
+    tm local{};
+    localtime_r(&sec, &local);
+    char stamp[24];
+    std::snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d.%03d ", local.tm_hour, local.tm_min, local.tm_sec,
+                  static_cast<int>(tv.tv_usec / 1000));
+    __android_log_write(ANDROID_LOG_INFO, "BigMoeLog", line.c_str());
+    std::string stamped = stamp;
+    stamped += line;
+    std::lock_guard<std::mutex> lock(g_log_mu);
+    g_log_lines.push_back(std::move(stamped));
+    g_log_next_seq++;
+    while (g_log_lines.size() > kLogMaxLines) g_log_lines.pop_front();
+}
+
+void log_reader(int fd) {
+    std::string pending;
+    char buf[4096];
+    for (;;) {
+        const ssize_t n = read(fd, buf, sizeof(buf));
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        for (ssize_t i = 0; i < n; i++) {
+            const char c = buf[i];
+            if (c == '\n') {
+                log_push_line(pending);
+                pending.clear();
+            } else if (c != '\r') {
+                pending.push_back(c);
+                if (pending.size() >= kLogMaxLineChars) {
+                    log_push_line(pending);
+                    pending.clear();
+                }
+            }
+        }
+    }
+}
+} // namespace
+
+// Idempotent. Nothing is captured before it runs (the app calls it at start).
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStart(JNIEnv *, jobject) {
+    std::call_once(g_log_once, [] {
+        int fds[2];
+        if (pipe(fds) != 0) return;
+        std::fflush(stderr);
+        if (dup2(fds[1], STDERR_FILENO) < 0) {
+            close(fds[0]);
+            close(fds[1]);
+            return;
+        }
+        close(fds[1]); // stderr keeps the write end open
+        std::thread(log_reader, fds[0]).detach();
+    });
+}
+
+// UTF-8 text: the first line is the sequence number of the newest line, then every line after `after`, one per line.
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogRead(JNIEnv * env, jobject, jlong after) {
+    std::string out;
+    {
+        std::lock_guard<std::mutex> lock(g_log_mu);
+        const uint64_t newest = g_log_next_seq - 1;
+        out = std::to_string(newest);
+        out.push_back('\n');
+        const uint64_t first = g_log_next_seq - g_log_lines.size(); // sequence number of g_log_lines.front()
+        const uint64_t want = after < 0 ? 1 : static_cast<uint64_t>(after) + 1;
+        const uint64_t from = std::max(want, first);
+        for (uint64_t seq = from; seq <= newest; seq++) {
+            out += g_log_lines[static_cast<size_t>(seq - first)];
+            out.push_back('\n');
+        }
+    }
+    return to_bytes(env, out);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogClear(JNIEnv *, jobject) {
+    std::lock_guard<std::mutex> lock(g_log_mu);
+    g_log_lines.clear(); // the sequence keeps counting, so a page that polls is not confused
+}

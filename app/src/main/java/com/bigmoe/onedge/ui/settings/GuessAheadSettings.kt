@@ -29,7 +29,7 @@ internal fun GuessAheadSettings(settings: EngineSettings, viewModel: SettingsVie
     ChoiceSetting("Tokens drafted per pass", DRAFT_MAX.map { it to it.toString() }, settings.draftMax) {
         viewModel.updateDraftMax(it)
     }
-    Hint("More tokens per pass only pay off when most of them are accepted.")
+    Hint("More tokens per pass only pay off when most of them are accepted. Speed tip: with a model that streams its experts from flash, a pass over several tokens reads the experts of all of them, so the gain is uncertain. Compare tokens per second with and without it; a model that ships its own MTP head (Qwen3.8 Flash Next) is worth one try.")
     ChoiceSetting(
         "MTP confidence floor",
         listOf(0 to "Always draft", 40 to "Above 40%", 60 to "Above 60%", 80 to "Above 80%"),
