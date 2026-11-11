@@ -1,6 +1,8 @@
 package com.bigmoe.onedge.ui.settings
 
 import android.content.Intent
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,14 +13,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -41,12 +43,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import com.bigmoe.onedge.core.EngineNativeBridge
+import com.bigmoe.onedge.ui.navigation.MainNavButtons
+import com.bigmoe.onedge.ui.navigation.TopTab
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val LOG_KEEP_LINES = 6000
 private const val LOG_COPY_LINES = 3000
@@ -54,11 +63,11 @@ private const val LOG_POLL_MS = 400L
 
 /**
  * llama.cpp's and the engine's log (what goes to stderr), kept natively from app start (`nativeLogStart`): follows
- * live, can be filtered, copied, shared as a file and cleared. Reached from Settings → Diagnostics.
+ * live, can be filtered, copied, shared, written to a file and cleared. One of the main pages (button in every top bar).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LogScreen(viewModel: SettingsViewModel, onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
+fun LogScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val bridge = remember { EngineNativeBridge() }
@@ -68,6 +77,19 @@ fun LogScreen(viewModel: SettingsViewModel, onNavigateBack: () -> Unit, modifier
     var filter by remember { mutableStateOf("") }
     var follow by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
+
+    // "Write to file": the person picks where (Storage Access Framework, so no storage permission is needed).
+    // Writes everything that is kept, not only the filtered lines.
+    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val snapshot = lines
+        val ok = runCatching {
+            context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write((snapshot.joinToString("\n") + "\n").toByteArray(Charsets.UTF_8)) }
+        }.isSuccess
+        android.widget.Toast.makeText(
+            context, if (ok) "Wrote ${snapshot.size} lines" else "Could not write the file", android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
 
     // Poll for new lines; the ring lives natively, so opening the page again shows everything that is still kept.
     LaunchedEffect(Unit) {
@@ -99,20 +121,7 @@ fun LogScreen(viewModel: SettingsViewModel, onNavigateBack: () -> Unit, modifier
         topBar = {
             TopAppBar(
                 title = { Text("LOG", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        clipboard.setText(AnnotatedString(shown.takeLast(LOG_COPY_LINES).joinToString("\n")))
-                        android.widget.Toast.makeText(context, "Copied the last ${minOf(shown.size, LOG_COPY_LINES)} lines", android.widget.Toast.LENGTH_SHORT).show()
-                    }) { Icon(Icons.Default.ContentCopy, contentDescription = "Copy") }
-                    IconButton(onClick = { shareLog(context, shown) }) { Icon(Icons.Default.Share, contentDescription = "Share as file") }
-                    IconButton(onClick = {
-                        runCatching { bridge.nativeLogClear() }
-                        lines = emptyList()
-                    }) { Icon(Icons.Default.Delete, contentDescription = "Clear") }
-                }
+                actions = { MainNavButtons(TopTab.LOG) }
             )
         },
         modifier = modifier
@@ -129,6 +138,21 @@ fun LogScreen(viewModel: SettingsViewModel, onNavigateBack: () -> Unit, modifier
                     )
                 }
                 Switch(checked = recording, onCheckedChange = { viewModel.updateLogCapture(it) })
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    clipboard.setText(AnnotatedString(shown.takeLast(LOG_COPY_LINES).joinToString("\n")))
+                    android.widget.Toast.makeText(context, "Copied the last ${minOf(shown.size, LOG_COPY_LINES)} lines", android.widget.Toast.LENGTH_SHORT).show()
+                }) { Icon(Icons.Default.ContentCopy, contentDescription = null); Text("  Copy") }
+                OutlinedButton(onClick = { shareLog(context, shown) }) { Icon(Icons.Default.Share, contentDescription = null); Text("  Share") }
+                OutlinedButton(onClick = {
+                    if (lines.isEmpty()) android.widget.Toast.makeText(context, "The log is empty.", android.widget.Toast.LENGTH_SHORT).show()
+                    else saveLauncher.launch("bigmoe-log-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".txt")
+                }) { Icon(Icons.Default.Save, contentDescription = null); Text("  Write to file") }
+                OutlinedButton(onClick = {
+                    runCatching { bridge.nativeLogClear() }
+                    lines = emptyList()
+                }) { Icon(Icons.Default.Delete, contentDescription = null); Text("  Clear") }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(

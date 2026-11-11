@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,8 +88,9 @@ sealed class Screen(val route: String) {
 }
 
 /**
- * Three top-level pages (Models, Chats = Home, Settings) behind a floating bar, and the Chat page on top
- * of them. The app always starts on Home; it never jumps straight into the last chat. Within a session the Chats tab
+ * Four top-level pages (Chats = Home, Models, Settings, Log), each reached by the buttons in its top bar
+ * ([MainNavButtons]), and the Chat page on top of them. The app always starts on Home; it never jumps straight into the
+ * last chat. Within a session the Chats button
  * returns to the chat that was open before Models or Settings, or to the chat list if that was where the person was.
  */
 @Composable
@@ -106,18 +108,13 @@ fun AppNavigation(
     val backStack by navController.currentBackStackEntryAsState()
     var chatHistoryPaneVisible by rememberSaveable { mutableStateOf(true) }
     val route = backStack?.destination?.route
-    val tab = when (route) {
-        Screen.Home.route -> TopTab.CHATS
-        Screen.Models.route -> TopTab.MODELS
-        Screen.Settings.route -> TopTab.SETTINGS
-        else -> null
-    }
 
     fun goTo(target: TopTab) {
         val dest = when (target) {
             TopTab.CHATS -> Screen.Home.route
             TopTab.MODELS -> Screen.Models.route
             TopTab.SETTINGS -> Screen.Settings.route
+            TopTab.LOG -> Screen.Log.route
         }
         if (dest == route) return
         navController.navigate(dest) {
@@ -135,7 +132,7 @@ fun AppNavigation(
         }
     }
 
-    /** The Chats tab of the floating bar: back into the chat that was open, else the chat list. */
+    /** The Chats button of every page except the chat itself: back into the chat that was open, else the chat list. */
     fun goToChats() {
         if (!resumeChat) return goTo(TopTab.CHATS)
         navController.navigate(Screen.Chat.createRoute(chatViewModel.uiState.value.currentSession?.id)) {
@@ -153,19 +150,29 @@ fun AppNavigation(
         if (!initialSessionId.isNullOrBlank()) openChat(initialSessionId)
     }
 
+    // The buttons in every top bar. From the chat itself "Chats" shows the chat list; from the other pages it returns
+    // to the chat that was open.
+    val mainNav = MainNav { target ->
+        when {
+            target == TopTab.CHATS && route?.startsWith("chat") != true -> goToChats()
+            else -> goTo(target)
+        }
+    }
+
+    CompositionLocalProvider(LocalMainNav provides mainNav) {
     Box(modifier = modifier.fillMaxSize().then(appBackgroundModifier())) {
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
             modifier = Modifier.fillMaxSize(),
-            // Switching between Chats / Models / Settings / a chat is instant: no fade, no slide.
+            // Switching between Chats / Models / Settings / Log / a chat is instant: no fade, no slide.
             enterTransition = { EnterTransition.None },
             exitTransition = { ExitTransition.None },
             popEnterTransition = { EnterTransition.None },
             popExitTransition = { ExitTransition.None }
         ) {
             composable(route = Screen.Home.route) {
-                HomeScreen(viewModel = historyViewModel, onOpenChat = { id -> openChat(id) })
+                HomeScreen(viewModel = historyViewModel, onOpenChat = { id -> openChat(id) }, onNewChat = { openChat(null) })
             }
             composable(route = Screen.Models.route) {
                 ModelScreen(viewModel = modelViewModel)
@@ -176,11 +183,11 @@ fun AppNavigation(
                     onOpenModels = { goTo(TopTab.MODELS) },
                     onOpenWorkspace = { navController.navigate(Screen.Workspace.route) },
                     onOpenAutoSettings = { navController.navigate(Screen.AutoSettings.route) { launchSingleTop = true } },
-                    onOpenLog = { navController.navigate(Screen.Log.route) { launchSingleTop = true } }
+                    onOpenLog = { goTo(TopTab.LOG) }
                 )
             }
             composable(route = Screen.Log.route) {
-                LogScreen(viewModel = settingsViewModel, onNavigateBack = { navController.popBackStack() })
+                LogScreen(viewModel = settingsViewModel)
             }
             composable(route = Screen.AutoSettings.route) {
                 DeviceTuneScreen(
@@ -318,14 +325,6 @@ fun AppNavigation(
                 }
             }
         }
-
-        if (tab != null) {
-            FloatingNavBar(
-                selected = tab,
-                onSelect = { if (it == TopTab.CHATS) goToChats() else goTo(it) },
-                onNewChat = { openChat(null) },
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
-        }
+    }
     }
 }

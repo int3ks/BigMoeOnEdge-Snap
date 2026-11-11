@@ -133,7 +133,8 @@ fun SettingsScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = if (AppTheme.visualStyle == AppVisualStyle.SOLID) MaterialTheme.colorScheme.surface else Color.Transparent
                 ),
-                title = { Text("SETTINGS", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold) }
+                title = { Text("SETTINGS", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold) },
+                actions = { com.bigmoe.onedge.ui.navigation.MainNavButtons(com.bigmoe.onedge.ui.navigation.TopTab.SETTINGS) }
             )
         },
         modifier = modifier,
@@ -851,7 +852,7 @@ private fun SettingsContent(
         }
         Spacer(Modifier.height(8.dp))
 
-        Spacer(Modifier.height(120.dp)) // clear of the floating navigation bar
+        Spacer(Modifier.height(24.dp))
     }
 
     editingPalette?.let { palette ->

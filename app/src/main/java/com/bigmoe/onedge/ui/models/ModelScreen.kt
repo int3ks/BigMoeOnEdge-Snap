@@ -181,7 +181,8 @@ fun ModelScreen(
             TopAppBar(
                 title = {
                     Text("MODELS", style = MaterialTheme.typography.headlineMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold)
-                }
+                },
+                actions = { com.bigmoe.onedge.ui.navigation.MainNavButtons(com.bigmoe.onedge.ui.navigation.TopTab.MODELS) }
             )
         },
         modifier = modifier
@@ -442,8 +443,7 @@ fun ModelScreen(
                 item(key = "mmproj_header") { SectionHeader("Vision projectors (mmproj)", "Attach one to a model above; it loads together with that model.") }
                 items(projectors, key = { "mmproj:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
             }
-            // keeps the last row clear of the floating navigation bar
-            item(key = "bottom_spacer") { androidx.compose.foundation.layout.Spacer(Modifier.height(112.dp)) }
+            item(key = "bottom_spacer") { androidx.compose.foundation.layout.Spacer(Modifier.height(24.dp)) }
         }
     }
 

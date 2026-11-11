@@ -140,7 +140,8 @@ fun ChatInputBar(
             ) {
                 if (textValue.isEmpty()) {
                     Text(
-                        text = "Ask anything",
+                        text = systemPrompts.firstOrNull { it.id == activeSystemPromptId }?.name?.trim()?.takeIf { it.isNotEmpty() }
+                            ?.let { "I am $it, you can ask me anything" } ?: "Ask anything",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)
                     )

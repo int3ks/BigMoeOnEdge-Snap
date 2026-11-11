@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Delete
@@ -64,6 +65,7 @@ import com.bigmoe.onedge.ui.rememberContextMenuState
 fun HomeScreen(
     viewModel: HistoryViewModel,
     onOpenChat: (String) -> Unit,
+    onNewChat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val sessions by viewModel.sessionsState.collectAsState()
@@ -90,6 +92,10 @@ fun HomeScreen(
                     Icon(Icons.Default.CleaningServices, contentDescription = "Delete all chats")
                 }
             }
+            IconButton(onClick = onNewChat) {
+                Icon(Icons.Default.Add, contentDescription = "New chat", tint = MaterialTheme.colorScheme.primary)
+            }
+            com.bigmoe.onedge.ui.navigation.MainNavButtons(com.bigmoe.onedge.ui.navigation.TopTab.CHATS)
         }
 
         if (sessions.isEmpty()) {
@@ -109,7 +115,7 @@ fun HomeScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.secondary
                 )
-                Spacer(Modifier.height(96.dp)) // keeps the text clear of the floating bar
+                Spacer(Modifier.height(24.dp))
             }
         } else {
             LazyColumn(
@@ -125,7 +131,7 @@ fun HomeScreen(
                         onDelete = { deleting = session }
                     )
                 }
-                item { Spacer(Modifier.height(112.dp)) }
+                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }

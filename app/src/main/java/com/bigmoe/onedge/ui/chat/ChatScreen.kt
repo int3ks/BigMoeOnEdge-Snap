@@ -26,8 +26,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,6 +76,8 @@ import com.bigmoe.onedge.ui.history.HistoryViewModel
 import com.bigmoe.onedge.ui.home.ChatHistoryPanel
 import com.bigmoe.onedge.ui.models.ModelPickerButton
 import com.bigmoe.onedge.ui.models.ModelViewModel
+import com.bigmoe.onedge.ui.navigation.MainNavButtons
+import com.bigmoe.onedge.ui.navigation.TopTab
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.conflate
@@ -253,23 +253,18 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    // Always-visible escape hatch back to the main Chats/Home page.
-                    // This is especially useful on tablets where the chat is a permanent split pane.
-                    IconButton(onClick = onNavigateHome) {
-                        Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
-                    }
                     IconButton(onClick = { showFilesSheet = true }) {
                         Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "Chat files")
                     }
-                    // Opens a small list of your models (load / unload) instead of jumping to the Models page.
-                    ModelPickerButton(
-                        viewModel = modelViewModel,
-                        isGenerating = uiState.isGenerating,
-                        onManageModels = onNavigateToModels
-                    )
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
-                    }
+                    // The same page buttons as on every other page (Chats here shows the chat list). Models opens a
+                    // small list of your models (load / unload) instead of jumping to the Models page.
+                    MainNavButtons(current = TopTab.CHATS, modelsButton = {
+                        ModelPickerButton(
+                            viewModel = modelViewModel,
+                            isGenerating = uiState.isGenerating,
+                            onManageModels = onNavigateToModels
+                        )
+                    })
                 }
             )
         },

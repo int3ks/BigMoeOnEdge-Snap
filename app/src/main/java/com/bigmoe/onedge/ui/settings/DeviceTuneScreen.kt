@@ -135,7 +135,7 @@ fun DeviceTuneScreen(
                     onRetest = { viewModel.retest(param) }
                 )
             }
-            item { Spacer(Modifier.height(112.dp)) }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 }
