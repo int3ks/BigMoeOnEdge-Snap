@@ -2412,7 +2412,22 @@ static ggml_status ggml_backend_hexagon_graph_compute(ggml_backend_t backend, gg
                 }
             }
 
-            GGML_ASSERT(htp_kparams_solve(sess, node));
+            if (!htp_kparams_solve(sess, node)) {
+                // BigMoeOnEdge-Snap: say which node it was before aborting (supports_op accepted it, the solve
+                // with the real tensors did not), so the log file names the op, its types and its shapes.
+                fprintf(stderr, "ggml-hex: kparams-solve failed for node '%s' op %s -> %s [%lld,%lld,%lld,%lld]\n",
+                        n->name, ggml_op_desc(n), ggml_type_name(n->type),
+                        (long long) n->ne[0], (long long) n->ne[1], (long long) n->ne[2], (long long) n->ne[3]);
+                for (int si = 0; si < GGML_MAX_SRC && n->src[si]; si++) {
+                    const ggml_tensor * t = n->src[si];
+                    fprintf(stderr, "ggml-hex:   src%d '%s' %s [%lld,%lld,%lld,%lld] op %s%s%s\n", si, t->name,
+                            ggml_type_name(t->type),
+                            (long long) t->ne[0], (long long) t->ne[1], (long long) t->ne[2], (long long) t->ne[3],
+                            ggml_op_desc(t), t->view_src ? " view" : "", ggml_is_contiguous(t) ? "" : " non-contiguous");
+                }
+                fflush(stderr);
+                GGML_ABORT("ggml-hex: graph-compute could not solve kernel params for %s\n", ggml_op_desc(n));
+            }
             if (node.opcode == HTP_OP_CPY && node.kparams<htp_copy_kernel_params>()->total_elems == 0) {
                 continue;
             }
