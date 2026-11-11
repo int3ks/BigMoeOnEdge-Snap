@@ -763,6 +763,12 @@ class ChatViewModel(
 
     fun toggleToolTermux() = updateToggles { it.copy(termux = !it.termux) }
 
+    /**
+     * Picks the system prompt of the open chat. Only the chat's own switches change: the model stays loaded, the next
+     * message just starts with the other prompt (the engine re-reads the conversation once).
+     */
+    fun selectSystemPrompt(id: String) = updateToggles { it.copy(promptId = id) }
+
     fun toggleToolExternal() {
         val v = !_uiState.value.settings.toolsExternalEnabled
         viewModelScope.launch { settingsDataStore.updateToolsExternalEnabled(v) }

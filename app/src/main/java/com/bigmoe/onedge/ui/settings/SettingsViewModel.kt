@@ -11,6 +11,7 @@ import com.bigmoe.onedge.core.ModelManager
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import com.bigmoe.onedge.data.local.datastore.EngineSettingsDataStore
 import com.bigmoe.onedge.data.local.datastore.AppVisualStyle
+import com.bigmoe.onedge.data.local.datastore.SystemPromptProfile
 import com.bigmoe.onedge.data.local.datastore.WebSearchMode
 import com.bigmoe.onedge.ui.theme.PalettePresets
 import com.bigmoe.onedge.ui.theme.PaletteSpec
@@ -46,8 +47,16 @@ class SettingsViewModel(
     }
 
     // ---- per-request (apply to the next message) ----
-    fun updateSystemPrompt(v: String) = launch { dataStore.updateSystemPrompt(v) }
-    fun updateMaxTokens(v: Int) = launch { dataStore.updateMaxTokens(v) }
+    fun addSystemPrompt() = launch {
+        dataStore.editSystemPrompts { list ->
+            list + SystemPromptProfile(SystemPromptProfile.newId(list), "Prompt ${list.size + 1}", "")
+        }
+    }
+    fun updateSystemPrompt(id: String, name: String, prompt: String) = launch {
+        dataStore.editSystemPrompts { list -> list.map { if (it.id == id) it.copy(name = name, prompt = prompt) else it } }
+    }
+    fun deleteSystemPrompt(id: String) = launch { dataStore.editSystemPrompts { list -> list.filterNot { it.id == id } } }
+    fun setDefaultSystemPrompt(id: String) = launch { dataStore.updateDefaultSystemPromptId(id) }
     fun updateThinkingEnabled(v: Boolean) = launch { dataStore.updateThinkingEnabled(v) }
     fun updateWebSearchEnabled(v: Boolean) = launch { dataStore.updateWebSearchEnabled(v) }
     fun updateWebSearchMode(v: WebSearchMode) = launch { dataStore.updateWebSearchMode(v) }

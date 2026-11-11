@@ -25,6 +25,59 @@ private val Context.dataStore by preferencesDataStore(name = "engine_settings")
 
 const val DEFAULT_SYSTEM_PROMPT = ""
 
+/** One named system prompt. Chats pick one of them; [id] is stable, [name] is only a label. */
+data class SystemPromptProfile(val id: String, val name: String, val prompt: String) {
+    companion object {
+        /** The profile the single system prompt of older versions becomes. */
+        const val LEGACY_ID = "default"
+
+        fun newId(existing: List<SystemPromptProfile>): String {
+            val used = existing.map { it.id }.toSet()
+            while (true) {
+                val id = java.util.UUID.randomUUID().toString().take(8)
+                if (id !in used) return id
+            }
+        }
+
+        fun encode(list: List<SystemPromptProfile>): String {
+            val a = JSONArray()
+            list.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("prompt", it.prompt)) }
+            return a.toString()
+        }
+
+        /** Empty for anything unreadable. Entries without an id are skipped, duplicate ids keep the first. */
+        fun decode(raw: String?): List<SystemPromptProfile> {
+            if (raw.isNullOrBlank()) return emptyList()
+            return runCatching {
+                val a = JSONArray(raw)
+                val out = ArrayList<SystemPromptProfile>(a.length())
+                for (i in 0 until a.length()) {
+                    val o = a.optJSONObject(i) ?: continue
+                    val id = o.optString("id")
+                    if (id.isBlank() || out.any { it.id == id }) continue
+                    out.add(SystemPromptProfile(id, o.optString("name"), o.optString("prompt")))
+                }
+                out
+            }.getOrDefault(emptyList())
+        }
+
+        /**
+         * The stored profiles; before there were any, the old single system prompt (if it was not blank) becomes the
+         * profile "Default".
+         */
+        fun resolve(json: String?, legacyPrompt: String?): List<SystemPromptProfile> {
+            val stored = decode(json)
+            if (stored.isNotEmpty() || !json.isNullOrBlank()) return stored
+            return if (legacyPrompt.isNullOrBlank()) emptyList()
+            else listOf(SystemPromptProfile(LEGACY_ID, "Default", legacyPrompt))
+        }
+
+        /** The profile with [id], else the first one (the default is never "nothing" while profiles exist). */
+        fun pick(list: List<SystemPromptProfile>, id: String?): SystemPromptProfile? =
+            list.firstOrNull { it.id == id } ?: list.firstOrNull()
+    }
+}
+
 /** When web search is switched on: the model decides (tool call) or the app searches for every message. */
 enum class WebSearchMode { AUTO, ALWAYS }
 
@@ -125,10 +178,15 @@ data class EngineSettings(
     /** Preserve the app's existing ability to choose a cache below the engine's 1500 MiB floor. */
     val forceCache: Boolean = true,
     // ---- per-request ----
-    /** <= 0 = as long as the context allows. */
+    /** Always -1: generation runs until the context is full (the setting was removed). */
     val maxTokens: Int = -1,
     val thinkingEnabled: Boolean = false,
+    /** What the chat in use sends: the text of the profile [systemPromptId]. Not stored; see [systemPrompts]. */
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+    val systemPromptId: String = "",
+    /** All named system prompts, and the one new chats start with. */
+    val systemPrompts: List<SystemPromptProfile> = emptyList(),
+    val defaultSystemPromptId: String = "",
     val isWebSearchEnabled: Boolean = false,
     val webSearchMode: WebSearchMode = WebSearchMode.ALWAYS,
     /** Allow compact, structured native UI blocks when explicitly requested; off keeps ordinary replies lean. */
@@ -335,9 +393,11 @@ class EngineSettingsDataStore(private val context: Context) {
         val NGRAM_MAX_MATCH = intPreferencesKey("ngram_max_match")
         val DECISION_PREFIX_CACHE = stringPreferencesKey("decision_prefix_cache")
         val FORCE_CACHE = booleanPreferencesKey("force_cache")
-        val MAX_TOKENS = intPreferencesKey("max_tokens")
         val THINKING = booleanPreferencesKey("thinking_enabled_v2")
+        /** Only read, to turn the single prompt of older versions into a profile. */
         val SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
+        val SYSTEM_PROMPTS_JSON = stringPreferencesKey("system_prompts_json")
+        val DEFAULT_SYSTEM_PROMPT_ID = stringPreferencesKey("default_system_prompt_id")
         val WEB_SEARCH = booleanPreferencesKey("is_web_search_enabled")
         val WEB_SEARCH_MODE = stringPreferencesKey("web_search_mode")
         val INTERACTIVE_UI = booleanPreferencesKey("interactive_ui_enabled")
@@ -375,6 +435,7 @@ class EngineSettingsDataStore(private val context: Context) {
 
     val settingsFlow: Flow<EngineSettings> = context.dataStore.data.map { p ->
         val d = EngineSettings()
+        val profiles = SystemPromptProfile.resolve(p[Keys.SYSTEM_PROMPTS_JSON], p[Keys.SYSTEM_PROMPT])
         EngineSettings(
             contextLength = p[Keys.CONTEXT_LENGTH] ?: d.contextLength,
             threadCount = p[Keys.THREAD_COUNT] ?: d.threadCount,
@@ -427,9 +488,12 @@ class EngineSettingsDataStore(private val context: Context) {
             ngramMaxMatch = p[Keys.NGRAM_MAX_MATCH] ?: d.ngramMaxMatch,
             decisionPrefixCache = enumOrDefault(p[Keys.DECISION_PREFIX_CACHE], d.decisionPrefixCache),
             forceCache = p[Keys.FORCE_CACHE] ?: d.forceCache,
-            maxTokens = p[Keys.MAX_TOKENS] ?: d.maxTokens,
+            maxTokens = -1,
             thinkingEnabled = p[Keys.THINKING] ?: d.thinkingEnabled,
-            systemPrompt = p[Keys.SYSTEM_PROMPT] ?: d.systemPrompt,
+            systemPrompt = SystemPromptProfile.pick(profiles, p[Keys.DEFAULT_SYSTEM_PROMPT_ID])?.prompt ?: d.systemPrompt,
+            systemPromptId = SystemPromptProfile.pick(profiles, p[Keys.DEFAULT_SYSTEM_PROMPT_ID])?.id ?: "",
+            systemPrompts = profiles,
+            defaultSystemPromptId = p[Keys.DEFAULT_SYSTEM_PROMPT_ID] ?: "",
             isWebSearchEnabled = p[Keys.WEB_SEARCH] ?: d.isWebSearchEnabled,
             webSearchMode = enumOrDefault(p[Keys.WEB_SEARCH_MODE], d.webSearchMode),
             interactiveUiEnabled = p[Keys.INTERACTIVE_UI] ?: d.interactiveUiEnabled,
@@ -578,9 +642,27 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateForceCache(v: Boolean) = set(Keys.FORCE_CACHE, v)
 
     // ---- per request ----
-    suspend fun updateMaxTokens(v: Int) = set(Keys.MAX_TOKENS, v)
     suspend fun updateThinkingEnabled(v: Boolean) = set(Keys.THINKING, v)
-    suspend fun updateSystemPrompt(v: String) = set(Keys.SYSTEM_PROMPT, v)
+
+    /**
+     * Changes the list of system prompts in one transaction, so two edits (name and text are saved separately, a
+     * moment apart) never overwrite each other. The first change also stores what the old single prompt became.
+     */
+    suspend fun editSystemPrompts(change: (List<SystemPromptProfile>) -> List<SystemPromptProfile>) {
+        context.dataStore.edit { p ->
+            val before = SystemPromptProfile.resolve(p[Keys.SYSTEM_PROMPTS_JSON], p[Keys.SYSTEM_PROMPT])
+            val after = change(before)
+            p[Keys.SYSTEM_PROMPTS_JSON] = SystemPromptProfile.encode(after)
+            // Keep the default valid: the first profile ever made is the default, a deleted default falls back.
+            val def = p[Keys.DEFAULT_SYSTEM_PROMPT_ID]
+            if (after.none { it.id == def }) {
+                val next = after.firstOrNull()?.id
+                if (next != null) p[Keys.DEFAULT_SYSTEM_PROMPT_ID] = next else p.remove(Keys.DEFAULT_SYSTEM_PROMPT_ID)
+            }
+        }
+    }
+
+    suspend fun updateDefaultSystemPromptId(id: String) = set(Keys.DEFAULT_SYSTEM_PROMPT_ID, id)
     suspend fun updateWebSearchEnabled(v: Boolean) = set(Keys.WEB_SEARCH, v)
     suspend fun updateWebSearchMode(v: WebSearchMode) = set(Keys.WEB_SEARCH_MODE, v.name)
     suspend fun updateInteractiveUiEnabled(v: Boolean) = set(Keys.INTERACTIVE_UI, v)

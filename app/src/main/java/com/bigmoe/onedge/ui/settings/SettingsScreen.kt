@@ -79,7 +79,7 @@ import com.bigmoe.onedge.ui.theme.appSurfaceModifier
 import kotlinx.coroutines.delay
 import java.io.File
 
-private const val DEBOUNCE_MS = 500L
+internal const val DEBOUNCE_MS = 500L
 
 /** Same choice lists as the original BigMoeOnEdge Android app (AppSettings.*_CHOICES). */
 private object Choices {
@@ -96,7 +96,6 @@ private object Choices {
     val BATCH_WIDTH = com.bigmoe.onedge.core.SettingChoices.BATCH_WIDTH
     val NPU_MIN_TOKENS = com.bigmoe.onedge.core.SettingChoices.NPU_MIN_TOKENS
     val NPU_ROUTED_FULL_PCT = listOf(50, 70, 85, 95, 100)
-    val NPREDICT = listOf(16, 32, 48, 64, 128, 256, 512, 1024, 2048, 4096, -1)
     val IMAGE_DIM = listOf(256, 384, 512, 768, 1024, 1344)
     val VIDEO_FRAMES = listOf(1, 2, 4, 6, 8, 12, 16)
 }
@@ -169,14 +168,11 @@ private fun SettingsContent(
 ) {
     val context = LocalContext.current
     val readyInfo = (engine as? EngineState.Ready)?.info
-    // A model with its own guess ahead (Models page) is not compared with the global mode.
-    val reloadNeeded = readyInfo != null && loadConfigDiffers(readyInfo.config, settings, ignoreSpec = readyInfo.requested.modelSpec != null)
     // Streaming settings only apply when the loaded model is a Mixture-of-Experts one (chosen automatically on load).
     val stream = readyInfo?.config?.mmapBaseline != true
     val cacheOn = stream && settings.cacheMb != 0
 
     // Text fields keep their own state, seeded ONCE from the stored value, and write back debounced.
-    var systemPrompt by remember { mutableStateOf(settings.systemPrompt) }
     var braveKey by remember { mutableStateOf(settings.braveApiKey) }
     var searxUrl by remember { mutableStateOf(settings.searxngUrl) }
     var temp by remember { mutableFloatStateOf(settings.temperature) }
@@ -194,7 +190,6 @@ private fun SettingsContent(
     var experimental by remember { mutableStateOf(false) }
     var performanceExpanded by remember { mutableStateOf(true) }
     var toolsMediaExpanded by remember { mutableStateOf(false) }
-    var modelExpanded by remember { mutableStateOf(false) }
     var appearanceExpanded by remember { mutableStateOf(false) }
     var chatExpanded by remember { mutableStateOf(false) }
     var mediaExpanded by remember { mutableStateOf(false) }
@@ -205,12 +200,6 @@ private fun SettingsContent(
     var editingPalette by remember { mutableStateOf<PaletteSpec?>(null) }
     var editingIsNew by remember { mutableStateOf(false) }
 
-    // Reveal the reload action automatically whenever a load-sensitive setting diverges from the live session.
-    LaunchedEffect(reloadNeeded) { if (reloadNeeded) modelExpanded = true }
-
-    LaunchedEffect(systemPrompt) {
-        if (systemPrompt != settings.systemPrompt) { delay(DEBOUNCE_MS); viewModel.updateSystemPrompt(systemPrompt) }
-    }
     LaunchedEffect(braveKey) {
         if (braveKey != settings.braveApiKey) { delay(DEBOUNCE_MS); viewModel.updateBraveApiKey(braveKey) }
     }
@@ -324,70 +313,14 @@ private fun SettingsContent(
         Spacer(Modifier.height(8.dp))
 
         SettingsFoldout(
-            title = "Model & loading", subtitle = "Current model status and model-management shortcuts", expanded = modelExpanded,
-            onToggle = { modelExpanded = !modelExpanded }
-        )
-        androidx.compose.animation.AnimatedVisibility(visible = modelExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            // ------------------------------------------------------------ model
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = when (engine) {
-                        is EngineState.Ready -> "Loaded: ${engine.info.name}"
-                        is EngineState.Loading -> "Loading…"
-                        is EngineState.Failed -> "Last load failed"
-                        EngineState.Unloaded -> "No model loaded"
-                    },
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                OutlinedButton(onClick = onOpenModels) { Text("Manage models") }
-            }
-            if (readyInfo != null) {
-                Hint(
-                    if (readyInfo.config.mmapBaseline) "Regular (non-MoE) model: loaded the ordinary way, expert streaming is off automatically"
-                    else "Expert streaming ON • I/O–compute overlap: " + if (readyInfo.overlapActive) "active" else "not active"
-                )
-            }
-            if (reloadNeeded) {
-                Spacer(Modifier.height(8.dp))
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            "Engine settings changed since the model was loaded. The engine fixes them when it opens the model.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Button(onClick = { viewModel.reloadModel() }) { Text("Reload model now") }
-                    }
-                }
-            }
-            Divider()
-
-
-        SettingsFoldout(
-            title = "Chat", subtitle = "System prompt and response length", expanded = chatExpanded,
+            title = "Chat", subtitle = "System prompts for your chats", expanded = chatExpanded,
             onToggle = { chatExpanded = !chatExpanded }
         )
         androidx.compose.animation.AnimatedVisibility(visible = chatExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            // ------------------------------------------------------------ chat (per message)
-            Text("System prompt", style = MaterialTheme.typography.labelMedium)
-            OutlinedTextField(
-                value = systemPrompt,
-                onValueChange = { systemPrompt = it },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3
-            )
-            Hint("Applies to the next message. Changing it makes the engine re-read the conversation once.")
-            Spacer(Modifier.height(12.dp))
-            ChoiceSetting("Tokens to generate", Choices.NPREDICT.map { it to if (it < 0) "Unlimited (until the context is full)" else it.toString() },
-                selected = if (settings.maxTokens <= 0) -1 else settings.maxTokens) { viewModel.updateMaxTokens(it) }
+            // ------------------------------------------------------------ chat (system prompts)
+            SystemPromptsSection(settings = settings, viewModel = viewModel)
             Divider()
-
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-
             }
         }
         Spacer(Modifier.height(8.dp))

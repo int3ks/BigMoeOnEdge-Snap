@@ -24,16 +24,23 @@ data class ChatToggles(
     val files: Boolean,
     val code: Boolean,
     val utilities: Boolean,
-    val termux: Boolean
+    val termux: Boolean,
+    /** The chat's own system prompt (a [SystemPromptProfile] id); empty = whatever the default is. */
+    val promptId: String = ""
 ) {
-    fun applyTo(s: EngineSettings): EngineSettings = s.copy(
-        thinkingEnabled = thinking, isWebSearchEnabled = webSearch, toolsFilesEnabled = files,
-        toolsCodeEnabled = code, toolsUtilitiesEnabled = utilities, toolsTermuxEnabled = termux
-    )
+    fun applyTo(s: EngineSettings): EngineSettings {
+        // A deleted profile falls back to the default, like a chat that never chose one.
+        val prompt = SystemPromptProfile.pick(s.systemPrompts, promptId.ifBlank { s.defaultSystemPromptId })
+        return s.copy(
+            thinkingEnabled = thinking, isWebSearchEnabled = webSearch, toolsFilesEnabled = files,
+            toolsCodeEnabled = code, toolsUtilitiesEnabled = utilities, toolsTermuxEnabled = termux,
+            systemPrompt = prompt?.prompt ?: s.systemPrompt, systemPromptId = prompt?.id ?: s.systemPromptId
+        )
+    }
 
     fun encode(): String = JSONObject()
         .put("thinking", thinking).put("webSearch", webSearch).put("files", files)
-        .put("code", code).put("utilities", utilities).put("termux", termux).toString()
+        .put("code", code).put("utilities", utilities).put("termux", termux).put("prompt", promptId).toString()
 
     companion object {
         fun from(s: EngineSettings) = ChatToggles(
@@ -49,7 +56,8 @@ data class ChatToggles(
                 ChatToggles(
                     o.optBoolean("thinking", d.thinking), o.optBoolean("webSearch", d.webSearch),
                     o.optBoolean("files", d.files), o.optBoolean("code", d.code),
-                    o.optBoolean("utilities", d.utilities), o.optBoolean("termux", d.termux)
+                    o.optBoolean("utilities", d.utilities), o.optBoolean("termux", d.termux),
+                    o.optString("prompt", "")
                 )
             }.getOrNull()
         }

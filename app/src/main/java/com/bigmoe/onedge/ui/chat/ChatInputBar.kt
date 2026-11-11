@@ -25,11 +25,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.DropdownMenu
@@ -94,9 +96,13 @@ fun ChatInputBar(
     choiceOptions: String = "",
     onToggleChooseFromOptions: () -> Unit = {},
     onChoiceOptionsChanged: (String) -> Unit = {},
+    systemPrompts: List<com.bigmoe.onedge.data.local.datastore.SystemPromptProfile> = emptyList(),
+    activeSystemPromptId: String = "",
+    onSelectSystemPrompt: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var attachMenu by remember { mutableStateOf(false) }
+    var promptMenu by remember { mutableStateOf(false) }
     var toolsMenu by remember { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -260,6 +266,30 @@ fun ChatInputBar(
                         enabled = thinkingSwitchable,
                         onClick = onToggleThinking
                     )
+                    // Only worth a button when there is something to choose from (Settings → Chat).
+                    if (systemPrompts.size > 1) {
+                        val active = systemPrompts.firstOrNull { it.id == activeSystemPromptId }
+                        Box {
+                            ToggleIcon(
+                                icon = Icons.Default.Psychology,
+                                on = promptMenu,
+                                description = "System prompt: " + (active?.name?.ifBlank { "(unnamed)" } ?: "none"),
+                                onClick = { promptMenu = true }
+                            )
+                            DropdownMenu(expanded = promptMenu, onDismissRequest = { promptMenu = false }) {
+                                systemPrompts.forEach { p ->
+                                    DropdownMenuItem(
+                                        text = { Text(p.name.ifBlank { "(unnamed)" }) },
+                                        trailingIcon = { if (p.id == activeSystemPromptId) Icon(Icons.Default.Check, "Selected") },
+                                        onClick = {
+                                            promptMenu = false
+                                            onSelectSystemPrompt(p.id)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Box {
                         ToggleIcon(
                             icon = Icons.Default.Build,
