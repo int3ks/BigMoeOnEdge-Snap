@@ -3,6 +3,7 @@ package com.bigmoe.onedge
 import android.app.Application
 import com.bigmoe.onedge.di.AppContainer
 import com.bigmoe.onedge.core.HexagonRuntimeSetup
+import com.bigmoe.onedge.core.LogFiles
 import kotlinx.coroutines.flow.first
 
 class OnEdgeApplication : Application() {
@@ -16,12 +17,13 @@ class OnEdgeApplication : Application() {
         // The ordinary CPU build contains no DSP skeleton assets; setup then safely no-ops.
         HexagonRuntimeSetup.prepare(this)
         container = AppContainer(this)
+        LogFiles.init(this) { container.workspace.rootDir }
         // Log page: record llama.cpp's and the engine's log from the start, but only when the user switched it on
         // (Log page, off by default). Off the main thread: it reads the setting and loads the native library.
         Thread {
             runCatching {
                 val on = kotlinx.coroutines.runBlocking { container.settingsDataStore.settingsFlow.first().logCapture }
-                if (on) com.bigmoe.onedge.core.EngineNativeBridge().nativeLogStart()
+                if (on) LogFiles.startRecording(com.bigmoe.onedge.core.EngineNativeBridge())
             }
         }.start()
         container.followCpuCoreSetting()

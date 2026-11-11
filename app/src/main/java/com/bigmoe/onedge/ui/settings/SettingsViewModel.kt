@@ -66,7 +66,7 @@ class SettingsViewModel(
         withContext(Dispatchers.IO) {
             runCatching {
                 val bridge = com.bigmoe.onedge.core.EngineNativeBridge()
-                if (v) bridge.nativeLogStart() else bridge.nativeLogStop()
+                if (v) com.bigmoe.onedge.core.LogFiles.startRecording(bridge) else com.bigmoe.onedge.core.LogFiles.stopRecording(bridge)
             }
         }
     }

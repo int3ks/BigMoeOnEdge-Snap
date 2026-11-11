@@ -1066,6 +1066,39 @@ std::mutex g_cap_mu;
 int g_saved_stderr = -1;
 bool g_capturing = false;
 
+// Optional log file next to the in-memory ring: every line is written with write() (O_APPEND) the moment the reader
+// has it, so the file survives a crash or a kill of the process (the data is in the kernel's page cache then).
+constexpr uint64_t kLogFileMaxBytes = 64ull << 20; // a runaway log must not fill the tablet
+std::mutex g_file_mu;
+int g_log_file_fd = -1;
+uint64_t g_log_file_bytes = 0;
+
+void log_file_write(const std::string & stamped) {
+    std::lock_guard<std::mutex> lock(g_file_mu);
+    if (g_log_file_fd < 0) return;
+    if (g_log_file_bytes + stamped.size() + 1 > kLogFileMaxBytes) {
+        close(g_log_file_fd);
+        g_log_file_fd = -1;
+        return;
+    }
+    std::string out = stamped;
+    out.push_back('\n');
+    const char * p = out.data();
+    size_t left = out.size();
+    while (left > 0) {
+        const ssize_t w = write(g_log_file_fd, p, left);
+        if (w < 0 && errno == EINTR) continue;
+        if (w <= 0) { // disk full or the file vanished: stop writing, keep the ring going
+            close(g_log_file_fd);
+            g_log_file_fd = -1;
+            return;
+        }
+        p += w;
+        left -= static_cast<size_t>(w);
+        g_log_file_bytes += static_cast<uint64_t>(w);
+    }
+}
+
 void log_push_line(const std::string & line) {
     if (line.empty()) return;
     timeval tv{};
@@ -1078,6 +1111,7 @@ void log_push_line(const std::string & line) {
                   static_cast<int>(tv.tv_usec / 1000));
     std::string stamped = stamp;
     stamped += line;
+    log_file_write(stamped);
     std::lock_guard<std::mutex> lock(g_log_mu);
     g_log_lines.push_back(std::move(stamped));
     g_log_next_seq++;
@@ -1112,9 +1146,9 @@ void log_reader(int fd) {
 }
 } // namespace
 
-// Idempotent. Nothing is captured while it is off.
+// Idempotent. Nothing is captured while it is off. [path] (may be null) is a log file that every line is appended to.
 extern "C" JNIEXPORT void JNICALL
-Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStart(JNIEnv *, jobject) {
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStart(JNIEnv * env, jobject, jstring path) {
     std::lock_guard<std::mutex> cap(g_cap_mu);
     if (g_capturing) return;
     int fds[2];
@@ -1133,9 +1167,26 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStart(JNIEnv *, jobject)
         return;
     }
     close(fds[1]); // stderr keeps the write end open
+    if (path != nullptr) {
+        const char * chars = env->GetStringUTFChars(path, nullptr);
+        if (chars != nullptr) {
+            const int fd = open(chars, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+            env->ReleaseStringUTFChars(path, chars);
+            if (fd >= 0) {
+                std::lock_guard<std::mutex> lock(g_file_mu);
+                if (g_log_file_fd >= 0) close(g_log_file_fd);
+                g_log_file_fd = fd;
+                g_log_file_bytes = static_cast<uint64_t>(lseek(fd, 0, SEEK_END)); // Kotlin wrote a header already
+            }
+        }
+    }
     try {
         std::thread(log_reader, fds[0]).detach();
     } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(g_file_mu);
+            if (g_log_file_fd >= 0) { close(g_log_file_fd); g_log_file_fd = -1; }
+        }
         // No reader: put stderr back at once, or the first full pipe would have nobody to empty it.
         dup2(saved, STDERR_FILENO);
         close(saved);
@@ -1156,6 +1207,11 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStop(JNIEnv *, jobject) 
     close(g_saved_stderr);
     g_saved_stderr = -1;
     g_capturing = false;
+    std::lock_guard<std::mutex> lock(g_file_mu);
+    if (g_log_file_fd >= 0) {
+        close(g_log_file_fd);
+        g_log_file_fd = -1;
+    }
 }
 
 // UTF-8 text: the first line is the sequence number of the newest line, then every line after `after`, one per line.

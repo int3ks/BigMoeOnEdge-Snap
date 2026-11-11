@@ -116,8 +116,11 @@ class EngineNativeBridge {
     /** Bit 0: expert-ready hook; bit 1: multimodal; bit 2: HTP backend runtime probe succeeded. */
     external fun nativeCapabilities(): Int
 
-    /** Copies stderr (llama.cpp's log, the engine's "bmoe:" lines) into an in-memory ring for the Log page. Idempotent. */
-    external fun nativeLogStart()
+    /**
+     * Copies stderr (llama.cpp's log, the engine's "bmoe:" lines) into an in-memory ring for the Log page. Idempotent.
+     * [path], when not null, is a log file every line is appended to as soon as it arrives (see [LogFiles]).
+     */
+    external fun nativeLogStart(path: String?)
 
     /** Puts the original stderr back; the lines already kept stay. */
     external fun nativeLogStop()
