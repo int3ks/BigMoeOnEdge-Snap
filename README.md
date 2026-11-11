@@ -55,6 +55,32 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
   Termux and other apps can read and write it; the files are moved along in both directions.
 * **Approval setting:** ask before every command and change (default) or allow everything for watched tasks.
 
+### Memory and NPU per model (new)
+* **Memory section in every model card:** switch the NPU prefill (Default / On / Off) and override the expert cache
+  (dropdown, 500 MiB steps from 2000 MiB) **per model**. Both apply the next time the model loads.
+* **Estimate before loading**, read from the GGUF tensor directory: expert cache, other weights in RAM and the extra
+  memory the NPU needs (expert and dense slots, converted copies), compared with the device's RAM. It only warns and
+  never blocks; KV cache and compute buffers are not part of the sum yet.
+* **Free RAM seen on the device:** while a model loads or runs, the app notes the free memory. It remembers the lowest
+  value at which the tablet still responded (also after a restart), so a rough safe limit emerges. The chat title shows
+  the current free memory.
+* **Fix: crash while loading with the NPU on** (a BF16 weight whose tiled matmul kernel does not fit the NPU's VTCM
+  made the Hexagon backend abort). The backend now predicts the tiled layout, and a failing step reports a diagnostic
+  line instead of a silent assert. Verification on more models is still pending.
+
+### Auto settings, log and navigation (new)
+* **Auto settings = a real device test:** measures decode and prefill threads, expert cache, I/O lanes, ubatch and NPU
+  options on the loaded model (coarse, then fine search, median of two runs, heat check, crash marker per value) and
+  applies the best values; results are kept per model.
+* **Log page and crash log:** Settings and chat have a Log button; "Record log" captures llama.cpp's and the engine's
+  stderr, "Write to file" additionally appends it continuously to `.bigmoe/logs`, so it survives a crash. The file
+  header names the app, device and why the previous run ended.
+* **Page buttons in every top bar** (Chats, Models, Settings, Log); the floating bar is gone.
+* **Several named system prompts**; the empty chat box says "I am <prompt name>, you can ask me anything".
+* **Settings export/import** (no paths, no API keys), per-chat toggles for tools, thinking and web search.
+* **Replay keeps the KV prefix** (edit, regenerate and chat switches no longer clear the cache) and the model card shows
+  the **load progress**.
+
 ### Engine and models
 * **Engine updates from upstream BigMoeOnEdge 0.34-0.36:** context checkpoints (Qwen3.5/3.6, Gemma and other
   hybrid or sliding-window models no longer prefill the whole conversation again when a prompt differs from what the
@@ -76,16 +102,16 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 * **CPU core table:** pick the cores for decode (writing the answer) and for prefill (reading the prompt) separately,
   one thread per ticked core. Default: the first two and the last two cores. Implemented with a small llama.cpp hook
   that places each graph's threads before it runs.
-* **KV cache type per model:** F16 (default), Q8_0 (about half the memory, nearly lossless) or Q4_0 (a quarter, costs
-  quality) – the easiest way to afford a bigger context for agent work. A type the device cannot use falls back to F16
+* **KV cache type per model:** Q8_0 (default, about half the memory of F16, nearly lossless), F16 (full precision) or Q4_0
+  (a quarter, costs quality) – the easiest way to afford a bigger context for agent work. A type the device cannot use falls back to F16
   with a note.
 
 ### Models page
 * **Everything attached to the model:** the MTP drafter, the LoRA adapter and the vision projector (mmproj) are
   attached per model and load with it. Loading no longer asks for a projector, and the confirmation only appears when
   the pre-flight checks warn about something.
-* **Guess ahead in one place:** a card for all models with Off / MTP / n-gram, tokens per pass, the MTP confidence
-  floor and the n-gram match lengths. With MTP, a model uses its attached drafter, otherwise its own head.
+* **Guess ahead per model:** each model card sets Off / MTP / n-gram; default mode and tuning (tokens per pass, the MTP
+  confidence floor, the n-gram match lengths) are in Settings → Guess ahead. With MTP, a model uses its attached drafter, otherwise its own head.
 * **Clear order:** autoload switch, Guess ahead card, then the MTP drafters, LoRA adapters and vision projectors in
   their own lists, then the models.
 * **Collapsible model cards:** only the loaded model is open; the others fold into one line with a summary
@@ -360,8 +386,8 @@ Full details, every curl command, and what was and was not verified: [`docs/API_
 
 * `app/src/main/cpp/core`: the customised BigMoeOnEdge engine (0.28 baseline with local patches, see `patches/`, and
   later upstream engine work ported piece by piece, see `docs/UPSTREAM_WATCH.md`). Host tests: `scripts/host-engine-tests.sh`.
-* `app/src/main/cpp/third_party/llama.cpp`: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-2810` (396b6c4,
-  upstream of 2026-10-28) with the local changes in `patches/0007`.
+* `app/src/main/cpp/third_party/llama.cpp`: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-0411` (7ac98f4,
+  upstream v0.9.0) with the local changes in `patches/0007`.
 * `app/src/main/cpp/native-bridge.cpp` and `EngineNativeBridge.kt`: the JNI bridge.
 
 ### Known limitations
@@ -370,6 +396,8 @@ Full details, every curl command, and what was and was not verified: [`docs/API_
   Android or the phone maker can keep an app off some cores.
 * LoRA adapters, MTP drafters for non-Qwen4Exp models and the CPU core table are new and still need more testing on
   real devices; an adapter or drafter that does not fit the model is dropped with a warning.
+* NPU prefill needs extra RAM (several GiB with big models, see Memory in the model card); on a tablet without swap a
+  too large cache plus NPU can freeze the device. The estimate warns, it does not stop you.
 * Multimodal behaviour depends on the exact model and `mmproj` combination; video uses sampled frames.
 * Web search needs a network connection and is slow with large local models.
 * Grammar-checked tool calls are not applied on turns where the model reasons first (Thinking on); there a small
