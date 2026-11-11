@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- Expert cache choices: 500 MiB steps from 2000 up to 10000 MiB (before: 1000 MiB steps above 5000, up to 8000), the auto cache ceiling too (`SettingChoices.CACHE_MB`; the device tuner refines on the same list). The model card's expert cache is the same dropdown as in Settings, with "Default" for the global value, instead of a text field.
 - **Memory per model** (Models page, in each model's card, section "Memory"):
   - **NPU per model** (Default / On / Off) and **expert cache per model** (MiB, empty = the global value), stored in `.model-options.properties` (`.npu`, `.cache`) and applied by `EngineController.load` on top of the global settings; the device tuner still tests the global ones. Both apply at the next load.
   - **Estimate before loading**, from the tensor directory of the GGUF file(s) (`GgufInspector.tensors`, `core/ModelMemory.kt`): expert cache, other weights in RAM, weights too big for RAM that stay on flash, and for the NPU the two expert slots (2 x the largest layer's experts), the layer-weight slots and the Q8_0 copies of weights the NPU's matmul does not take (the rules of `device_arena.cpp`, with file sizes: the NPU can lay a weight out wider). Sum against the device's RAM and the RAM free right now; a warning when the sum is larger, never a block. KV cache / model state and compute buffers are not estimated. A note when the experts are stored in a type the NPU does not compute.

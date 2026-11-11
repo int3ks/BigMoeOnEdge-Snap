@@ -83,9 +83,9 @@ internal const val DEBOUNCE_MS = 500L
 
 /** Same choice lists as the original BigMoeOnEdge Android app (AppSettings.*_CHOICES). */
 private object Choices {
-    // Finer where it matters: 250 MiB steps up to 2000, 500 up to 5000, then 1000 up to 8000.
+    // Finer where it matters: 250 MiB steps up to 2000, then 500 MiB steps up to 10000.
     val CACHE = listOf(CACHE_AUTO_MB, 0) + com.bigmoe.onedge.core.SettingChoices.CACHE_MB
-    val CACHE_CEIL = listOf(0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
+    val CACHE_CEIL = listOf(0) + (1000..10000 step 500).toList()
     val IO = com.bigmoe.onedge.core.SettingChoices.IO_LANES
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)
