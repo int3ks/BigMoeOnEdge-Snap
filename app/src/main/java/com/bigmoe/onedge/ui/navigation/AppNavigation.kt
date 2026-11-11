@@ -180,7 +180,7 @@ fun AppNavigation(
                 )
             }
             composable(route = Screen.Log.route) {
-                LogScreen(onNavigateBack = { navController.popBackStack() })
+                LogScreen(viewModel = settingsViewModel, onNavigateBack = { navController.popBackStack() })
             }
             composable(route = Screen.AutoSettings.route) {
                 DeviceTuneScreen(

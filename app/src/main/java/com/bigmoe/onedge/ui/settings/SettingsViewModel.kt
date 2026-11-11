@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 class SettingsViewModel(
     private val dataStore: EngineSettingsDataStore,
@@ -57,6 +59,17 @@ class SettingsViewModel(
     }
     fun deleteSystemPrompt(id: String) = launch { dataStore.editSystemPrompts { list -> list.filterNot { it.id == id } } }
     fun setDefaultSystemPrompt(id: String) = launch { dataStore.updateDefaultSystemPromptId(id) }
+
+    /** Switches the log recording on or off right now and remembers it for the next start. */
+    fun updateLogCapture(v: Boolean) = launch {
+        dataStore.updateLogCapture(v)
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bridge = com.bigmoe.onedge.core.EngineNativeBridge()
+                if (v) bridge.nativeLogStart() else bridge.nativeLogStop()
+            }
+        }
+    }
     fun updateThinkingEnabled(v: Boolean) = launch { dataStore.updateThinkingEnabled(v) }
     fun updateWebSearchEnabled(v: Boolean) = launch { dataStore.updateWebSearchEnabled(v) }
     fun updateWebSearchMode(v: WebSearchMode) = launch { dataStore.updateWebSearchMode(v) }

@@ -22,10 +22,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,10 +58,12 @@ private const val LOG_POLL_MS = 400L
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LogScreen(onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
+fun LogScreen(viewModel: SettingsViewModel, onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val bridge = remember { EngineNativeBridge() }
+    val settings by viewModel.settingsState.collectAsState()
+    val recording = settings?.logCapture == true
     var lines by remember { mutableStateOf<List<String>>(emptyList()) }
     var filter by remember { mutableStateOf("") }
     var follow by remember { mutableStateOf(true) }
@@ -114,6 +118,18 @@ fun LogScreen(onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
         modifier = modifier
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text("Record log", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Off by default. While on, what llama.cpp and the engine print is kept here. It is cheap, but if the " +
+                            "tablet ever stalls with it on, switch it off. Starts with the app, so switch it on before loading a model " +
+                            "to see the load.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = recording, onCheckedChange = { viewModel.updateLogCapture(it) })
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = filter,
@@ -130,6 +146,9 @@ fun LogScreen(onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 4.dp)
             )
+            if (!recording && lines.isEmpty()) {
+                Text("Nothing recorded. Switch \"Record log\" on, then load or use a model.", style = MaterialTheme.typography.bodyMedium)
+            }
             val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
             SelectionContainer {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {

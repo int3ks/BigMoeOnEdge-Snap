@@ -833,7 +833,7 @@ private fun SettingsContent(
                 settings.metricsCsv
             ) { viewModel.updateMetricsCsv(it) }
             OutlinedButton(onClick = { shareLatestCsv(context) }) { Text("Share latest metrics CSV") }
-            Hint("Log: what llama.cpp and the engine print while loading and generating (timings, cache, I/O, errors), kept since the app started. Filter it, copy it or share it as a file.")
+            Hint("Log: what llama.cpp and the engine print while loading and generating (timings, cache, I/O, errors). Off until you switch \"Record log\" on there. Filter it, copy it or share it as a file.")
             OutlinedButton(onClick = onOpenLog) { Text("Open log") }
             Divider()
 

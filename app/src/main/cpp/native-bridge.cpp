@@ -1040,13 +1040,20 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeAllowedCpus(JNIEnv *, jobje
 
 // ---- In-app log ------------------------------------------------------------------------------------------------
 // llama.cpp's default logger and the engine's "bmoe: ..." lines write to stderr, which an Android app does not see
-// anywhere. nativeLogStart() points stderr at a pipe; a reader thread cuts it into lines, stamps them with the time
-// and keeps the newest kLogMaxLines in memory for the Log page (and copies each to logcat, tag BigMoeLog).
+// anywhere. While recording is on (Log page switch, off by default), stderr points at a pipe; a reader thread cuts it
+// into lines, stamps them with the time and keeps the newest kLogMaxLines in memory for the Log page.
 // Lines are numbered; the page asks for everything after the number it already has.
+//
+// It must never slow the engine down or stop it: the pipe's write end is non-blocking (a full pipe drops text instead of
+// making the writer wait), the pipe is large, the reader runs at a low priority, nothing is forwarded to logcat, and
+// switching it off puts the original stderr back.
 #include <cerrno>
 #include <ctime>
 #include <deque>
 #include <thread>
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 
 namespace {
@@ -1055,7 +1062,9 @@ constexpr size_t kLogMaxLineChars = 2000;
 std::mutex g_log_mu;
 std::deque<std::string> g_log_lines; // oldest first; the newest has sequence number g_log_next_seq - 1
 uint64_t g_log_next_seq = 1;
-std::once_flag g_log_once;
+std::mutex g_cap_mu;
+int g_saved_stderr = -1;
+bool g_capturing = false;
 
 void log_push_line(const std::string & line) {
     if (line.empty()) return;
@@ -1067,7 +1076,6 @@ void log_push_line(const std::string & line) {
     char stamp[24];
     std::snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d.%03d ", local.tm_hour, local.tm_min, local.tm_sec,
                   static_cast<int>(tv.tv_usec / 1000));
-    __android_log_write(ANDROID_LOG_INFO, "BigMoeLog", line.c_str());
     std::string stamped = stamp;
     stamped += line;
     std::lock_guard<std::mutex> lock(g_log_mu);
@@ -1076,9 +1084,11 @@ void log_push_line(const std::string & line) {
     while (g_log_lines.size() > kLogMaxLines) g_log_lines.pop_front();
 }
 
+// Ends (and closes the pipe) when the last write end is gone, i.e. when recording is switched off.
 void log_reader(int fd) {
+    setpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)), 10); // never compete with the compute threads
     std::string pending;
-    char buf[4096];
+    char buf[8192];
     for (;;) {
         const ssize_t n = read(fd, buf, sizeof(buf));
         if (n < 0 && errno == EINTR) continue;
@@ -1097,24 +1107,55 @@ void log_reader(int fd) {
             }
         }
     }
+    log_push_line(pending);
+    close(fd);
 }
 } // namespace
 
-// Idempotent. Nothing is captured before it runs (the app calls it at start).
+// Idempotent. Nothing is captured while it is off.
 extern "C" JNIEXPORT void JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStart(JNIEnv *, jobject) {
-    std::call_once(g_log_once, [] {
-        int fds[2];
-        if (pipe(fds) != 0) return;
-        std::fflush(stderr);
-        if (dup2(fds[1], STDERR_FILENO) < 0) {
-            close(fds[0]);
-            close(fds[1]);
-            return;
-        }
-        close(fds[1]); // stderr keeps the write end open
+    std::lock_guard<std::mutex> cap(g_cap_mu);
+    if (g_capturing) return;
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC) != 0) return;
+    // The write end is shared by stderr (same open file description): a full pipe must drop, never block the engine.
+    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+#ifdef F_SETPIPE_SZ
+    fcntl(fds[1], F_SETPIPE_SZ, 1 << 20); // best effort; the default is 64 KiB
+#endif
+    std::fflush(stderr);
+    const int saved = dup(STDERR_FILENO);
+    if (saved < 0 || dup2(fds[1], STDERR_FILENO) < 0) {
+        if (saved >= 0) close(saved);
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    close(fds[1]); // stderr keeps the write end open
+    try {
         std::thread(log_reader, fds[0]).detach();
-    });
+    } catch (...) {
+        // No reader: put stderr back at once, or the first full pipe would have nobody to empty it.
+        dup2(saved, STDERR_FILENO);
+        close(saved);
+        close(fds[0]);
+        return;
+    }
+    g_saved_stderr = saved;
+    g_capturing = true;
+}
+
+// Puts the original stderr back; the reader finishes the rest of the pipe and ends. The kept lines stay.
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStop(JNIEnv *, jobject) {
+    std::lock_guard<std::mutex> cap(g_cap_mu);
+    if (!g_capturing) return;
+    std::fflush(stderr);
+    dup2(g_saved_stderr, STDERR_FILENO);
+    close(g_saved_stderr);
+    g_saved_stderr = -1;
+    g_capturing = false;
 }
 
 // UTF-8 text: the first line is the sequence number of the newest line, then every line after `after`, one per line.
