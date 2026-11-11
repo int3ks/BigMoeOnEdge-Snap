@@ -1197,6 +1197,16 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStart(JNIEnv * env, jobj
     g_capturing = true;
 }
 
+// A line from the app (free-RAM samples): straight into the ring and the file, not through the stderr pipe.
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogNote(JNIEnv * env, jobject, jstring line) {
+    if (line == nullptr) return;
+    const char * chars = env->GetStringUTFChars(line, nullptr);
+    if (chars == nullptr) return;
+    log_push_line(std::string(chars));
+    env->ReleaseStringUTFChars(line, chars);
+}
+
 // Puts the original stderr back; the reader finishes the rest of the pipe and ends. The kept lines stay.
 extern "C" JNIEXPORT void JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLogStop(JNIEnv *, jobject) {

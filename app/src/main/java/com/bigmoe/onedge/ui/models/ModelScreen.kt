@@ -427,7 +427,23 @@ fun ModelScreen(
                     kvType = ui.modelKvTypes[model.path] ?: ModelManager.DEFAULT_KV_CACHE_TYPE,
                     loadedKvType = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }?.config?.kvCacheType,
                     onKvType = { viewModel.setKvCacheType(model.path, it) },
-                    settings = settings
+                    settings = settings,
+                    memory = {
+                        androidx.compose.runtime.LaunchedEffect(model.path) { viewModel.ensureEstimate(model.path) }
+                        val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
+                        val memoryRecords by com.bigmoe.onedge.core.MemoryWatch.records.collectAsState()
+                        MemorySection(
+                            options = ui.modelMemoryOptions[model.path] ?: com.bigmoe.onedge.core.ModelMemoryOptions(),
+                            settings = settings,
+                            estimate = ui.modelEstimates[model.path],
+                            record = memoryRecords[model.path],
+                            now = memoryNow,
+                            deviceRamBytes = viewModel.deviceRamBytes,
+                            npuAvailable = viewModel.npuAvailable,
+                            onNpu = { viewModel.setNpuForModel(model.path, it) },
+                            onCacheMb = { viewModel.setCacheMbForModel(model.path, it) }
+                        )
+                    }
                 )
             }
             // Auxiliary files below the models, each kind in its own list: attach them to a model in its card above.
@@ -681,7 +697,9 @@ private fun ModelRow(
     kvType: com.bigmoe.onedge.core.KvCacheType,
     loadedKvType: com.bigmoe.onedge.core.KvCacheType?,
     onKvType: (com.bigmoe.onedge.core.KvCacheType) -> Unit,
-    settings: EngineSettings
+    settings: EngineSettings,
+    /** The model's memory choices and overview (NPU, expert cache, estimate); composed only while the card is open. */
+    memory: @Composable () -> Unit = {}
 ) {
     // Collapsed by default so a long list stays short; the loaded model opens. Tap the name to toggle.
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(model.path) { mutableStateOf(isLoaded) }
@@ -747,6 +765,8 @@ private fun ModelRow(
                 MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)
                 LoraRow(loras, attachedLora, isLoaded, onAttachLora, onPickLora, onLoraScale)
                 KvCacheRow(kvType, loadedKvType, onKvType)
+                androidx.compose.material3.HorizontalDivider()
+                memory()
                 if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
             }
         }

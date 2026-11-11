@@ -21,6 +21,11 @@ enum class ModelKind {
     UNKNOWN
 }
 
+/** One entry of a GGUF tensor directory. [type] is the ggml type number, [bytes] the size in the file. */
+class GgufTensor(val name: String, val dims: LongArray, val type: Int, val bytes: Long) {
+    val elements: Long get() = dims.fold(1L) { a, b -> a * b }
+}
+
 data class GgufSummary(
     val architecture: String,
     val expertCount: Int,
@@ -83,6 +88,70 @@ object GgufInspector {
     }
 
     private val UNKNOWN_SUMMARY = GgufSummary("", 0, ModelKind.UNKNOWN)
+
+    /** Counts the bytes handed out, so the start of the tensor data (end of the header, aligned) is known. */
+    private class CountingStream(input: InputStream) : java.io.FilterInputStream(input) {
+        var count = 0L
+        override fun read(): Int = super.read().also { if (it >= 0) count++ }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) count += it }
+        override fun skip(n: Long): Long = super.skip(n).also { if (it > 0) count += it }
+        override fun markSupported(): Boolean = false
+    }
+
+    /**
+     * The tensor directory of one GGUF file (one shard): name, shape, type and size in the file of every tensor,
+     * without reading any weights. Sizes come from the offsets (the gap to the next tensor; the last one runs to the
+     * end of the file), so they include a few bytes of alignment padding. Empty when the file cannot be read.
+     */
+    fun tensors(file: File): List<GgufTensor> = try {
+        val length = file.length()
+        file.inputStream().use { raw ->
+            val counter = CountingStream(BufferedInputStream(raw, 64 * 1024))
+            readTensors(DataInputStream(counter), counter, length)
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun readTensors(s: DataInputStream, counter: CountingStream, fileLength: Long): List<GgufTensor> {
+        val magic = ByteArray(4)
+        s.readFully(magic)
+        if (String(magic, Charsets.US_ASCII) != "GGUF") return emptyList()
+        val version = u32(s)
+        if (version < 2L || version > 3L) return emptyList()
+        val tensorCount = u64(s)
+        if (tensorCount < 0 || tensorCount > MAX_TENSORS) return emptyList()
+        val kvCount = u64(s)
+        if (kvCount < 0 || kvCount > MAX_KV) return emptyList()
+        var alignment = 32L
+        for (i in 0 until kvCount) {
+            val key = readString(s, MAX_KEY_BYTES)
+            val type = u32(s).toInt()
+            if (key == "general.alignment" && isInteger(type)) alignment = readInteger(s, type).coerceAtLeast(1L)
+            else skipValue(s, type)
+        }
+        class Raw(val name: String, val dims: LongArray, val type: Int, val offset: Long)
+        val raw = ArrayList<Raw>(tensorCount.toInt())
+        repeat(tensorCount.toInt()) {
+            val name = readString(s, MAX_KEY_BYTES)
+            val nDims = u32(s)
+            if (nDims < 1L || nDims > MAX_TENSOR_DIMS) throw IOException("invalid tensor dimension count")
+            val dims = LongArray(nDims.toInt()) { u64(s) }
+            val type = u32(s).toInt()
+            val offset = u64(s)
+            raw.add(Raw(name, dims, type, offset))
+        }
+        val dataStart = (counter.count + alignment - 1) / alignment * alignment
+        val dataLength = (fileLength - dataStart).coerceAtLeast(0L)
+        val byOffset = raw.sortedBy { it.offset }
+        val out = ArrayList<GgufTensor>(raw.size)
+        for (i in byOffset.indices) {
+            val t = byOffset[i]
+            val end = if (i + 1 < byOffset.size) byOffset[i + 1].offset else dataLength
+            out.add(GgufTensor(t.name, t.dims, t.type, (end - t.offset).coerceAtLeast(0L)))
+        }
+        return out
+    }
 
     private val IDENTITY_STRING_KEYS = setOf(
         "general.name", "general.basename", "general.finetune", "general.size_label",

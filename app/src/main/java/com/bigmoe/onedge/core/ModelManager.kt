@@ -494,6 +494,30 @@ class ModelManager(
         saveModelOptions(props)
     }
 
+    /** NPU prefill and expert cache chosen for [modelPath] on its card; a null field = the global setting applies. */
+    suspend fun memoryOptionsForModel(modelPath: String): ModelMemoryOptions = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath))
+        ModelMemoryOptions(
+            npu = when (props.getProperty(key + NPU_SUFFIX)) { "on" -> true; "off" -> false; else -> null },
+            cacheMb = props.getProperty(key + CACHE_SUFFIX)?.toIntOrNull()?.takeIf { it > 0 }
+        )
+    }
+
+    suspend fun setNpuForModel(modelPath: String, npu: Boolean?) = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath)) + NPU_SUFFIX
+        if (npu == null) props.remove(key) else props.setProperty(key, if (npu) "on" else "off")
+        saveModelOptions(props)
+    }
+
+    suspend fun setCacheMbForModel(modelPath: String, cacheMb: Int?) = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath)) + CACHE_SUFFIX
+        if (cacheMb == null || cacheMb <= 0) props.remove(key) else props.setProperty(key, cacheMb.toString())
+        saveModelOptions(props)
+    }
+
     private val draftLinksFile: File get() = File(modelsDir, ".draft-links.properties")
     private fun draftLinks(): java.util.Properties = java.util.Properties().also { props ->
         try { draftLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
@@ -1453,6 +1477,8 @@ class ModelManager(
         const val DEFAULT_LORA_SCALE = 1.75f
         private const val SCALE_SUFFIX = ".scale"
         private const val KV_SUFFIX = ".kv"
+        private const val NPU_SUFFIX = ".npu"
+        private const val CACHE_SUFFIX = ".cache"
         /** A model without its own choice: Q8_0, about half the memory of F16 and nearly lossless. */
         val DEFAULT_KV_CACHE_TYPE = KvCacheType.Q8_0
         private const val SPEC_SUFFIX = ".spec"

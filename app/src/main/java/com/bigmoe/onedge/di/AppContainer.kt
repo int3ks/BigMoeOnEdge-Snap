@@ -91,7 +91,8 @@ class AppContainer(private val context: Context) {
             csvPathProvider = { newMetricsCsvPath() },
             loraProvider = { path -> modelManager.loraForModel(path) },
             kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) },
-            specProvider = { path -> modelManager.specForModel(path) }
+            specProvider = { path -> modelManager.specForModel(path) },
+            memoryOptionsProvider = { path -> modelManager.memoryOptionsForModel(path) }
         )
     }
 

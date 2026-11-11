@@ -133,6 +133,9 @@ class EngineNativeBridge {
 
     external fun nativeLogClear()
 
+    /** Adds one line of the app's own to the log (ring and, when open, the file), stamped like the others. */
+    external fun nativeLogNote(line: String)
+
     /** Detailed runtime diagnosis; Available does not by itself prove model operations ran on HTP. */
     external fun nativeNpuStatus(): ByteArray
 

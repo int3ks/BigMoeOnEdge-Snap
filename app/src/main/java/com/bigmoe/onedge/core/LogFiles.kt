@@ -27,6 +27,17 @@ object LogFiles {
     var currentPath: String? by mutableStateOf<String?>(null)
         private set
 
+    /** True while the native recording runs (with or without a file). */
+    @Volatile
+    var recording: Boolean = false
+        private set
+
+    /** A line of the app's own in the log (ring and file), e.g. the free-RAM samples. Ignored while not recording. */
+    fun note(line: String) {
+        if (!recording) return
+        runCatching { EngineNativeBridge().nativeLogNote(line) }
+    }
+
     fun init(context: Context, workspaceRoot: () -> File) {
         appContext = context.applicationContext
         this.workspaceRoot = workspaceRoot
@@ -37,10 +48,12 @@ object LogFiles {
         val path = if (toFile) runCatching { createFile() }.getOrNull() else null
         currentPath = path
         bridge.nativeLogStart(path)
+        recording = true
     }
 
     /** Ends the recording. The file stays. */
     fun stopRecording(bridge: EngineNativeBridge) {
+        recording = false
         bridge.nativeLogStop()
         currentPath = null
     }

@@ -227,9 +227,12 @@ fun ChatScreen(
                         // One model: the loaded one (it answers the next message), else the last one this chat used.
                         val modelName = (uiState.engineState as? EngineState.Ready)?.info?.name
                             ?: uiState.currentSession?.modelNames?.lastOrNull()
+                        // Free RAM next to the model name (sampled every 2 s): the figure to watch when a big model
+                        // and its cache leave the tablet little room.
+                        val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
                         if (modelName != null) {
                             Text(
-                                text = modelName,
+                                text = modelName + (memoryNow?.let { " \u2022 ${it.freeMb} MiB free" } ?: ""),
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall,

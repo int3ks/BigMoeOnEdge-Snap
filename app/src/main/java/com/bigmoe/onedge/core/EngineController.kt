@@ -36,7 +36,9 @@ class EngineController(
     /** The KV cache type chosen for a model on the Models page; F16 when none was chosen. */
     private val kvCacheTypeProvider: suspend (modelPath: String) -> KvCacheType = { KvCacheType.F16 },
     /** Guess ahead chosen on a model's card (Models page); null = the requested (global) setting applies. */
-    private val specProvider: suspend (modelPath: String) -> SpecSource? = { null }
+    private val specProvider: suspend (modelPath: String) -> SpecSource? = { null },
+    /** NPU prefill and expert cache chosen on a model's card; null fields = the requested (global) setting applies. */
+    private val memoryOptionsProvider: suspend (modelPath: String) -> ModelMemoryOptions = { ModelMemoryOptions() }
 ) {
     private val backend: EngineBackend by lazy(backendProvider)
 
@@ -132,7 +134,20 @@ class EngineController(
             val specBlocked = requestedConfig.routeAhead != 0 || requestedConfig.rowStream
             val modelSpec = if (useModelSpec) runCatching { specProvider(modelPath) }.getOrNull()
                 ?.let { if (specBlocked && it != SpecSource.OFF) null else it } else null
-            val requested = if (modelSpec != null) requestedConfig.copy(spec = modelSpec) else requestedConfig
+            val requestedGlobal = if (modelSpec != null) requestedConfig.copy(spec = modelSpec) else requestedConfig
+            // The model's own NPU switch and expert cache (its card) win over the global settings. The NPU is only
+            // forced on where this build and device have it.
+            val memoryOptions = if (useModelSpec) runCatching { memoryOptionsProvider(modelPath) }.getOrDefault(ModelMemoryOptions())
+            else ModelMemoryOptions()
+            val requested = requestedGlobal.copy(
+                npuPrefill = when (memoryOptions.npu) {
+                    null -> requestedGlobal.npuPrefill
+                    true -> capabilities.npuPrefill
+                    false -> false
+                },
+                cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
+                cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb
+            )
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar

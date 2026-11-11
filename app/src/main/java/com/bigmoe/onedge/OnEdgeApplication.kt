@@ -4,6 +4,7 @@ import android.app.Application
 import com.bigmoe.onedge.di.AppContainer
 import com.bigmoe.onedge.core.HexagonRuntimeSetup
 import com.bigmoe.onedge.core.LogFiles
+import com.bigmoe.onedge.core.MemoryWatch
 import kotlinx.coroutines.flow.first
 
 class OnEdgeApplication : Application() {
@@ -26,9 +27,15 @@ class OnEdgeApplication : Application() {
                 if (s.logCapture) LogFiles.startRecording(com.bigmoe.onedge.core.EngineNativeBridge(), s.logToFile)
             }
         }.start()
+        MemoryWatch.start(this, container.engineController.state)
         container.followCpuCoreSetting()
         container.trackModelUse()
         container.autoLoadLastModelIfEnabled()
         container.startApiServerIfEnabled()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        MemoryWatch.noteTrim(level)
     }
 }

@@ -46,6 +46,10 @@ data class ModelsUiState(
     val modelLoras: Map<String, com.bigmoe.onedge.core.LoraChoice> = emptyMap(),
     /** The vision projector (mmproj) attached to each model. */
     val modelMmprojs: Map<String, String> = emptyMap(),
+    /** NPU / expert cache set on a model's card; a model without an entry uses the global settings. */
+    val modelMemoryOptions: Map<String, com.bigmoe.onedge.core.ModelMemoryOptions> = emptyMap(),
+    /** Memory estimates from the GGUF tensor directory, filled when a card asks for one. */
+    val modelEstimates: Map<String, com.bigmoe.onedge.core.MemoryEstimate> = emptyMap(),
     /** KV cache type per model; models not in the map use F16. */
     val modelKvTypes: Map<String, com.bigmoe.onedge.core.KvCacheType> = emptyMap(),
     /** Guess ahead set on a model's card; a model without an entry uses the default mode (Settings → Guess ahead). */
@@ -94,13 +98,14 @@ class ModelViewModel(
             val mmprojLinks = list.mapNotNull { model -> modelManager.mmprojForModel(model.path)?.let { model.path to it } }.toMap()
             val kvTypes = list.associate { model -> model.path to modelManager.kvCacheTypeForModel(model.path) }
             val specs = list.mapNotNull { model -> modelManager.specForModel(model.path)?.let { model.path to it } }.toMap()
+            val memoryOptions = list.associate { model -> model.path to modelManager.memoryOptionsForModel(model.path) }
             val folder = modelManager.modelFolder()
             val folderReadable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { folder?.let { it.isDirectory && it.canRead() } == true }
             val folderFiles = if (folderReadable) modelManager.modelFolderFileCount() else 0
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
-                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs,
+                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable
                 )
             }
@@ -238,6 +243,36 @@ class ModelViewModel(
         viewModelScope.launch {
             modelManager.setSpecForModel(modelPath, spec)
             refresh()
+        }
+    }
+
+    val deviceRamBytes: Long get() = totalRamBytes()
+
+    /** Whether this build and device have NPU prefill at all (the per-model NPU switch is only shown then). */
+    val npuAvailable: Boolean get() = engineController.capabilities.npuPrefill
+
+    fun setNpuForModel(modelPath: String, npu: Boolean?) {
+        viewModelScope.launch {
+            modelManager.setNpuForModel(modelPath, npu)
+            refresh()
+        }
+    }
+
+    fun setCacheMbForModel(modelPath: String, cacheMb: Int?) {
+        viewModelScope.launch {
+            modelManager.setCacheMbForModel(modelPath, cacheMb)
+            refresh()
+        }
+    }
+
+    /** Reads the model's tensor directory once (headers only) for the memory overview of its card. */
+    fun ensureEstimate(modelPath: String) {
+        if (_uiState.value.modelEstimates.containsKey(modelPath)) return
+        viewModelScope.launch {
+            val estimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.bigmoe.onedge.core.ModelMemoryEstimator.estimate(File(modelPath), totalRamBytes()) }.getOrNull()
+            } ?: return@launch
+            _uiState.update { it.copy(modelEstimates = it.modelEstimates + (modelPath to estimate)) }
         }
     }
 
