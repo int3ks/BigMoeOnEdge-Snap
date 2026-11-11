@@ -3,6 +3,9 @@ package com.bigmoe.onedge.core
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -21,7 +24,7 @@ object LogFiles {
     private lateinit var workspaceRoot: () -> File
 
     /** Path of the file the current recording writes to, or null when no file is written. Observable by the Log page. */
-    var currentPath: String? by androidx.compose.runtime.mutableStateOf(null)
+    var currentPath: String? by mutableStateOf<String?>(null)
         private set
 
     fun init(context: Context, workspaceRoot: () -> File) {
