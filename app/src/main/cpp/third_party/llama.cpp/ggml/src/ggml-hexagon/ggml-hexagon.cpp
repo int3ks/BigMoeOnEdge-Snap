@@ -2425,6 +2425,37 @@ static ggml_status ggml_backend_hexagon_graph_compute(ggml_backend_t backend, gg
                             (long long) t->ne[0], (long long) t->ne[1], (long long) t->ne[2], (long long) t->ne[3],
                             ggml_op_desc(t), t->view_src ? " view" : "", ggml_is_contiguous(t) ? "" : " non-contiguous");
                 }
+                // What the solve saw: the inputs after the row collapse, where each tensor lives, whether the
+                // weight counts as tiled, and (matmul) the kernel it picked and the VTCM it wanted.
+                fprintf(stderr, "ggml-hex:   session vtcm budget %zu, n_hmx %u, n_threads %u, rt_repack %d, mm_select %d\n",
+                        htp_session_vtcm_size(sess), htp_session_n_hmx(sess), htp_session_n_threads(sess),
+                        opt_rt_repack, opt_mm_select);
+                for (size_t ii = 0; ii < node.inputs.size(); ii++) {
+                    const ggml_tensor * t = node.inputs[ii];
+                    if (!t) continue;
+                    const auto * extra = (const htp_tensor_extra *) t->extra;
+                    fprintf(stderr,
+                            "ggml-hex:   in%zu %s ne [%lld,%lld,%lld,%lld] nb [%zu,%zu,%zu,%zu] buffer %s%s extra-flags 0x%x tiled %d can-rt-repack %d\n",
+                            ii, ggml_type_name(t->type),
+                            (long long) t->ne[0], (long long) t->ne[1], (long long) t->ne[2], (long long) t->ne[3],
+                            t->nb[0], t->nb[1], t->nb[2], t->nb[3],
+                            t->buffer ? ggml_backend_buffer_name(t->buffer) : "none",
+                            (t->buffer && ggml_backend_buft_is_host(t->buffer->buft)) ? " (host)" : "",
+                            extra ? extra->flags : 0u, htp_tensor_is_tiled(t) ? 1 : 0, htp_can_rt_repack(t) ? 1 : 0);
+                }
+                if (const ggml_tensor * d = node.dst()) {
+                    fprintf(stderr, "ggml-hex:   dst %s ne [%lld,%lld,%lld,%lld] nb [%zu,%zu,%zu,%zu]\n", ggml_type_name(d->type),
+                            (long long) d->ne[0], (long long) d->ne[1], (long long) d->ne[2], (long long) d->ne[3],
+                            d->nb[0], d->nb[1], d->nb[2], d->nb[3]);
+                }
+                if (node.opcode == HTP_OP_MUL_MAT || node.opcode == HTP_OP_MUL_MAT_ID) {
+                    const auto * kp = node.kparams<htp_mm_kernel_params>();
+                    fprintf(stderr,
+                            "ggml-hex:   matmul kparams: kernel_type %d (0 = unsupported or type check failed), n_hmx %d, "
+                            "vtcm_size %d, tile_size %d, act_row_size %d, m_chunk %d, n_prefetch %d\n",
+                            (int) kp->kernel_type, (int) kp->n_hmx, (int) kp->vtcm_size, (int) kp->tile_size,
+                            (int) kp->act_row_size, (int) kp->m_chunk, (int) kp->n_prefetch);
+                }
                 fflush(stderr);
                 GGML_ABORT("ggml-hex: graph-compute could not solve kernel params for %s\n", ggml_op_desc(n));
             }
