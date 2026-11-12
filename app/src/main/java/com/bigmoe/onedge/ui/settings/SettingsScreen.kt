@@ -336,31 +336,25 @@ private fun SettingsContent(
         )
         Spacer(Modifier.height(8.dp))
         if (performanceExpanded) {
-            // ------------------------------------------------------------ CPU · NPU · OpenCL & memory
-            PerformanceGroup("CPU · NPU · OpenCL & memory", "Which processor runs prompt and reply, CPU cores, context") {
-            val htp = viewModel.htpPrefillAvailable
-            val gpu = viewModel.gpuPrefillAvailable
+            // ------------------------------------------------------------ CPU · NPU & memory
+            PerformanceGroup("CPU · NPU & memory", "Prompt prefill on the NPU, CPU cores, context") {
+            val htp = viewModel.npuPrefillAvailable
             Hint(viewModel.npuPrefillStatus)
-            Hint("Prefill = processing the prompt, decode = writing the reply. Everything here applies at the next model load.")
+            Hint("Prefill = processing the prompt; it can run on the Hexagon NPU. Decode (writing the reply) runs on the CPU. Applies at the next model load.")
 
             Section("Dense models (loaded into RAM)")
-            val denseDecodeOptions = listOf(0 to "CPU") + (if (gpu || settings.denseDecode == 1) listOf(1 to "OpenCL GPU (experimental)") else emptyList())
-            ChoiceSetting("Decode", denseDecodeOptions, settings.denseDecode) { viewModel.updateDenseDecode(it) }
-            if (settings.denseDecode == 1) {
-                Hint(
-                    if (gpu) "The whole model runs on the GPU, prompt and reply. The weights live in GPU memory only (once in RAM). The UI may stutter while the GPU computes."
-                    else "Saved as OpenCL, but OpenCL is unavailable here: the model runs on the CPU."
-                )
-            } else {
-                val densePrefillOptions = listOf(0 to "CPU") +
-                    (if (htp || settings.densePrefill == 1) listOf(1 to "NPU") else emptyList()) +
-                    (if (gpu || settings.densePrefill == 2) listOf(2 to "OpenCL GPU (experimental)") else emptyList())
-                ChoiceSetting("Prefill", densePrefillOptions, settings.densePrefill) { viewModel.updateDensePrefill(it) }
-                Hint(
-                    if (settings.densePrefill == 0) "Prompt and reply on the CPU. Weights in RAM once."
-                    else "The accelerator keeps its own copy of the layer weights while the CPU decodes from the file: about twice the weights in RAM."
-                )
-            }
+            ChoiceSetting(
+                "Prefill",
+                listOf(0 to "CPU") + (if (htp || settings.densePrefill == 1) listOf(1 to "NPU") else emptyList()),
+                settings.densePrefill
+            ) { viewModel.updateDensePrefill(it) }
+            Hint(
+                when {
+                    settings.densePrefill == 1 && !htp -> "Saved as NPU, but the NPU is unavailable: dense models run on the CPU."
+                    settings.densePrefill == 1 -> "The NPU keeps its own copy of the layer weights while the CPU decodes from the file: about twice the weights in RAM."
+                    else -> "Prompt and reply on the CPU. Weights in RAM once."
+                }
+            )
 
             Section("MoE models (experts streamed from flash)")
             val npuCombinationAllowed = !settings.rowStream
@@ -378,13 +372,11 @@ private fun SettingsContent(
                     else -> "Prompt and reply on the CPU."
                 }
             )
-            Hint("Decode: CPU. OpenCL is not offered for streamed models: it takes only whole tensors, while the experts are loaded one at a time.")
 
-            Section("Accelerated prefill tuning")
-            val npuKnobs = (htp && settings.npuPrefill) ||
-                (settings.denseDecode == 0 && ((htp && settings.densePrefill == 1) || (gpu && settings.densePrefill == 2)))
+            Section("NPU prefill tuning")
+            val npuKnobs = htp && (settings.npuPrefill || settings.densePrefill == 1)
             ChoiceSetting(
-                    "Accelerator loader threads",
+                    "NPU prefill loader threads",
                     com.bigmoe.onedge.core.SettingChoices.NPU_LOADERS.map { it to it.toString() },
                     settings.npuLoaders,
                     enabled = npuKnobs
@@ -394,13 +386,13 @@ private fun SettingsContent(
                     it <= settings.toLoadConfig().nUbatch && it >= settings.toLoadConfig().npuMinTokensFloor
                 }.ifEmpty { listOf(settings.toLoadConfig().npuMinTokensFloor) }
                 ChoiceSetting(
-                    "Minimum prompt tokens for the accelerator",
+                    "Minimum prompt tokens sent to NPU",
                     npuMinChoices.map { it to "$it tokens" },
                     (npuMinChoices.lastOrNull { it <= settings.npuMinTokens } ?: npuMinChoices.first()),
                     enabled = npuKnobs
                 ) { viewModel.updateNpuMinTokens(it) }
                 SwitchRow(
-                    "Routed expert reads during accelerated prefill",
+                    "Routed expert reads during NPU prefill",
                     "Predict which experts a prompt graph needs and load those instead of reading every expert in the layer. Falls back to a full-layer read when the predicted routing is dense.",
                     settings.npuRoutedPrefill,
                     enabled = npuKnobs
@@ -414,7 +406,7 @@ private fun SettingsContent(
                     ) { viewModel.updateNpuRoutedFullPct(it) }
                     Hint("At higher thresholds, more layers use routed reads; a lower threshold chooses a full-layer read sooner. This is a memory-I/O trade-off, not a quality setting.")
                 }
-            Hint("Used by NPU and OpenCL prefill. Routed reads matter for streamed models only.")
+            Hint("Routed reads matter for streamed (MoE) models only.")
 
             Section("CPU")
             CpuCoresSetting(
@@ -443,7 +435,7 @@ private fun SettingsContent(
                 if (contextValid) "Type any number, there is no limit. Prompt plus reply the session can hold. Also memory: the KV cache is sized for it at open, so a very large value needs a lot of RAM and the model may fail to load; lower it if that happens. Speed tip: a smaller context also leaves more RAM for the expert cache."
                 else "Enter a whole number greater than 0. The last valid value (${settings.contextLength}) stays in use."
             )
-            } // CPU · NPU · OpenCL group
+            } // CPU · NPU group
             Spacer(Modifier.height(10.dp))
 
             // ------------------------------------------------------------ streaming (engine)

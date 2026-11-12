@@ -74,9 +74,6 @@ struct SessionConfig {
     // Wide prefill graphs on an accelerator, decode on the CPU. Fixed for the session: the device
     // joins the scheduler at load. See RunConfig::prefill.
     PrefillDeviceConfig prefill;
-    // Every layer on this ggml device (e.g. "GPUOpenCL"): prefill AND decode run there, llama.cpp's
-    // ordinary offload. Resident models only (no expert streaming), exclusive with `prefill`. Empty = CPU.
-    std::string offload_device;
     DecideConfig decide; // decide()'s prefix-state policy. See RunConfig::decide.
 };
 

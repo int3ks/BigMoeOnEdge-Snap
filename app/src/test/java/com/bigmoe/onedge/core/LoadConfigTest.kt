@@ -2,6 +2,7 @@ package com.bigmoe.onedge.core
 
 import com.bigmoe.onedge.data.local.datastore.CACHE_AUTO_MB
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
+import com.bigmoe.onedge.data.local.datastore.loadConfigDiffers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -92,9 +93,6 @@ class LoadConfigTest {
         assertEquals(2, c.copy(kvCacheType = KvCacheType.Q4_0).toIntArray()[44])
         assertEquals(64, v[45])               // I_REPEAT_LAST_N (default window)
         assertEquals(-1, c.copy(repeatLastN = -5).toIntArray()[45])
-        assertEquals(0, c.toIntArray()[46])                          // I_PREFILL_GPU off by default
-        assertEquals(1, c.copy(prefillGpu = true).toIntArray()[46])
-        assertEquals(1, c.copy(decodeGpu = true).toIntArray()[47])   // I_DECODE_GPU
     }
 
     @Test
@@ -170,18 +168,20 @@ class LoadConfigTest {
     }
 
     @Test
-    fun acceleratorsResolvePerModelKind() {
-        val all = EngineCaps(overlapHook = true, multimodal = true, npuPrefill = true, htpPrefill = true, gpuPrefill = true)
+    fun npuPrefillResolvesPerModelKind() {
+        val npu = EngineCaps(overlapHook = true, multimodal = true, npuPrefill = true)
         val base = EngineController.applyAutoMode(d, ModelKind.DENSE)
-        val gpu = EngineController.resolveAccelerators(base.copy(densePrefill = 1, denseDecode = 1), ModelKind.DENSE, null, all)
-        assertEquals(true, gpu.decodeGpu); assertEquals(false, gpu.npuPrefill)
-        val npu = EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, null, all)
-        assertEquals(true, npu.npuPrefill); assertEquals(false, npu.prefillGpu)
-        val ocl = EngineController.resolveAccelerators(base.copy(densePrefill = 2), ModelKind.DENSE, null, all.copy(htpPrefill = false))
-        assertEquals(true, ocl.prefillGpu)
-        val off = EngineController.resolveAccelerators(base.copy(densePrefill = 2, denseDecode = 1), ModelKind.DENSE, false, all)
-        assertEquals(false, off.npuPrefill || off.decodeGpu)
-        val moe = EngineController.resolveAccelerators(base.copy(npuPrefill = true, denseDecode = 1), ModelKind.MOE, null, all)
-        assertEquals(true, moe.npuPrefill); assertEquals(false, moe.decodeGpu || moe.prefillGpu)
+        assertEquals(true, EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, null, npu).npuPrefill)
+        assertEquals(false, EngineController.resolveAccelerators(base.copy(npuPrefill = true, densePrefill = 0), ModelKind.DENSE, null, npu).npuPrefill)
+        assertEquals(false, EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, false, npu).npuPrefill)
+        assertEquals(false, EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, null, npu.copy(npuPrefill = false)).npuPrefill)
+        assertEquals(true, EngineController.resolveAccelerators(base.copy(npuPrefill = true), ModelKind.MOE, null, npu).npuPrefill)
+    }
+
+    @Test
+    fun cardOptionsDoNotCountAsChangedSettings() {
+        val s = EngineSettings()
+        // The global config the load was asked for compares equal; the per-model cache override must not matter.
+        assertEquals(false, loadConfigDiffers(s.toLoadConfig(), s, ignoreSpec = true))
     }
 }

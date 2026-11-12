@@ -39,27 +39,7 @@ set(LLAMA_USE_PREBUILT_UI OFF CACHE BOOL "" FORCE)
 # llama.cpp's public eval callback, which does not depend on OpenMP.
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-# Optional GPU prefill through ggml-opencl (Adreno). The engine does not link libOpenCL.so: opencl/opencl_shim.c
-# defines the cl* entry points and dlopens the vendor library on first use, so a device without an app-visible
-# libOpenCL.so loads the engine as before and simply registers no GPU device. Headers: third_party/opencl-headers
-# (Khronos OpenCL-Headers 82f6031). ggml-opencl embeds its kernels at build time, which needs Python 3.
-option(BMOE_ENABLE_OPENCL "Enable the optional OpenCL/GPU prefill path (Android arm64)" OFF)
-if(BMOE_ENABLE_OPENCL)
-    if(NOT ANDROID OR NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-        message(FATAL_ERROR "BMOE_ENABLE_OPENCL requires an Android arm64-v8a build")
-    endif()
-    add_library(bmoe_opencl_shim STATIC opencl/opencl_shim.c)
-    target_include_directories(bmoe_opencl_shim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencl-headers")
-    target_link_libraries(bmoe_opencl_shim PUBLIC dl log)
-    # FindOpenCL (called by ggml-opencl) takes preset cache values as found; the "library" is the shim target.
-    set(OpenCL_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencl-headers" CACHE PATH "" FORCE)
-    set(OpenCL_LIBRARY bmoe_opencl_shim CACHE STRING "" FORCE)
-    set(GGML_OPENCL ON CACHE BOOL "" FORCE)
-    set(GGML_OPENCL_EMBED_KERNELS ON CACHE BOOL "" FORCE)
-    set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "" FORCE)
-else()
-    set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
-endif()
+set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
 # Would FetchContent-download KleidiAI at configure time; the build must work offline.
 set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
 
@@ -117,13 +97,6 @@ add_library(onedge-engine SHARED native-bridge.cpp)
 if(BMOE_HEXAGON_ENABLED)
     target_compile_definitions(bmoe_core PUBLIC BMOE_HAVE_HEXAGON=1)
     target_compile_definitions(onedge-engine PRIVATE BMOE_HAVE_HEXAGON=1)
-endif()
-if(BMOE_ENABLE_OPENCL)
-    if(NOT GGML_OPENCL)
-        message(FATAL_ERROR "BMOE_ENABLE_OPENCL was requested but GGML_OPENCL did not configure")
-    endif()
-    target_compile_definitions(onedge-engine PRIVATE BMOE_HAVE_OPENCL=1)
-    target_link_libraries(onedge-engine PRIVATE bmoe_opencl_shim)
 endif()
 
 # Keep the engine's compute threads on the fast cores with a small priority boost (perf_tuning.h).

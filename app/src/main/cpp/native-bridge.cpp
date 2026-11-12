@@ -187,8 +187,6 @@ enum IntIdx {
     I_DECIDE_PREFIX_CACHE, I_FORCE_CACHE,
     I_KV_CACHE_TYPE,   // 0 f16, 1 q8_0, 2 q4_0 (per model)
     I_REPEAT_LAST_N,   // repetition-penalty window: 0 off, < 0 whole context
-    I_PREFILL_GPU,     // 1 = the prefill device is the GPU (ggml-opencl "GPUOpenCL") instead of HTP0
-    I_DECODE_GPU,      // 1 = whole model on the GPU (prefill and decode); resident models only
     I_COUNT
 };
 enum FloatIdx { F_TEMPERATURE = 0, F_TOP_P, F_MIN_P, F_REPEAT_PENALTY, F_FREQ_PENALTY, F_PRESENCE_PENALTY, F_COUNT };
@@ -210,37 +208,6 @@ struct NpuRuntimeStatus {
     bool available = false;
     std::string message;
 };
-
-#ifdef BMOE_HAVE_OPENCL
-extern "C" int bmoe_opencl_library_available(void);
-#endif
-
-// GPU prefill (ggml-opencl). Only the registry is checked here: opening the device compiles every
-// kernel (seconds, cached on disk afterwards), which belongs to the model load, where
-// PrefillPath::find_device probes it for a readable load error.
-const NpuRuntimeStatus & gpu_runtime_status() {
-    static const NpuRuntimeStatus status = [] {
-        NpuRuntimeStatus out;
-#ifdef BMOE_HAVE_OPENCL
-        if (!bmoe_opencl_library_available()) {
-            out.message = "Unavailable: libOpenCL.so could not be opened (not exposed to apps on this device).";
-            return out;
-        }
-        ggml_backend_dev_t dev = ggml_backend_dev_by_name("GPUOpenCL");
-        if (!dev) {
-            out.message = "Unavailable: libOpenCL.so opened, but ggml-opencl found no supported GPU (logcat tag ggml / bmoe-opencl).";
-            return out;
-        }
-        out.available = true;
-        out.message = std::string("Available: GPUOpenCL (") + ggml_backend_dev_description(dev) +
-                      "). Kernels compile on the first load with GPU prefill and are cached afterwards.";
-#else
-        out.message = "Unavailable: this APK's native engine was built without OpenCL support.";
-#endif
-        return out;
-    }();
-    return status;
-}
 
 // Cache one real backend initialization probe. A build flag alone must never enable the settings UI.
 const NpuRuntimeStatus & npu_runtime_status() {
@@ -398,24 +365,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
 
     release_session_blocking();
 
-    const bool npu_requested = iv[I_NPU_PREFILL] != 0 && iv[I_PREFILL_GPU] == 0;
-    const bool gpu_requested = iv[I_NPU_PREFILL] != 0 && iv[I_PREFILL_GPU] != 0;
-    if (gpu_requested && iv[I_ROW_STREAM] != 0) {
-        return to_bytes(env, "GPU prefill was requested together with Row-stream tables. Disable one of these conflicting settings and reload.");
-    }
-    const bool decode_gpu = iv[I_DECODE_GPU] != 0;
-    if (decode_gpu && iv[I_NPU_PREFILL] != 0) {
-        return to_bytes(env, "GPU decode was requested together with a separate prefill device. Choose one.");
-    }
-    if (decode_gpu && iv[I_MMAP_BASELINE] == 0) {
-        return to_bytes(env, "GPU decode needs a model that is not streamed (a dense model loaded into RAM).");
-    }
-    if (decode_gpu && !gpu_runtime_status().available) {
-        return to_bytes(env, "GPU decode was requested but OpenCL is unavailable. " + gpu_runtime_status().message);
-    }
-    if (gpu_requested && !gpu_runtime_status().available) {
-        return to_bytes(env, "GPU prefill was requested but OpenCL is unavailable. " + gpu_runtime_status().message);
-    }
+    const bool npu_requested = iv[I_NPU_PREFILL] != 0;
     // Guess ahead (MTP / n-gram) is compatible: the engine keeps the draft context on the CPU and only
     // requires the NPU threshold to clear the verify width (applied below, once draft_max is known).
     if (npu_requested && iv[I_ROW_STREAM] != 0) {
@@ -446,10 +396,9 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     cfg.lora_path = lora_path; // empty = no LoRA adapter
     cfg.lora_scale = std::clamp<float>((float) j_lora_scale, 0.0f, 4.0f);
     cfg.kv_cache_type = std::clamp<int>(iv[I_KV_CACHE_TYPE], 0, 2);
-    if (decode_gpu) cfg.offload_device = "GPUOpenCL";
-    // The NPU knobs (loaders, threshold, routed experts) drive whichever accelerator does the prefill.
-    if (npu_requested || gpu_requested) {
-        cfg.prefill.device = gpu_requested ? "GPUOpenCL" : "HTP0";
+#ifdef BMOE_HAVE_HEXAGON
+    if (npu_requested) {
+        cfg.prefill.device = "HTP0";
         cfg.prefill.load_threads = std::clamp<int>(iv[I_NPU_LOADERS], 1, bmoe::PrefillDeviceConfig::load_threads_max);
         cfg.prefill.min_tokens = std::clamp<int>(iv[I_NPU_MIN_TOKENS], bmoe::PrefillDeviceConfig::min_tokens_floor,
                                                  std::max<int>(bmoe::PrefillDeviceConfig::min_tokens_floor, cfg.n_ubatch));
@@ -457,6 +406,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
         cfg.prefill.routed_full_frac = std::clamp<float>(static_cast<float>(iv[I_NPU_ROUTED_FULL_PCT]) / 100.0f,
                                                          0.01f, 1.0f);
     }
+#endif
     cfg.decide.enabled = true; // required by the app's existing scored-choice API
     switch (iv[I_DECIDE_PREFIX_CACHE]) {
         case 1: cfg.decide.prefix_cache = bmoe::PrefixCacheMode::On; break;
@@ -554,15 +504,17 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
         cfg.spec.ngram_max_match = ngram_max;
         cfg.spec.ngram_min_match = std::clamp<int>(iv[I_NGRAM_MIN_MATCH], 1, ngram_max);
     }
+#ifdef BMOE_HAVE_HEXAGON
     // With speculation the CPU decode graph is 1 + draft_max positions wide, not one token. Every device
     // graph has to be wider than that or llama.cpp could reuse a CPU-scheduled graph for a device one
     // (see PrefillDeviceConfig). Raise the user's threshold rather than refuse the load over a tuning knob.
-    if (cfg.prefill.enabled() && cfg.spec.enabled() && cfg.prefill.min_tokens <= cfg.spec.draft_max + 1) {
+    if (npu_requested && cfg.spec.enabled() && cfg.prefill.min_tokens <= cfg.spec.draft_max + 1) {
         const int raised = cfg.spec.draft_max + 2;
-        LOGW("Prefill device min tokens %d is not above the speculative verify width %d; using %d",
+        LOGW("NPU prefill min tokens %d is not above the speculative verify width %d; using %d",
              cfg.prefill.min_tokens, cfg.spec.draft_max + 1, raised);
         cfg.prefill.min_tokens = raised;
     }
+#endif
 
 #ifdef BMOE_PIN_FAST_CORES
     g_n_threads.store(cfg.n_threads > 0 ? cfg.n_threads : 4);
@@ -642,14 +594,12 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeCapabilities(JNIEnv *, jobj
 #ifdef BMOE_HAVE_HEXAGON
     if (npu_runtime_status().available) caps |= 4;
 #endif
-    // Bit 8: GPU prefill through OpenCL is available.
-    if (gpu_runtime_status().available) caps |= 8;
     return caps;
 }
 
 JNIEXPORT jbyteArray JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeNpuStatus(JNIEnv * env, jobject) {
-    return to_bytes(env, "NPU: " + npu_runtime_status().message + "\nGPU: " + gpu_runtime_status().message);
+    return to_bytes(env, npu_runtime_status().message);
 }
 
 JNIEXPORT jbyteArray JNICALL

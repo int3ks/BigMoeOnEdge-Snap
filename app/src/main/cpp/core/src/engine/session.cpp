@@ -932,19 +932,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
             return fail(" was requested but could not be opened: " + derr + "; refusing CPU fallback");
         }
     }
-    // Whole-model offload (decode on the GPU too). llama.cpp copies the layer weights into the device's
-    // buffers and unmaps the file ranges no CPU buffer uses, so the weights are in RAM once.
-    static ggml_backend_dev_t offload_devices[2] = {nullptr, nullptr};
-    if (!cfg.offload_device.empty()) {
-        if (cfg.moe.enabled) return fail(cfg.offload_device + " decode needs a model that is not streamed (expert streaming is on)");
-        if (cfg.prefill.enabled()) return fail(cfg.offload_device + " decode cannot be combined with a separate prefill device");
-        std::string derr;
-        ggml_backend_dev_t dev = detail::PrefillPath::find_device(cfg.offload_device, derr);
-        if (!dev) return fail("decode device: " + derr);
-        offload_devices[0] = dev;
-        mparams.devices = offload_devices;
-        mparams.n_gpu_layers = 999;
-    } else if (!im.prefill) {
+    if (!im.prefill) {
         if (const ggml_backend_dev_t * devs = detail::PrefillPath::devices_without_prefill(auto_devices)) {
             mparams.devices = const_cast<ggml_backend_dev_t *>(devs);
         }
@@ -1164,7 +1152,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
             // head runs on the host in every phase, so it gets an empty list (CPU only) rather than
             // llama.cpp's default, which would open the same HTP device a second time.
             static ggml_backend_dev_t cpu_only_devices[1] = {nullptr};
-            if (im.prefill || !cfg.offload_device.empty()) draft_mparams.devices = cpu_only_devices;
+            if (im.prefill) draft_mparams.devices = cpu_only_devices;
             draft_mparams.progress_callback = [](float p, void *) {
                 load_progress_set(LoadStep::Draft, p);
                 return true;

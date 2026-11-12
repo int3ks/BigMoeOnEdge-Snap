@@ -46,17 +46,11 @@ internal fun MemorySection(
 ) {
     val small = MaterialTheme.typography.bodySmall
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
-    // Dense models follow Settings → Dense models (prefill / decode device), MoE models the MoE prefill switch.
-    // On this card: Default, On (NPU prefill) or Off (everything on the CPU).
+    // Default: dense models follow Settings → Dense models, MoE models the MoE prefill choice.
     val dense = estimate != null && !estimate.moe
-    val denseNpu = settings.denseDecode == 0 && settings.densePrefill == 1
-    val npuOn = npuAvailable && (options.npu ?: if (dense) denseNpu else settings.npuPrefill)
-    val defaultAccel = if (dense) when {
-        settings.denseDecode == 1 -> "OpenCL"
-        settings.densePrefill == 1 -> "NPU"
-        settings.densePrefill == 2 -> "OpenCL prefill"
-        else -> "off"
-    } else if (settings.npuPrefill) "on" else "off"
+    val defaultNpu = if (dense) settings.densePrefill == 1 else settings.npuPrefill
+    val npuOn = npuAvailable && (options.npu ?: defaultNpu)
+    val defaultAccel = if (defaultNpu) "on" else "off"
     // The cache this model will load with: its own, else the global one (null = sized automatically at load).
     val cacheMb: Long? = options.cacheMb?.toLong() ?: when (settings.cacheMode) {
         CacheMode.FIXED -> settings.cacheMb.toLong()

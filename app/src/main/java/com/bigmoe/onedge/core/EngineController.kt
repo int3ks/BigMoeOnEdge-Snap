@@ -142,7 +142,7 @@ class EngineController(
             val requested = requestedGlobal.copy(
                 npuPrefill = when (memoryOptions.npu) {
                     null -> requestedGlobal.npuPrefill
-                    true -> capabilities.htpPrefill
+                    true -> capabilities.npuPrefill
                     false -> false
                 },
                 cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
@@ -177,7 +177,7 @@ class EngineController(
                 var activeConfig = config
                 var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
                 var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
-                val requestedAddOns = RequestedAddOns(config, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null, modelSpec)
+                val requestedAddOns = RequestedAddOns(config, requestedConfig, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null, modelSpec)
                 var warning: String? = null
                 var error = try {
                     backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)
@@ -281,26 +281,14 @@ class EngineController(
 
         /** MoE = stream experts, dense = ordinary load. An unreadable header keeps the requested value. */
         /**
-         * Which processor runs prefill and decode. Streamed (MoE) models: the NPU switch ([LoadConfig.npuPrefill]),
-         * decode on the CPU. Dense (resident) models: [LoadConfig.densePrefill] / [LoadConfig.denseDecode]; OpenCL
-         * decode puts the whole model on the GPU (prefill too). The model card's NPU switch: Off = all CPU,
-         * On = NPU prefill. A device this build/phone does not have falls back to the CPU.
+         * NPU prefill per model type. Streamed (MoE) models: the MoE switch ([LoadConfig.npuPrefill]). Dense (resident)
+         * models: [LoadConfig.densePrefill] (the NPU keeps a second copy of the weights there). The model card's NPU
+         * switch (On/Off) wins over both; a phone without the NPU runs on the CPU.
          */
         fun resolveAccelerators(r: LoadConfig, kind: ModelKind, modelNpu: Boolean?, caps: EngineCaps): LoadConfig {
-            if (kind != ModelKind.DENSE) return r.copy(prefillGpu = false, decodeGpu = false)
-            if (modelNpu == false) return r.copy(npuPrefill = false, prefillGpu = false, decodeGpu = false)
-            val decodeGpu = modelNpu != true && r.denseDecode == 1 && caps.gpuPrefill
-            val prefill = when {
-                decodeGpu -> 0
-                modelNpu == true -> 1
-                else -> r.densePrefill
-            }
-            val dev = when (prefill) {
-                1 -> if (caps.htpPrefill) 1 else 0
-                2 -> if (caps.gpuPrefill) 2 else 0
-                else -> 0
-            }
-            return r.copy(npuPrefill = dev != 0, prefillGpu = dev == 2, decodeGpu = decodeGpu)
+            if (kind != ModelKind.DENSE) return r
+            val npu = modelNpu ?: (r.densePrefill == 1)
+            return r.copy(npuPrefill = npu && caps.npuPrefill)
         }
 
         fun applyAutoMode(config: LoadConfig, kind: ModelKind): LoadConfig = when (kind) {

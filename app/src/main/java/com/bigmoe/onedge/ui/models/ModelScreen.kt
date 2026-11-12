@@ -646,7 +646,7 @@ private fun ModelStatusSection(
                         )
                     }
                     // Guess ahead is compared per model (addOnsChanged), so it is left out here.
-                    val settingsChanged = loadConfigDiffers(info.requested.config ?: info.config, settings, ignoreSpec = true)
+                    val settingsChanged = loadConfigDiffers(info.requested.globalConfig ?: info.requested.config ?: info.config, settings, ignoreSpec = true)
                     if (settingsChanged || addOnsChanged) {
                         Text(
                             listOfNotNull(

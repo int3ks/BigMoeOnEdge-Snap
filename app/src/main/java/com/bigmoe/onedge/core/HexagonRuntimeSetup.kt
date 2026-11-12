@@ -28,12 +28,6 @@ object HexagonRuntimeSetup {
     @JvmStatic
     fun prepare(context: Context) {
         val app = context.applicationContext
-        // GPU prefill (ggml-opencl): keep compiled kernels between runs. The default would be <temp dir>, which
-        // does not exist for an app process, so every load would compile all kernels again.
-        runCatching {
-            val clCache = File(app.cacheDir, "cl-cache").apply { mkdirs() }
-            Os.setenv("GGML_OPENCL_KERNEL_CACHE_DIR", clCache.absolutePath, true)
-        }.onFailure { Log.w(TAG, "Cannot set the OpenCL kernel cache directory", it) }
         try {
             val names = app.assets.list(ASSET_DIR)?.toSet().orEmpty()
             if (!skeletons.all(names::contains)) {

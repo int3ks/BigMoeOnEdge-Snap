@@ -49,15 +49,6 @@ test -d "$TOOLS_ROOT" || { echo "ERROR: HEXAGON_TOOLS_ROOT does not exist: $TOOL
 }
 printf "Hexagon SDK: %s\nHexagon tools: %s\nPREBUILT_LIB_DIR: %s\n" "$SDK_ROOT" "$TOOLS_ROOT" "$PREBUILT_LIB_DIR"
 
-# ggml-opencl (GPU prefill) embeds its .cl kernels at configure/build time with a Python script.
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 is missing in the toolchain image; installing it for the OpenCL kernel embedding"
-    if command -v apt-get >/dev/null 2>&1; then
-        (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3) >/dev/null
-    fi
-    command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is required for -DBMOE_ENABLE_OPENCL=ON" >&2; exit 1; }
-fi
-
 # Optional compiler cache (CI passes BMOE_CCACHE and CCACHE_* through the container): unchanged sources are not
 # compiled again. Without it, or when the binary does not run here, the build is the same as before.
 LAUNCHER=()
@@ -79,9 +70,8 @@ cmake -S "$ROOT/app/src/main/cpp" -B "$OUT" \
   -DCMAKE_CXX_FLAGS="-D_GNU_SOURCE" \
   -DBMOE_ENABLE_HEXAGON=ON \
   -DBMOE_ENABLE_MULTIMODAL=ON \
-  -DBMOE_ENABLE_OPENCL=ON \
   -DBMOE_BUILD_TESTS=OFF \
-  -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF \
+  -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_OPENCL=OFF -DGGML_LLAMAFILE=OFF \
   -DGGML_CPU_ARM_ARCH="$CPU_ARCH" \
   -DHEXAGON_SDK_ROOT="$SDK_ROOT" \
   -DHEXAGON_TOOLS_ROOT="$TOOLS_ROOT" \

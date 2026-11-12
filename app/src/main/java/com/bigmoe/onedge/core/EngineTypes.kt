@@ -92,14 +92,8 @@ data class LoadConfig(
     val npuMinTokens: Int = 32,
     val npuRoutedPrefill: Boolean = true,
     val npuRoutedFullPct: Int = 85,
-    /** Run the accelerated prefill ([npuPrefill]) on the GPU (OpenCL) instead of the Hexagon NPU. Resolved by EngineController. */
-    val prefillGpu: Boolean = false,
-    /** Whole model on the GPU (OpenCL): prefill and decode. Resident (dense) models only. Resolved by EngineController. */
-    val decodeGpu: Boolean = false,
-    /** Settings for dense (resident) models, resolved into npuPrefill/prefillGpu/decodeGpu at load. 0 CPU, 1 NPU, 2 OpenCL. */
+    /** Dense (resident) models: 0 CPU, 1 NPU prefill. Not on the wire: EngineController resolves it into [npuPrefill]. */
     val densePrefill: Int = 0,
-    /** 0 CPU, 1 OpenCL. */
-    val denseDecode: Int = 0,
     val ngramMinMatch: Int = 3,
     val ngramMaxMatch: Int = 12,
     /** `--decide-prefix-cache`: affects scored-choice requests only. */
@@ -146,9 +140,7 @@ data class LoadConfig(
         if (predictionProbe) 1 else 0, if (loadAllExpertsForBenchmark) 1 else 0,
         decisionPrefixCache.code, if (forceCache) 1 else 0,
         kvCacheType.code,
-        repeatLastN.coerceIn(-1, 8192),
-        if (prefillGpu) 1 else 0,
-        if (decodeGpu) 1 else 0
+        repeatLastN.coerceIn(-1, 8192)
     )
 
     fun toFloatArray(): FloatArray = floatArrayOf(
@@ -160,7 +152,7 @@ data class LoadConfig(
     companion object {
         const val UBATCH = 512
         /** Length of [toIntArray]; must equal I_COUNT in native-bridge.cpp. */
-        const val INT_COUNT = 48
+        const val INT_COUNT = 46
         const val FLOAT_COUNT = 6
     }
 }
@@ -197,6 +189,8 @@ data class ModelInfo(
 data class RequestedAddOns(
     /** The load configuration as asked for (a fallback may have changed info.config, e.g. speculation off). */
     val config: LoadConfig? = null,
+    /** The settings-derived configuration before the model's own options (card) were applied: what "settings changed" compares. */
+    val globalConfig: LoadConfig? = null,
     val kvCacheType: KvCacheType = KvCacheType.F16,
     val lora: LoraChoice? = null,
     val mmprojPath: String? = null,
@@ -244,21 +238,12 @@ class ImageData(val width: Int, val height: Int, val rgb: ByteArray) {
 }
 
 /** What this libonedge-engine.so was built with (see EngineNativeBridge.nativeCapabilities). */
-data class EngineCaps(
-    val overlapHook: Boolean,
-    val multimodal: Boolean,
-    /** Any prefill accelerator is usable (NPU or GPU): gates the "accelerated prefill" switches. */
-    val npuPrefill: Boolean,
-    val htpPrefill: Boolean = npuPrefill,
-    val gpuPrefill: Boolean = false
-) {
+data class EngineCaps(val overlapHook: Boolean, val multimodal: Boolean, val npuPrefill: Boolean) {
     companion object {
         fun fromBits(bits: Int) = EngineCaps(
             overlapHook = bits and 1 != 0,
             multimodal = bits and 2 != 0,
-            npuPrefill = bits and (4 or 8) != 0,
-            htpPrefill = bits and 4 != 0,
-            gpuPrefill = bits and 8 != 0
+            npuPrefill = bits and 4 != 0
         )
     }
 }
