@@ -360,6 +360,30 @@ private fun SettingsContent(
                 viewModel.updateNpuPrefill(it)
             }
             Hint(viewModel.npuPrefillStatus)
+            // GPU instead of NPU: the same prefill path (loaders, threshold, routed reads) on ggml-opencl.
+            Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                color = Color.Transparent,
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        "EXPERIMENTAL", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    SwitchRow(
+                        "Prefill on the GPU (OpenCL) instead of the NPU",
+                        when {
+                            !viewModel.gpuPrefillAvailable -> "GPU prefill is unavailable on this device (see the status line above)."
+                            !viewModel.htpPrefillAvailable -> "The NPU is unavailable, so accelerated prefill always uses the GPU here."
+                            else -> "Prompt graphs run on the Adreno GPU through OpenCL; decode stays on the CPU. The first load compiles the GPU kernels (can take a while, cached afterwards). Expert matmuls of IQ quants stay on the CPU. Reload the model to apply."
+                        },
+                        checked = settings.prefillGpu || (viewModel.gpuPrefillAvailable && !viewModel.htpPrefillAvailable),
+                        enabled = viewModel.gpuPrefillAvailable && viewModel.htpPrefillAvailable
+                    ) { viewModel.updatePrefillGpu(it) }
+                }
+            }
             ChoiceSetting(
                     "NPU prefill loader threads",
                     com.bigmoe.onedge.core.SettingChoices.NPU_LOADERS.map { it to it.toString() },

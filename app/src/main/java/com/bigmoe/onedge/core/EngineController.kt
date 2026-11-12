@@ -147,7 +147,10 @@ class EngineController(
                 },
                 cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
                 cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb
-            )
+            ).let { r ->
+                // Which accelerator does the prefill: the GPU when chosen (or when it is the only one), else the NPU.
+                r.copy(prefillGpu = r.npuPrefill && capabilities.gpuPrefill && (r.prefillGpu || !capabilities.htpPrefill))
+            }
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar

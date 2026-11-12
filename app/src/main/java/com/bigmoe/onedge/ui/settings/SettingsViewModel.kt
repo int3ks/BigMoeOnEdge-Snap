@@ -43,6 +43,8 @@ class SettingsViewModel(
     val engineState: StateFlow<EngineState> = engineController.state
     val npuPrefillAvailable: Boolean get() = engineController.capabilities.npuPrefill
     val npuPrefillStatus: String get() = engineController.npuPrefillStatus
+    val htpPrefillAvailable: Boolean get() = engineController.capabilities.htpPrefill
+    val gpuPrefillAvailable: Boolean get() = engineController.capabilities.gpuPrefill
 
     private fun launch(block: suspend () -> Unit) {
         viewModelScope.launch { block() }
@@ -189,6 +191,7 @@ class SettingsViewModel(
     fun updateSeparateMtpDraftEnabled(v: Boolean) = launch { dataStore.updateSeparateMtpDraftEnabled(v) }
     fun updateMetricsCsv(v: Boolean) = launch { dataStore.updateMetricsCsv(v) }
     fun updateNpuPrefill(v: Boolean) = launch { dataStore.updateNpuPrefill(v) }
+    fun updatePrefillGpu(v: Boolean) = launch { dataStore.updatePrefillGpu(v) }
     fun updateNpuLoaders(v: Int) = launch { dataStore.updateNpuLoaders(v) }
     fun updateNpuMinTokens(v: Int) = launch { dataStore.updateNpuMinTokens(v) }
     fun updateNpuRoutedPrefill(v: Boolean) = launch { dataStore.updateNpuRoutedPrefill(v) }

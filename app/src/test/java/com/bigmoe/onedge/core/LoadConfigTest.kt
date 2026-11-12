@@ -92,6 +92,8 @@ class LoadConfigTest {
         assertEquals(2, c.copy(kvCacheType = KvCacheType.Q4_0).toIntArray()[44])
         assertEquals(64, v[45])               // I_REPEAT_LAST_N (default window)
         assertEquals(-1, c.copy(repeatLastN = -5).toIntArray()[45])
+        assertEquals(0, c.toIntArray()[46])                          // I_PREFILL_GPU off by default
+        assertEquals(1, c.copy(prefillGpu = true).toIntArray()[46])
     }
 
     @Test

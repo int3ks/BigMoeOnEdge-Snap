@@ -55,6 +55,11 @@
         <uses-native-library
             android:name="libcdsprpc.so"
             android:required="false" />
+        <!-- GPU prefill: opencl_shim.c dlopen()s the vendor OpenCL library (Adreno). Listed in the vendor's
+             public.libraries.txt on Snapdragon devices; optional like the FastRPC library above. -->
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
 
         <activity
             android:name=".MainActivity"
