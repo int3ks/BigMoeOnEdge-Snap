@@ -189,7 +189,6 @@ class SettingsViewModel(
     fun updateSeparateMtpDraftEnabled(v: Boolean) = launch { dataStore.updateSeparateMtpDraftEnabled(v) }
     fun updateMetricsCsv(v: Boolean) = launch { dataStore.updateMetricsCsv(v) }
     fun updateNpuPrefill(v: Boolean) = launch { dataStore.updateNpuPrefill(v) }
-    fun updateDensePrefill(v: Int) = launch { dataStore.updateDensePrefill(v) }
     fun updateNpuLoaders(v: Int) = launch { dataStore.updateNpuLoaders(v) }
     fun updateNpuMinTokens(v: Int) = launch { dataStore.updateNpuMinTokens(v) }
     fun updateNpuRoutedPrefill(v: Boolean) = launch { dataStore.updateNpuRoutedPrefill(v) }

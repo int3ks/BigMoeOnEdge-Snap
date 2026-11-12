@@ -46,11 +46,7 @@ internal fun MemorySection(
 ) {
     val small = MaterialTheme.typography.bodySmall
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
-    // Default: dense models follow Settings → Dense models, MoE models the MoE prefill choice.
-    val dense = estimate != null && !estimate.moe
-    val defaultNpu = if (dense) settings.densePrefill == 1 else settings.npuPrefill
-    val npuOn = npuAvailable && (options.npu ?: defaultNpu)
-    val defaultAccel = if (defaultNpu) "on" else "off"
+    val npuOn = npuAvailable && (options.npu ?: settings.npuPrefill)
     // The cache this model will load with: its own, else the global one (null = sized automatically at load).
     val cacheMb: Long? = options.cacheMb?.toLong() ?: when (settings.cacheMode) {
         CacheMode.FIXED -> settings.cacheMb.toLong()
@@ -66,7 +62,7 @@ internal fun MemorySection(
                 Text("NPU", style = small, modifier = Modifier.width(92.dp))
                 FilterChip(
                     selected = options.npu == null, onClick = { onNpu(null) },
-                    label = { Text("Default ($defaultAccel)") }
+                    label = { Text("Default (" + (if (settings.npuPrefill) "on" else "off") + ")") }
                 )
                 FilterChip(selected = options.npu == true, onClick = { onNpu(true) }, label = { Text("On") })
                 FilterChip(selected = options.npu == false, onClick = { onNpu(false) }, label = { Text("Off") })

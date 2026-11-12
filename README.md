@@ -76,7 +76,7 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
   stderr, "Write to file" additionally appends it continuously to `.bigmoe/logs`, so it survives a crash. The file
   header names the app, device and why the previous run ended.
 * **Page buttons in every top bar** (Chats, Models, Settings, Log); the floating bar is gone.
-* **Several named system prompts**; the empty chat box says "I am <prompt name>, you can ask me anything".
+* **Several named system prompts**; the empty chat box shows the prompt's name as it is (e.g. "I am Default, ask me").
 * **Settings export/import** (no paths, no API keys), per-chat toggles for tools, thinking and web search.
 * **Replay keeps the KV prefix** (edit, regenerate and chat switches no longer clear the cache) and the model card shows
   the **load progress**.

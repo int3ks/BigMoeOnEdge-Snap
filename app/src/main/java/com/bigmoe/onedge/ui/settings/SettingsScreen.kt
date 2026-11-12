@@ -337,49 +337,34 @@ private fun SettingsContent(
         Spacer(Modifier.height(8.dp))
         if (performanceExpanded) {
             // ------------------------------------------------------------ CPU · NPU & memory
-            PerformanceGroup("CPU · NPU & memory", "Prompt prefill on the NPU, CPU cores, context") {
-            val htp = viewModel.npuPrefillAvailable
-            Hint(viewModel.npuPrefillStatus)
-            Hint("Prefill = processing the prompt; it can run on the Hexagon NPU. Decode (writing the reply) runs on the CPU. Applies at the next model load.")
-
-            Section("Dense models (loaded into RAM)")
-            ChoiceSetting(
-                "Prefill",
-                listOf(0 to "CPU") + (if (htp || settings.densePrefill == 1) listOf(1 to "NPU") else emptyList()),
-                settings.densePrefill
-            ) { viewModel.updateDensePrefill(it) }
-            Hint(
-                when {
-                    settings.densePrefill == 1 && !htp -> "Saved as NPU, but the NPU is unavailable: dense models run on the CPU."
-                    settings.densePrefill == 1 -> "The NPU keeps its own copy of the layer weights while the CPU decodes from the file: about twice the weights in RAM."
-                    else -> "Prompt and reply on the CPU. Weights in RAM once."
-                }
-            )
-
-            Section("MoE models (experts streamed from flash)")
+            PerformanceGroup("CPU · NPU & memory", "NPU prompt prefill, CPU cores, context") {
+            Hint("These options apply only when the APK includes the Hexagon backend. Prompt prefill can use the NPU; token-by-token decode remains on CPU.")
             val npuCombinationAllowed = !settings.rowStream
-            ChoiceSetting(
-                "Prefill",
-                listOf(0 to "CPU") + (if (htp || settings.npuPrefill) listOf(1 to "NPU") else emptyList()),
-                if (settings.npuPrefill) 1 else 0,
-                enabled = npuCombinationAllowed || settings.npuPrefill
-            ) { viewModel.updateNpuPrefill(it == 1) }
-            Hint(
+            // Keep a stale saved-on switch interactive so an unavailable NPU preference can be turned off;
+            // all other HTP controls remain disabled until the runtime probe really opens HTP0.
+            val npuToggleEnabled = (viewModel.npuPrefillAvailable && npuCombinationAllowed) || settings.npuPrefill
+            val loadedModel = (engine as? EngineState.Ready)?.info
+            SwitchRow(
+                "NPU prefill (Snapdragon Hexagon)",
                 when {
-                    settings.npuPrefill && !htp -> "Saved as NPU, but the NPU is unavailable. Choose CPU so MoE models can load."
-                    !npuCombinationAllowed -> "NPU is unavailable while Row-stream tables are on."
-                    settings.npuPrefill -> "Prompt graphs run on the Hexagon NPU, two layers at a time: no second copy of the model."
-                    else -> "Prompt and reply on the CPU."
-                }
-            )
-
-            Section("NPU prefill tuning")
-            val npuKnobs = htp && (settings.npuPrefill || settings.densePrefill == 1)
+                    settings.npuPrefill && !viewModel.npuPrefillAvailable -> "This preference is saved as on, but HTP is unavailable. Turn this switch off to allow CPU-only model loading."
+                    !npuCombinationAllowed -> "Unavailable while Row-stream tables are enabled. Turn that option off before enabling NPU prefill."
+                    loadedModel?.npuPrefillReady == true && loadedModel.config.npuPrefill && settings.npuPrefill -> "Enabled for the loaded model: HTP0 opened during model load. Actual execution is confirmed only when logcat reports NPU prefill device_nodes greater than zero."
+                    loadedModel?.npuPrefillReady == true && !settings.npuPrefill -> "The currently loaded model still has HTP prefill active; reload it to apply this saved-off preference."
+                    settings.npuPrefill -> "Selected for the next model load. Prompt graphs may run on HTP; token-by-token decode remains on CPU."
+                    else -> "Uses the HTP device for eligible wide prompt graphs. This changes only after the model is reloaded; execution must be confirmed from device-node telemetry."
+                },
+                checked = settings.npuPrefill,
+                enabled = npuToggleEnabled
+            ) {
+                viewModel.updateNpuPrefill(it)
+            }
+            Hint(viewModel.npuPrefillStatus)
             ChoiceSetting(
                     "NPU prefill loader threads",
                     com.bigmoe.onedge.core.SettingChoices.NPU_LOADERS.map { it to it.toString() },
                     settings.npuLoaders,
-                    enabled = npuKnobs
+                    enabled = npuToggleEnabled && settings.npuPrefill
                 ) { viewModel.updateNpuLoaders(it) }
                 // With Guess ahead the CPU verify batch is draftMax + 1 wide; only thresholds above it are offered.
                 val npuMinChoices = Choices.NPU_MIN_TOKENS.filter {
@@ -389,24 +374,26 @@ private fun SettingsContent(
                     "Minimum prompt tokens sent to NPU",
                     npuMinChoices.map { it to "$it tokens" },
                     (npuMinChoices.lastOrNull { it <= settings.npuMinTokens } ?: npuMinChoices.first()),
-                    enabled = npuKnobs
+                    enabled = npuToggleEnabled && settings.npuPrefill
                 ) { viewModel.updateNpuMinTokens(it) }
                 SwitchRow(
                     "Routed expert reads during NPU prefill",
                     "Predict which experts a prompt graph needs and load those instead of reading every expert in the layer. Falls back to a full-layer read when the predicted routing is dense.",
                     settings.npuRoutedPrefill,
-                    enabled = npuKnobs
+                    enabled = npuToggleEnabled && settings.npuPrefill
                 ) { viewModel.updateNpuRoutedPrefill(it) }
                 if (settings.npuRoutedPrefill) {
                     ChoiceSetting(
                         "Full-layer fallback threshold",
                         Choices.NPU_ROUTED_FULL_PCT.map { it to "$it% of experts" },
                         settings.npuRoutedFullPct,
-                        enabled = npuKnobs
+                        enabled = npuToggleEnabled && settings.npuPrefill
                     ) { viewModel.updateNpuRoutedFullPct(it) }
                     Hint("At higher thresholds, more layers use routed reads; a lower threshold chooses a full-layer read sooner. This is a memory-I/O trade-off, not a quality setting.")
                 }
-            Hint("Routed reads matter for streamed (MoE) models only.")
+            if (!viewModel.npuPrefillAvailable) {
+                Hint("Loader, threshold and routed-read preferences do not activate hardware by themselves. They stay disabled until the runtime can open HTP0.")
+            }
 
             Section("CPU")
             CpuCoresSetting(

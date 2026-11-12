@@ -168,8 +168,6 @@ data class EngineSettings(
     /** Enable optional Hexagon/NPU prefill; off by default so CPU-only APKs remain normal. */
     val npuPrefill: Boolean = false,
     val npuLoaders: Int = 8,
-    /** Dense (resident) models: prefill 0 CPU / 1 NPU. [npuPrefill] is the MoE prefill. */
-    val densePrefill: Int = 0,
     val npuMinTokens: Int = 32,
     val npuRoutedPrefill: Boolean = true,
     val npuRoutedFullPct: Int = 85,
@@ -311,7 +309,6 @@ data class EngineSettings(
         metricsCsv = metricsCsv,
         npuPrefill = npuPrefill,
         npuLoaders = npuLoaders,
-        densePrefill = densePrefill,
         npuMinTokens = npuMinTokens,
         npuRoutedPrefill = npuRoutedPrefill,
         npuRoutedFullPct = npuRoutedFullPct,
@@ -393,7 +390,6 @@ class EngineSettingsDataStore(private val context: Context) {
         val METRICS_CSV = booleanPreferencesKey("metrics_csv")
         val NPU_PREFILL = booleanPreferencesKey("npu_prefill")
         val NPU_LOADERS = intPreferencesKey("npu_loaders")
-        val DENSE_PREFILL = intPreferencesKey("dense_prefill")
         val NPU_MIN_TOKENS = intPreferencesKey("npu_min_tokens")
         val NPU_ROUTED = booleanPreferencesKey("npu_routed_prefill")
         val NPU_ROUTED_FULL_PCT = intPreferencesKey("npu_routed_full_pct")
@@ -491,8 +487,6 @@ class EngineSettingsDataStore(private val context: Context) {
             metricsCsv = p[Keys.METRICS_CSV] ?: d.metricsCsv,
             npuPrefill = p[Keys.NPU_PREFILL] ?: d.npuPrefill,
             npuLoaders = p[Keys.NPU_LOADERS] ?: d.npuLoaders,
-            // Before the split, one NPU switch served every model.
-            densePrefill = (p[Keys.DENSE_PREFILL] ?: if (p[Keys.NPU_PREFILL] == true) 1 else d.densePrefill).coerceIn(0, 1),
             npuMinTokens = p[Keys.NPU_MIN_TOKENS] ?: d.npuMinTokens,
             npuRoutedPrefill = p[Keys.NPU_ROUTED] ?: d.npuRoutedPrefill,
             npuRoutedFullPct = p[Keys.NPU_ROUTED_FULL_PCT] ?: d.npuRoutedFullPct,
@@ -647,7 +641,6 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateMetricsCsv(v: Boolean) = set(Keys.METRICS_CSV, v)
     suspend fun updateNpuPrefill(v: Boolean) = set(Keys.NPU_PREFILL, v)
     suspend fun updateNpuLoaders(v: Int) = set(Keys.NPU_LOADERS, v.coerceIn(1, 16))
-    suspend fun updateDensePrefill(v: Int) = set(Keys.DENSE_PREFILL, v.coerceIn(0, 1))
     suspend fun updateNpuMinTokens(v: Int) = set(Keys.NPU_MIN_TOKENS, v.coerceIn(2, 2048))
     suspend fun updateNpuRoutedPrefill(v: Boolean) = set(Keys.NPU_ROUTED, v)
     suspend fun updateNpuRoutedFullPct(v: Int) = set(Keys.NPU_ROUTED_FULL_PCT, v.coerceIn(1, 100))

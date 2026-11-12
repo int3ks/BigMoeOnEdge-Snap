@@ -168,17 +168,6 @@ class LoadConfigTest {
     }
 
     @Test
-    fun npuPrefillResolvesPerModelKind() {
-        val npu = EngineCaps(overlapHook = true, multimodal = true, npuPrefill = true)
-        val base = EngineController.applyAutoMode(d, ModelKind.DENSE)
-        assertEquals(true, EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, null, npu).npuPrefill)
-        assertEquals(false, EngineController.resolveAccelerators(base.copy(npuPrefill = true, densePrefill = 0), ModelKind.DENSE, null, npu).npuPrefill)
-        assertEquals(false, EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, false, npu).npuPrefill)
-        assertEquals(false, EngineController.resolveAccelerators(base.copy(densePrefill = 1), ModelKind.DENSE, null, npu.copy(npuPrefill = false)).npuPrefill)
-        assertEquals(true, EngineController.resolveAccelerators(base.copy(npuPrefill = true), ModelKind.MOE, null, npu).npuPrefill)
-    }
-
-    @Test
     fun cardOptionsDoNotCountAsChangedSettings() {
         val s = EngineSettings()
         // The global config the load was asked for compares equal; the per-model cache override must not matter.

@@ -147,7 +147,7 @@ class EngineController(
                 },
                 cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
                 cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb
-            ).let { r -> resolveAccelerators(r, kind, memoryOptions.npu, capabilities) }
+            )
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar
@@ -280,17 +280,6 @@ class EngineController(
         private const val API_POLL_MS = 50L
 
         /** MoE = stream experts, dense = ordinary load. An unreadable header keeps the requested value. */
-        /**
-         * NPU prefill per model type. Streamed (MoE) models: the MoE switch ([LoadConfig.npuPrefill]). Dense (resident)
-         * models: [LoadConfig.densePrefill] (the NPU keeps a second copy of the weights there). The model card's NPU
-         * switch (On/Off) wins over both; a phone without the NPU runs on the CPU.
-         */
-        fun resolveAccelerators(r: LoadConfig, kind: ModelKind, modelNpu: Boolean?, caps: EngineCaps): LoadConfig {
-            if (kind != ModelKind.DENSE) return r
-            val npu = modelNpu ?: (r.densePrefill == 1)
-            return r.copy(npuPrefill = npu && caps.npuPrefill)
-        }
-
         fun applyAutoMode(config: LoadConfig, kind: ModelKind): LoadConfig = when (kind) {
             ModelKind.MOE -> config.copy(mmapBaseline = false)
             ModelKind.DENSE -> config.copy(mmapBaseline = true)

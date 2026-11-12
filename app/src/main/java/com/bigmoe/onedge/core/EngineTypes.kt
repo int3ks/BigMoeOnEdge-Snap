@@ -92,8 +92,6 @@ data class LoadConfig(
     val npuMinTokens: Int = 32,
     val npuRoutedPrefill: Boolean = true,
     val npuRoutedFullPct: Int = 85,
-    /** Dense (resident) models: 0 CPU, 1 NPU prefill. Not on the wire: EngineController resolves it into [npuPrefill]. */
-    val densePrefill: Int = 0,
     val ngramMinMatch: Int = 3,
     val ngramMaxMatch: Int = 12,
     /** `--decide-prefix-cache`: affects scored-choice requests only. */
