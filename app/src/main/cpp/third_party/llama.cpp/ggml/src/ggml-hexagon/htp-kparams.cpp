@@ -1034,40 +1034,12 @@ static bool htp_kparams_solve_matmul(
     if (!htp_matmul_check_types(src0, src1, dst)) {
         return false;
     }
-    const bool collapse = htp_matmul_can_collapse(src0, src1, dst);
-    const ggml_tensor src1_collapsed = collapse ? htp_tensor_collapse_rows(src1) : *src1;
-    const ggml_tensor dst_collapsed  = collapse ? htp_tensor_collapse_rows(dst) : *dst;
-    const ggml_tensor * s1 = collapse ? &src1_collapsed : src1;
-    const ggml_tensor * d  = collapse ? &dst_collapsed : dst;
-
-    if (!htp_kparams_solve_matmul_impl(sess, src0, s1, d, 0, 0, kparams)) {
-        return false;
+    if (htp_matmul_can_collapse(src0, src1, dst)) {
+        const ggml_tensor src1_collapsed = htp_tensor_collapse_rows(src1);
+        const ggml_tensor dst_collapsed  = htp_tensor_collapse_rows(dst);
+        return htp_kparams_solve_matmul_impl(sess, src0, &src1_collapsed, &dst_collapsed, 0, 0, kparams);
     }
-
-    // BigMoeOnEdge-Snap: a float weight that sits in a device weights buffer but has not been written yet
-    // (set_tensor not called: no WEIGHT flag) becomes TILED the moment it is written, and graph compute then
-    // solves the tiled kernel, which can need more VTCM than the plain one this check just accepted (seen:
-    // blk.47.hc_ffn_down.weight, BF16 10240x320, one activation row, 8 MiB VTCM -> abort in graph compute).
-    // A caller that fills its weight buffers while the graph runs (the prefill arena) is checked before the
-    // write, so answer for the layout the weight will have. Plain MUL_MAT only: this function also serves
-    // MUL_MAT_ID at run time, where the flags are final.
-    if (dst->op == GGML_OP_MUL_MAT && !ggml_is_quantized(src0->type) && !htp_tensor_is_tiled(src0)) {
-        const auto * extra = (const struct htp_tensor_extra *) src0->extra;
-        const bool written = extra && (extra->flags & HTP_TENSOR_WEIGHT);
-        const bool device_weights = src0->buffer && !ggml_backend_buft_is_host(src0->buffer->buft) &&
-                                    ggml_backend_buffer_get_usage(src0->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
-        if (!written && device_weights && htp_is_tiled_weight_tensor(src0)) {
-            struct htp_tensor_extra as_tiled;
-            as_tiled.flags = HTP_TENSOR_WEIGHT | HTP_TENSOR_TILED;
-            ggml_tensor src0_tiled = *src0;
-            src0_tiled.extra = &as_tiled;
-            struct htp_mm_kernel_params scratch;
-            if (!htp_kparams_solve_matmul_impl(sess, &src0_tiled, s1, d, 0, 0, &scratch)) {
-                return false;
-            }
-        }
-    }
-    return true;
+    return htp_kparams_solve_matmul_impl(sess, src0, src1, dst, 0, 0, kparams);
 }
 
 bool htp_matmul_add_can_collapse(
