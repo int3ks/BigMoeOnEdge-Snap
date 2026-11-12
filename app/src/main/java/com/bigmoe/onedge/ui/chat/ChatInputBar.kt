@@ -58,6 +58,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.attachments.PendingAttachment
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import com.bigmoe.onedge.data.local.entity.AttachmentKind
 import com.bigmoe.onedge.ui.theme.AppTheme
 import com.bigmoe.onedge.ui.theme.appSurfaceModifier
@@ -161,7 +167,33 @@ fun ChatInputBar(
                         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = menuModifier.fillMaxWidth()
+                        modifier = menuModifier.fillMaxWidth().onPreviewKeyEvent { e ->
+                            // Hardware keyboard: Enter sends, Shift+Enter is a new line. Left/Right are handled here
+                            // because on the tablet they did not move the cursor (Shift extends the selection).
+                            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (e.key) {
+                                Key.Enter, Key.NumPadEnter -> {
+                                    if (e.isShiftPressed) false else {
+                                        if (!isGenerating && (shown.text.isNotBlank() || pendingAttachments.isNotEmpty())) onSendClicked()
+                                        true
+                                    }
+                                }
+                                Key.DirectionLeft, Key.DirectionRight -> {
+                                    val sel = shown.selection
+                                    val left = e.key == Key.DirectionLeft
+                                    val target = if (!e.isShiftPressed && !sel.collapsed) {
+                                        if (left) sel.min else sel.max
+                                    } else {
+                                        (sel.end + if (left) -1 else 1).coerceIn(0, shown.text.length)
+                                    }
+                                    val next = if (e.isShiftPressed) androidx.compose.ui.text.TextRange(sel.start, target)
+                                    else androidx.compose.ui.text.TextRange(target)
+                                    change(shown.copy(selection = next))
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
                     )
                 }
             }
