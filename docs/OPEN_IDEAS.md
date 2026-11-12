@@ -19,3 +19,4 @@ Moved out of CLAUDE.md to save tokens (state 2026-11-11).
   checkpoint after an image (Snap clears the KV around image turns).
 
 * Settings: remove stale DataStore keys left by v0.6.71-0.6.73 (`prefill_gpu`, `dense_prefill`, `dense_decode`) so they no longer show up in the settings export (drop them on start or skip unknown keys when exporting).
+* llama.cpp 0911 (Helldez `bmoe/expert-ready-hook-0911`, ac30987) was tried in v0.6.77/0.6.78 and reverted: with the NPU prefill the load hung (Hexagon host buffer now on by default, `opt_hostbuf`), and with `GGML_HEXAGON_HOSTBUF=0` the replies were garbage. Suspects: 0911's Hexagon `set_tensor_n` / runtime repacking (#31744) against `PrefillDevice`'s binding swap and `set_tensor` writes. Its `htp-kparams` solves matmuls for `ggml_hexagon_tensor_will_tile`, which would make the local htp-kparams fix unnecessary. Upstream engine 0.42.0 (Helldez/BigMoeOnEdge `bb20578`) reviewed: nothing portable.
