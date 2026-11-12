@@ -27,8 +27,7 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
 * Engine core: `app/src/main/cpp/core` = upstream BigMoeOnEdge **0.28 baseline + local patches + ported pieces**
   (engine version `0.28.1` in `app/src/main/cpp/CMakeLists.txt`). It is NOT upstream 0.38/0.39 — upstream rebuilt a
   lot after 0.29 (planner, `--auto`, server library); we port single features. See `docs/UPSTREAM_WATCH.md`.
-* llama.cpp: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-0911` (ac30987, upstream of 2026-11-09), local changes
-  `patches/0007` (regenerate it as the diff of the pristine branch against `third_party/llama.cpp` after a bump).
+* llama.cpp: vendored Helldez/llama.cpp `bmoe/expert-ready-hook-0411` (7ac98f4, upstream v0.9.0), local changes `patches/0007`.
 * JNI: `app/src/main/cpp/native-bridge.cpp` ↔ `core/EngineNativeBridge.kt` ↔ `core/EngineBackend.kt` ↔
   `core/EngineController.kt` (load/generate/state; `EngineState`, `LoadConfig`, `ModelInfo` in `core/EngineTypes.kt`).
 

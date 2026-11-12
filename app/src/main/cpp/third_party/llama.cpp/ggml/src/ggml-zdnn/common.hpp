@@ -16,7 +16,8 @@
 #include <utility>
 #include <vector>
 
-#define GGML_ZDNN_NAME "zDNN"
+#define GGML_ZDNN_NAME    "zDNN"
+#define GGML_ZDNN_VERSION ZDNN_VERNUM
 
 #define ZDNN_CHECK(stmt)                \
     do {                                \

@@ -71,7 +71,6 @@ set(GGML_OPENCL_KERNELS
     lightning_indexer
     tri
     fill
-    arange
     fwht
     clamp
     cpy
@@ -79,7 +78,6 @@ set(GGML_OPENCL_KERNELS
     diag_mask_inf
     diag
     div
-    dsv4_hc
     gelu
     get_rows
     glu
@@ -195,8 +193,6 @@ set(GGML_OPENCL_KERNELS
     mul_mv_mxfp4_f32
     mul_mv_mxfp4_f32_flat
     mul_mv_id_q4_0_f32_8x_flat
-    mul_mv_id_f32_f32
-    mul_mm_id_f32_f32
     mul_mv_id_q8_0_f32
     mul_mv_id_q8_0_f32_flat
     mul_mv_id_mxfp4_f32

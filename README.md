@@ -88,11 +88,11 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
   cache brake (the expert cache halves itself when Android takes its memory back, instead of thrashing) and a
   truncated model file failing the load. Ported onto this fork's engine; host tests in `app/src/main/cpp/core/tests`.
 * **Newer llama.cpp:** the vendored tree moved from 965f897 (2026-09-26) to Helldez/llama.cpp
-  `bmoe/expert-ready-hook-2810` (upstream of 2026-10-28) then to `bmoe/expert-ready-hook-0411` (upstream v0.9.0 of
-  2026-11-04) and to `bmoe/expert-ready-hook-0911` (upstream of 2026-11-09). It brings faster Hexagon
+  `bmoe/expert-ready-hook-2810` (upstream of 2026-10-28) and then to `bmoe/expert-ready-hook-0411` (upstream v0.9.0 of
+  2026-11-04), the revision BigMoeOnEdge uses. It brings faster Hexagon
   (NPU) MoE kernels, DeepSeek V4.1 Flash, LFM3 and more models, and the **Flint** architecture
   (`FlintForCausalLM`, e.g. flint-40B-A2.5B) and the Jinja hex escapes its chat template needs; Flint is also
-  registered for expert streaming. Local changes on top are recorded in [`patches/0007`](patches/0007-llama-cpp-local-on-0911.patch).
+  registered for expert streaming. Local changes on top are recorded in [`patches/0007`](patches/0007-llama-cpp-local-on-0411.patch).
 * **NPU prefill builds on every push:** the Snapdragon Hexagon build runs in CI and is the APK that gets released.
 * **MTP for every architecture:** a separate MTP drafter (MTP-only GGUF) is no longer limited to Qwen4Exp; Qwen3.5/3.6
   and others can use one. Most Qwen3.5/3.6 GGUFs carry their own MTP head anyway.

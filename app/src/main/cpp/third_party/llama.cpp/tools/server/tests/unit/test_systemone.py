@@ -122,13 +122,10 @@ def test_systemone_invalid_request(data: dict):
     assert "error" in res.body
 
 
-def test_systemone_shared_prompt(tmp_path):
+def test_systemone_shared_prompt():
     global server
     server = ServerPreset.tinyopenjev()
-    server.n_slots = len(TEST_QUESTIONS)
     server.server_metrics = True
-    server.debug = True
-    server.log_path = str(tmp_path / "server.log")
     server.start()
     res = server.make_request("POST", "/v1/systemone", data={
         "state": TEST_STATE,
@@ -142,19 +139,8 @@ def test_systemone_shared_prompt(tmp_path):
     assert n_cached % 2 == 0
     assert n_processed + n_cached == res.body["usage"]["input_tokens"]
 
-    # the next request takes an empty slot as parent, so child slot 0 has a lower id than the parent
-    res_next = server.make_request("POST", "/v1/systemone", data={
-        "state": "Unrelated follow-up case: " * 10,
-        "questions": TEST_QUESTIONS,
-    })
-    assert res_next.status_code == 200
-
-    # in each request, each child waits for the parent during 1 batch only
-    server.stop()
-    with open(server.log_path) as f:
-        assert f.read().count("__TEST_TAG_WAIT_PARENT_SLOT__") == 2 * (len(TEST_QUESTIONS) - 1)
-
     # with one slot the prompt cannot be shared, the answers must be the same
+    server.stop()
     server = ServerPreset.tinyopenjev()
     server.n_slots = 1
     server.start()
@@ -195,7 +181,7 @@ def test_systemone_prompt_cache(cache_ram, tmp_path):
         log = f.read()
     # the prompt cache is opt-in for decision models, and restores their states once enabled
     assert ("__TEST_TAG_CACHE_IDLE_SLOTS_ENABLED__" in log) == (cache_ram is not None)
-    assert ("__TEST_TAG_PROMPT_CACHE_RESTORE__" in log) == (cache_ram is not None)
+    assert ("found better prompt" in log) == (cache_ram is not None)
 
 
 def test_systemone_prompt_cache_child_slots(tmp_path):
@@ -224,7 +210,7 @@ def test_systemone_prompt_cache_child_slots(tmp_path):
     decide(TEST_STATE, TEST_QUESTIONS)
 
     with open(server.log_path) as f:
-        n_restored = f.read().count("__TEST_TAG_PROMPT_CACHE_FULL_RESTORE__")
+        n_restored = f.read().count("found better prompt with f_keep = 1.000")
 
     # every overwritten state comes back whole from the prompt cache
     for state in states:
@@ -233,7 +219,7 @@ def test_systemone_prompt_cache_child_slots(tmp_path):
     server.stop()
 
     with open(server.log_path) as f:
-        assert f.read().count("__TEST_TAG_PROMPT_CACHE_FULL_RESTORE__") == n_restored + len(states)
+        assert f.read().count("found better prompt with f_keep = 1.000") == n_restored + len(states)
 
 
 def test_systemone_images():

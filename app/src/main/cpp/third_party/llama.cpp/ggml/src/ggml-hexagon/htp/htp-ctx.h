@@ -5,7 +5,7 @@
 #include "hmx-queue.h"
 #include "htp-dcache.h"
 #include "htp-ops.h"
-#include "htp-trace.h"
+#include "hex-profile.h"
 #include "work-queue.h"
 #include "hex-fastdiv.h"
 
@@ -16,6 +16,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+
+#ifndef HTP_MAX_NTHREADS
+#define HTP_MAX_NTHREADS 10
+#endif
 
 #define HTP_MAX_MMAPS 64
 
@@ -33,7 +37,7 @@ struct htp_spad {
     uint8_t *                 data;            // pointer to an area in vtcm
     uint32_t                  stride;          // stride used inside this spad
     uint32_t                  size;            // total size
-    uint32_t                  size_per_hvx;    // size per hvx
+    uint32_t                  size_per_thread; // size per thread
 };
 
 struct htp_mdev_group {
@@ -67,14 +71,14 @@ struct htp_ops_context {
     struct htp_spad dst_spad;
 
     uint32_t              flags;
-    uint32_t              n_hvx;
-    struct fastdiv_values n_hvx_div;
+    uint32_t              n_threads;
+    struct fastdiv_values n_threads_div;
     int                   status;
 
     // Must stay last: not cleared by htp_ops_context_reset(), ops init the caches they use
     union {
-        dma_cache_dm dma_cache_dm[HTP_MAX_NHVX];
-        dma_cache_fa dma_cache_fa[HTP_MAX_NHVX];
+        dma_cache_dm dma_cache_dm[HTP_MAX_NTHREADS];
+        dma_cache_fa dma_cache_fa[HTP_MAX_NTHREADS];
     } __attribute__((aligned(128)));
 };
 
@@ -84,13 +88,12 @@ struct htp_context {
 
     struct htp_mmap        mmap[HTP_MAX_MMAPS];
     dma_queue_t            dma[HTP_MAX_NTHREADS];
-    struct htp_thread_trace trace[HTP_MAX_NTHREADS];
-    work_queue_t           hvx_queue;
+    struct htp_thread_trace trace[HTP_MAX_NTHREADS + 1];
+    work_queue_t           work_queue;
     hmx_queue_t            hmx_queue;
 
     uint32_t               n_threads;
-    uint32_t               n_hvx;
-    struct fastdiv_values  n_hvx_div;
+    struct fastdiv_values  n_threads_div;
 
     int                    thread_id;
     int                    thread_prio;
@@ -123,37 +126,37 @@ struct htp_context {
 
 static inline void htp_ops_context_reset(struct htp_ops_context * octx, struct htp_context * ctx) {
     memset(octx, 0, offsetof(struct htp_ops_context, dma_cache_dm));
-    octx->ctx       = ctx;
-    octx->n_hvx     = ctx->n_hvx;
-    octx->n_hvx_div = ctx->n_hvx_div;
+    octx->ctx           = ctx;
+    octx->n_threads     = ctx->n_threads;
+    octx->n_threads_div = ctx->n_threads_div;
 }
 
-static inline bool htp_ops_context_set_n_hvx_div(
+static inline bool htp_ops_context_set_n_threads_div(
         struct htp_ops_context * octx,
-        uint32_t n_hvx,
-        struct fastdiv_values n_hvx_div) {
-    if (n_hvx == 0 || n_hvx > octx->ctx->n_hvx) {
+        uint32_t n_threads,
+        struct fastdiv_values n_threads_div) {
+    if (n_threads == 0 || n_threads > octx->ctx->n_threads) {
         return false;
     }
 
-    octx->n_hvx     = n_hvx;
-    octx->n_hvx_div = n_hvx_div;
+    octx->n_threads     = n_threads;
+    octx->n_threads_div = n_threads_div;
 
     return true;
 }
 
-static inline bool htp_ops_context_set_n_hvx(struct htp_ops_context * octx, uint32_t n_hvx) {
-    if (n_hvx == 0 || n_hvx > octx->ctx->n_hvx) {
+static inline bool htp_ops_context_set_n_threads(struct htp_ops_context * octx, uint32_t n_threads) {
+    if (n_threads == 0 || n_threads > octx->ctx->n_threads) {
         return false;
     }
-    if (n_hvx == octx->n_hvx) {
+    if (n_threads == octx->n_threads) {
         return true;
     }
 
-    const struct fastdiv_values n_hvx_div = n_hvx == octx->ctx->n_hvx
-        ? octx->ctx->n_hvx_div
-        : init_fastdiv_values(n_hvx);
-    return htp_ops_context_set_n_hvx_div(octx, n_hvx, n_hvx_div);
+    const struct fastdiv_values n_threads_div = n_threads == octx->ctx->n_threads
+        ? octx->ctx->n_threads_div
+        : init_fastdiv_values(n_threads);
+    return htp_ops_context_set_n_threads_div(octx, n_threads, n_threads_div);
 }
 
 static inline void htp_ops_context_set_status(struct htp_ops_context * octx, int status) {
