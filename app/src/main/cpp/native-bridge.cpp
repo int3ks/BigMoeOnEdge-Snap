@@ -188,6 +188,7 @@ enum IntIdx {
     I_KV_CACHE_TYPE,   // 0 f16, 1 q8_0, 2 q4_0 (per model)
     I_REPEAT_LAST_N,   // repetition-penalty window: 0 off, < 0 whole context
     I_PREFILL_GPU,     // 1 = the prefill device is the GPU (ggml-opencl "GPUOpenCL") instead of HTP0
+    I_DECODE_GPU,      // 1 = whole model on the GPU (prefill and decode); resident models only
     I_COUNT
 };
 enum FloatIdx { F_TEMPERATURE = 0, F_TOP_P, F_MIN_P, F_REPEAT_PENALTY, F_FREQ_PENALTY, F_PRESENCE_PENALTY, F_COUNT };
@@ -402,6 +403,16 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     if (gpu_requested && iv[I_ROW_STREAM] != 0) {
         return to_bytes(env, "GPU prefill was requested together with Row-stream tables. Disable one of these conflicting settings and reload.");
     }
+    const bool decode_gpu = iv[I_DECODE_GPU] != 0;
+    if (decode_gpu && iv[I_NPU_PREFILL] != 0) {
+        return to_bytes(env, "GPU decode was requested together with a separate prefill device. Choose one.");
+    }
+    if (decode_gpu && iv[I_MMAP_BASELINE] == 0) {
+        return to_bytes(env, "GPU decode needs a model that is not streamed (a dense model loaded into RAM).");
+    }
+    if (decode_gpu && !gpu_runtime_status().available) {
+        return to_bytes(env, "GPU decode was requested but OpenCL is unavailable. " + gpu_runtime_status().message);
+    }
     if (gpu_requested && !gpu_runtime_status().available) {
         return to_bytes(env, "GPU prefill was requested but OpenCL is unavailable. " + gpu_runtime_status().message);
     }
@@ -435,6 +446,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     cfg.lora_path = lora_path; // empty = no LoRA adapter
     cfg.lora_scale = std::clamp<float>((float) j_lora_scale, 0.0f, 4.0f);
     cfg.kv_cache_type = std::clamp<int>(iv[I_KV_CACHE_TYPE], 0, 2);
+    if (decode_gpu) cfg.offload_device = "GPUOpenCL";
     // The NPU knobs (loaders, threshold, routed experts) drive whichever accelerator does the prefill.
     if (npu_requested || gpu_requested) {
         cfg.prefill.device = gpu_requested ? "GPUOpenCL" : "HTP0";

@@ -336,89 +336,114 @@ private fun SettingsContent(
         )
         Spacer(Modifier.height(8.dp))
         if (performanceExpanded) {
-            // ------------------------------------------------------------ accelerator / NPU
-            PerformanceGroup("Accelerator · NPU prompt prefill", "Qualcomm Hexagon prompt acceleration") {
-            Hint("These options apply only when the APK includes the Hexagon backend. Prompt prefill can use the NPU; token-by-token decode remains on CPU.")
-            val npuCombinationAllowed = !settings.rowStream
-            // Keep a stale saved-on switch interactive so an unavailable NPU preference can be turned off;
-            // all other HTP controls remain disabled until the runtime probe really opens HTP0.
-            val npuToggleEnabled = (viewModel.npuPrefillAvailable && npuCombinationAllowed) || settings.npuPrefill
-            val loadedModel = (engine as? EngineState.Ready)?.info
-            SwitchRow(
-                "NPU prefill (Snapdragon Hexagon)",
-                when {
-                    settings.npuPrefill && !viewModel.npuPrefillAvailable -> "This preference is saved as on, but HTP is unavailable. Turn this switch off to allow CPU-only model loading."
-                    !npuCombinationAllowed -> "Unavailable while Row-stream tables are enabled. Turn that option off before enabling NPU prefill."
-                    loadedModel?.npuPrefillReady == true && loadedModel.config.npuPrefill && settings.npuPrefill -> "Enabled for the loaded model: HTP0 opened during model load. Actual execution is confirmed only when logcat reports NPU prefill device_nodes greater than zero."
-                    loadedModel?.npuPrefillReady == true && !settings.npuPrefill -> "The currently loaded model still has HTP prefill active; reload it to apply this saved-off preference."
-                    settings.npuPrefill -> "Selected for the next model load. Prompt graphs may run on HTP; token-by-token decode remains on CPU."
-                    else -> "Uses the HTP device for eligible wide prompt graphs. This changes only after the model is reloaded; execution must be confirmed from device-node telemetry."
-                },
-                checked = settings.npuPrefill,
-                enabled = npuToggleEnabled
-            ) {
-                viewModel.updateNpuPrefill(it)
-            }
+            // ------------------------------------------------------------ CPU · NPU · OpenCL & memory
+            PerformanceGroup("CPU · NPU · OpenCL & memory", "Which processor runs prompt and reply, CPU cores, context") {
+            val htp = viewModel.htpPrefillAvailable
+            val gpu = viewModel.gpuPrefillAvailable
             Hint(viewModel.npuPrefillStatus)
-            // GPU instead of NPU: the same prefill path (loaders, threshold, routed reads) on ggml-opencl.
-            Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                color = Color.Transparent,
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(
-                        "EXPERIMENTAL", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    SwitchRow(
-                        "Prefill on the GPU (OpenCL) instead of the NPU",
-                        when {
-                            !viewModel.gpuPrefillAvailable -> "GPU prefill is unavailable on this device (see the status line above)."
-                            !viewModel.htpPrefillAvailable -> "The NPU is unavailable, so accelerated prefill always uses the GPU here."
-                            else -> "Prompt graphs run on the Adreno GPU through OpenCL; decode stays on the CPU. The first load compiles the GPU kernels (can take a while, cached afterwards). Expert matmuls of IQ quants stay on the CPU. Reload the model to apply."
-                        },
-                        checked = settings.prefillGpu || (viewModel.gpuPrefillAvailable && !viewModel.htpPrefillAvailable),
-                        enabled = viewModel.gpuPrefillAvailable && viewModel.htpPrefillAvailable
-                    ) { viewModel.updatePrefillGpu(it) }
-                }
+            Hint("Prefill = processing the prompt, decode = writing the reply. Everything here applies at the next model load.")
+
+            Section("Dense models (loaded into RAM)")
+            val denseDecodeOptions = listOf(0 to "CPU") + (if (gpu || settings.denseDecode == 1) listOf(1 to "OpenCL GPU (experimental)") else emptyList())
+            ChoiceSetting("Decode", denseDecodeOptions, settings.denseDecode) { viewModel.updateDenseDecode(it) }
+            if (settings.denseDecode == 1) {
+                Hint(
+                    if (gpu) "The whole model runs on the GPU, prompt and reply. The weights live in GPU memory only (once in RAM). The UI may stutter while the GPU computes."
+                    else "Saved as OpenCL, but OpenCL is unavailable here: the model runs on the CPU."
+                )
+            } else {
+                val densePrefillOptions = listOf(0 to "CPU") +
+                    (if (htp || settings.densePrefill == 1) listOf(1 to "NPU") else emptyList()) +
+                    (if (gpu || settings.densePrefill == 2) listOf(2 to "OpenCL GPU (experimental)") else emptyList())
+                ChoiceSetting("Prefill", densePrefillOptions, settings.densePrefill) { viewModel.updateDensePrefill(it) }
+                Hint(
+                    if (settings.densePrefill == 0) "Prompt and reply on the CPU. Weights in RAM once."
+                    else "The accelerator keeps its own copy of the layer weights while the CPU decodes from the file: about twice the weights in RAM."
+                )
             }
+
+            Section("MoE models (experts streamed from flash)")
+            val npuCombinationAllowed = !settings.rowStream
             ChoiceSetting(
-                    "NPU prefill loader threads",
+                "Prefill",
+                listOf(0 to "CPU") + (if (htp || settings.npuPrefill) listOf(1 to "NPU") else emptyList()),
+                if (settings.npuPrefill) 1 else 0,
+                enabled = npuCombinationAllowed || settings.npuPrefill
+            ) { viewModel.updateNpuPrefill(it == 1) }
+            Hint(
+                when {
+                    settings.npuPrefill && !htp -> "Saved as NPU, but the NPU is unavailable. Choose CPU so MoE models can load."
+                    !npuCombinationAllowed -> "NPU is unavailable while Row-stream tables are on."
+                    settings.npuPrefill -> "Prompt graphs run on the Hexagon NPU, two layers at a time: no second copy of the model."
+                    else -> "Prompt and reply on the CPU."
+                }
+            )
+            Hint("Decode: CPU. OpenCL is not offered for streamed models: it takes only whole tensors, while the experts are loaded one at a time.")
+
+            Section("Accelerated prefill tuning")
+            val npuKnobs = (htp && settings.npuPrefill) ||
+                (settings.denseDecode == 0 && ((htp && settings.densePrefill == 1) || (gpu && settings.densePrefill == 2)))
+            ChoiceSetting(
+                    "Accelerator loader threads",
                     com.bigmoe.onedge.core.SettingChoices.NPU_LOADERS.map { it to it.toString() },
                     settings.npuLoaders,
-                    enabled = npuToggleEnabled && settings.npuPrefill
+                    enabled = npuKnobs
                 ) { viewModel.updateNpuLoaders(it) }
                 // With Guess ahead the CPU verify batch is draftMax + 1 wide; only thresholds above it are offered.
                 val npuMinChoices = Choices.NPU_MIN_TOKENS.filter {
                     it <= settings.toLoadConfig().nUbatch && it >= settings.toLoadConfig().npuMinTokensFloor
                 }.ifEmpty { listOf(settings.toLoadConfig().npuMinTokensFloor) }
                 ChoiceSetting(
-                    "Minimum prompt tokens sent to NPU",
+                    "Minimum prompt tokens for the accelerator",
                     npuMinChoices.map { it to "$it tokens" },
                     (npuMinChoices.lastOrNull { it <= settings.npuMinTokens } ?: npuMinChoices.first()),
-                    enabled = npuToggleEnabled && settings.npuPrefill
+                    enabled = npuKnobs
                 ) { viewModel.updateNpuMinTokens(it) }
                 SwitchRow(
-                    "Routed expert reads during NPU prefill",
+                    "Routed expert reads during accelerated prefill",
                     "Predict which experts a prompt graph needs and load those instead of reading every expert in the layer. Falls back to a full-layer read when the predicted routing is dense.",
                     settings.npuRoutedPrefill,
-                    enabled = npuToggleEnabled && settings.npuPrefill
+                    enabled = npuKnobs
                 ) { viewModel.updateNpuRoutedPrefill(it) }
                 if (settings.npuRoutedPrefill) {
                     ChoiceSetting(
                         "Full-layer fallback threshold",
                         Choices.NPU_ROUTED_FULL_PCT.map { it to "$it% of experts" },
                         settings.npuRoutedFullPct,
-                        enabled = npuToggleEnabled && settings.npuPrefill
+                        enabled = npuKnobs
                     ) { viewModel.updateNpuRoutedFullPct(it) }
                     Hint("At higher thresholds, more layers use routed reads; a lower threshold chooses a full-layer read sooner. This is a memory-I/O trade-off, not a quality setting.")
                 }
-            if (!viewModel.npuPrefillAvailable) {
-                Hint("Loader, threshold and routed-read preferences do not activate hardware by themselves. They stay disabled until the runtime can open HTP0.")
-            }
-            } // NPU group
+            Hint("Used by NPU and OpenCL prefill. Routed reads matter for streamed models only.")
+
+            Section("CPU")
+            CpuCoresSetting(
+                decodeMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMask),
+                prefillMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMaskPrefill),
+                allowed = remember { viewModel.allowedCpus },
+                onDecode = viewModel::updateCpuMask,
+                onPrefill = viewModel::updateCpuMaskPrefill
+            )
+            ChoiceSetting(
+                "Batch width (ubatch)",
+                Choices.BATCH_WIDTH.map { it to "$it tokens" },
+                settings.batchWidth
+            ) { viewModel.updateBatchWidth(it) }
+            Hint("Upper bound for tokens computed in one graph while processing prompts; the engine caps this at the context size. Smaller values reduce reserved compute RAM and can leave more memory for expert cache; larger values can prefill faster but may cause memory pressure. Decode speed is generally unaffected.")
+            Text("Context (tokens)", style = MaterialTheme.typography.labelMedium)
+            OutlinedTextField(
+                value = contextText,
+                onValueChange = { v -> contextText = ContextInput.sanitize(v) },
+                singleLine = true,
+                isError = !contextValid,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Hint(
+                if (contextValid) "Type any number, there is no limit. Prompt plus reply the session can hold. Also memory: the KV cache is sized for it at open, so a very large value needs a lot of RAM and the model may fail to load; lower it if that happens. Speed tip: a smaller context also leaves more RAM for the expert cache."
+                else "Enter a whole number greater than 0. The last valid value (${settings.contextLength}) stays in use."
+            )
+            } // CPU · NPU · OpenCL group
             Spacer(Modifier.height(10.dp))
 
             // ------------------------------------------------------------ streaming (engine)
@@ -496,12 +521,18 @@ private fun SettingsContent(
                 settings.releaseMmap,
                 enabled = stream && (settings.denseWeights == DenseWeights.ANONYMOUS || settings.denseWeights == DenseWeights.PINNED)
             ) { viewModel.updateReleaseMmap(it) }
+            SwitchRow(
+                "Start reads in two waves (experimental)",
+                "Publishes the first projection's expert reads before queuing the remaining projections, allowing I/O lanes to start earlier. Experimental; requires expert streaming, cache, and overlap. Leave off if it is slower on your device.",
+                settings.ioTwoWave,
+                enabled = stream && cacheOn && settings.overlap
+            ) { viewModel.updateIoTwoWave(it) }
             Divider()
             } // streaming group
             Spacer(Modifier.height(10.dp))
 
             // ------------------------------------------------------------ speed / quality
-            PerformanceGroup("Speed / quality", "Decode throughput, routing trade-offs and advanced controls") {
+            PerformanceGroup("Quality & speed", "Active experts, Guess ahead, prefetch and routing") {
             ChoiceSetting(
                 "Drop cold experts (% of even share)",
                 Choices.DROP_COLD.map {
@@ -532,53 +563,31 @@ private fun SettingsContent(
             GuessAheadSettings(settings, viewModel)
 
             Spacer(Modifier.height(8.dp))
-            // Always visible, framed in red. The scored-choice, quality-control and A/B diagnostics switches were
-            // removed from the screen (their stored values stay as they are).
-            Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                color = Color.Transparent,
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(
-                        "EXPERIMENTAL", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(Modifier.height(8.dp))
-                Section("I/O scheduling")
-                SwitchRow(
-                    "Start reads in two waves",
-                    "Publishes the first projection's expert reads before queuing the remaining projections, allowing I/O lanes to start earlier. Experimental; requires expert streaming, cache, and overlap. Leave off if it is slower on your device.",
-                    settings.ioTwoWave,
-                    enabled = stream && cacheOn && settings.overlap
-                ) { viewModel.updateIoTwoWave(it) }
-                Spacer(Modifier.height(8.dp))
-                Section("Prefetch and routing")
+                Section("Prefetch and routing (experimental)")
                 Hint("Guess ahead (MTP and n-gram): the mode per model on its card (Models page), the tuning above.")
                 ChoiceSetting(
-                    "Temporal prefetch (layers)",
+                    "Temporal prefetch (layers) (experimental)",
                     Choices.PREFETCH.map { it to if (it == 0) "off" else "$it" },
                     settings.prefetchLayers,
                     enabled = stream && cacheOn && !settings.predictPrefetch && settings.routeAhead == 0
                 ) { viewModel.updatePrefetchLayers(it) }
                 Hint("Bets a layer reuses the previous token's experts and reads them on idle lanes. Needs the cache.")
                 SwitchRow(
-                    "Predictive prefetch",
+                    "Predictive prefetch (experimental)",
                     "Runs the next layer's own router a layer early and prefetches what it names. More accurate than the bet above, and replaces it. Needs the cache.",
                     settings.predictPrefetch,
                     enabled = stream && cacheOn && settings.prefetchLayers == 0 && settings.routeAhead == 0
                 ) { viewModel.updatePredictPrefetch(it) }
                 if (settings.predictPrefetch) {
                     ChoiceSetting(
-                        "Predicted misses to read ahead",
+                        "Predicted misses to read ahead (experimental)",
                         Choices.PREDICT_SPEC.map { it to if (it == 0) "retention only" else "$it" },
                         settings.predictSpecMax, enabled = stream && cacheOn
                     ) { viewModel.updatePredictSpecMax(it) }
                     Hint("Retention only reads nothing and just protects what the prediction names, which is the safe setting.")
                 }
                 ChoiceSetting(
-                    "Prefer cached experts (% of score range)",
+                    "Prefer cached experts (% of score range) (experimental)",
                     Choices.SUBSTITUTE.map { it to if (it == 0) "off" else "$it%" },
                     settings.substitutePct, enabled = stream && cacheOn
                 ) { viewModel.updateSubstitutePct(it) }
@@ -590,46 +599,18 @@ private fun SettingsContent(
                     )
                 }
                 ChoiceSetting(
-                    "Route-ahead (layers)",
+                    "Route-ahead (layers) (experimental)",
                     Choices.ROUTE_AHEAD.map { it to if (it == 0) "off" else "$it" },
                     settings.routeAhead,
                     enabled = stream && settings.prefetchLayers == 0 && !settings.predictPrefetch && settings.spec == SpecSource.OFF
                 ) { viewModel.updateRouteAhead(it) }
                 Hint("Commits each layer's routing that many layers early, so its reads start early and can never be wasted. Lossy: some slots route differently. Excludes the prefetchers and Guess ahead.")
-                }
-            }
             Divider()
             } // speed / quality group
             Spacer(Modifier.height(10.dp))
 
-            // ------------------------------------------------------------ compute
-            PerformanceGroup("CPU compute & memory", "Prompt evaluation, context and sampling") {
-            CpuCoresSetting(
-                decodeMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMask),
-                prefillMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMaskPrefill),
-                allowed = remember { viewModel.allowedCpus },
-                onDecode = viewModel::updateCpuMask,
-                onPrefill = viewModel::updateCpuMaskPrefill
-            )
-            ChoiceSetting(
-                "Batch width (ubatch)",
-                Choices.BATCH_WIDTH.map { it to "$it tokens" },
-                settings.batchWidth
-            ) { viewModel.updateBatchWidth(it) }
-            Hint("Upper bound for tokens computed in one graph while processing prompts; the engine caps this at the context size. Smaller values reduce reserved compute RAM and can leave more memory for expert cache; larger values can prefill faster but may cause memory pressure. Decode speed is generally unaffected.")
-            Text("Context (tokens)", style = MaterialTheme.typography.labelMedium)
-            OutlinedTextField(
-                value = contextText,
-                onValueChange = { v -> contextText = ContextInput.sanitize(v) },
-                singleLine = true,
-                isError = !contextValid,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Hint(
-                if (contextValid) "Type any number, there is no limit. Prompt plus reply the session can hold. Also memory: the KV cache is sized for it at open, so a very large value needs a lot of RAM and the model may fail to load; lower it if that happens. Speed tip: a smaller context also leaves more RAM for the expert cache."
-                else "Enter a whole number greater than 0. The last valid value (${settings.contextLength}) stays in use."
-            )
+            // ------------------------------------------------------------ decoding (sampling)
+            PerformanceGroup("Decoding", "Temperature, Top P/K, Min P, penalties and seed") {
             Spacer(Modifier.height(8.dp))
             Text("Temperature: ${"%.2f".format(java.util.Locale.US, temp)}")
             Slider(value = temp, onValueChange = { temp = it }, onValueChangeFinished = { viewModel.updateTemperature(temp) }, valueRange = 0f..2f)

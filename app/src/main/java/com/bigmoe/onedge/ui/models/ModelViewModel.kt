@@ -249,7 +249,7 @@ class ModelViewModel(
     val deviceRamBytes: Long get() = totalRamBytes()
 
     /** Whether this build and device have NPU prefill at all (the per-model NPU switch is only shown then). */
-    val npuAvailable: Boolean get() = engineController.capabilities.npuPrefill
+    val npuAvailable: Boolean get() = engineController.capabilities.htpPrefill
 
     fun setNpuForModel(modelPath: String, npu: Boolean?) {
         viewModelScope.launch {

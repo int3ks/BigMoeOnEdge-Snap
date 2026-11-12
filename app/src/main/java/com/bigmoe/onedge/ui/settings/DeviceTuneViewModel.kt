@@ -72,7 +72,7 @@ class DeviceTuneViewModel(
                 say("The app closed last time while testing ${param.title} = ${DeviceTuneRunner.display(param, value)} " +
                     "with ${File(path).name} (most likely out of memory). That value is marked and will not be picked.")
             }
-            _ui.update { it.copy(npuAvailable = runCatching { engineController.capabilities.npuPrefill }.getOrDefault(false)) }
+            _ui.update { it.copy(npuAvailable = runCatching { engineController.capabilities.htpPrefill }.getOrDefault(false)) }
             refreshModels()
         }
         viewModelScope.launch {

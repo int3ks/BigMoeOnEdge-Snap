@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 
 namespace bmoe {
@@ -161,6 +162,7 @@ bool DeviceExpertArena::init(ggml_backend_dev_t dev,
     // a wider tile format) puts expert e at e * (allocated size / n_expert). That is the stride used
     // below, so it must divide evenly.
     ggml_backend_buffer_type_t buft = ggml_backend_dev_buffer_type(dev);
+    ggml_backend_dev_t dev_ptr = dev; // shadowed by the per-variant size below
     const size_t align = ggml_backend_buft_get_alignment(buft);
     size_t region_off[MoeRecipe::max_exps] = {};
     size_t slot_size = 0;
@@ -173,6 +175,25 @@ bool DeviceExpertArena::init(ggml_backend_dev_t dev,
                 err = std::string("the device lays out ") + v->name +
                       " in a way the arena cannot address one expert at a time";
                 return false;
+            }
+            // Each expert is written through a single-expert tensor at e * stride, so that tensor's own
+            // allocation must fit the stride. OpenCL (SOA layout) reserves alignment slack per quantised
+            // tensor and only takes whole-tensor writes: refuse with a load error instead of an assert.
+            {
+                ggml_init_params pp{};
+                pp.mem_size = ggml_tensor_overhead() * 2;
+                pp.no_alloc = true;
+                ggml_context * pc = ggml_init(pp);
+                const size_t one = pc ? ggml_backend_buft_get_alloc_size(
+                                            buft, ggml_new_tensor_3d(pc, v->type, v->ne[0], v->ne[1], 1))
+                                      : SIZE_MAX;
+                if (pc) ggml_free(pc);
+                if (one > dev / (size_t) n_expert_) {
+                    err = std::string(ggml_backend_dev_name(dev_ptr)) +
+                          " cannot take streamed experts one at a time (it needs whole tensors); "
+                          "use the NPU or the CPU for the prefill of streamed models";
+                    return false;
+                }
             }
             biggest = std::max(biggest, dev);
             n_tensors += 1 + (size_t) n_expert_;

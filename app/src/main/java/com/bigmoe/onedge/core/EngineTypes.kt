@@ -92,8 +92,14 @@ data class LoadConfig(
     val npuMinTokens: Int = 32,
     val npuRoutedPrefill: Boolean = true,
     val npuRoutedFullPct: Int = 85,
-    /** Run the accelerated prefill ([npuPrefill]) on the GPU (OpenCL) instead of the Hexagon NPU. Experimental. */
+    /** Run the accelerated prefill ([npuPrefill]) on the GPU (OpenCL) instead of the Hexagon NPU. Resolved by EngineController. */
     val prefillGpu: Boolean = false,
+    /** Whole model on the GPU (OpenCL): prefill and decode. Resident (dense) models only. Resolved by EngineController. */
+    val decodeGpu: Boolean = false,
+    /** Settings for dense (resident) models, resolved into npuPrefill/prefillGpu/decodeGpu at load. 0 CPU, 1 NPU, 2 OpenCL. */
+    val densePrefill: Int = 0,
+    /** 0 CPU, 1 OpenCL. */
+    val denseDecode: Int = 0,
     val ngramMinMatch: Int = 3,
     val ngramMaxMatch: Int = 12,
     /** `--decide-prefix-cache`: affects scored-choice requests only. */
@@ -141,7 +147,8 @@ data class LoadConfig(
         decisionPrefixCache.code, if (forceCache) 1 else 0,
         kvCacheType.code,
         repeatLastN.coerceIn(-1, 8192),
-        if (prefillGpu) 1 else 0
+        if (prefillGpu) 1 else 0,
+        if (decodeGpu) 1 else 0
     )
 
     fun toFloatArray(): FloatArray = floatArrayOf(
@@ -153,7 +160,7 @@ data class LoadConfig(
     companion object {
         const val UBATCH = 512
         /** Length of [toIntArray]; must equal I_COUNT in native-bridge.cpp. */
-        const val INT_COUNT = 47
+        const val INT_COUNT = 48
         const val FLOAT_COUNT = 6
     }
 }

@@ -142,15 +142,12 @@ class EngineController(
             val requested = requestedGlobal.copy(
                 npuPrefill = when (memoryOptions.npu) {
                     null -> requestedGlobal.npuPrefill
-                    true -> capabilities.npuPrefill
+                    true -> capabilities.htpPrefill
                     false -> false
                 },
                 cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
                 cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb
-            ).let { r ->
-                // Which accelerator does the prefill: the GPU when chosen (or when it is the only one), else the NPU.
-                r.copy(prefillGpu = r.npuPrefill && capabilities.gpuPrefill && (r.prefillGpu || !capabilities.htpPrefill))
-            }
+            ).let { r -> resolveAccelerators(r, kind, memoryOptions.npu, capabilities) }
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar
@@ -283,6 +280,29 @@ class EngineController(
         private const val API_POLL_MS = 50L
 
         /** MoE = stream experts, dense = ordinary load. An unreadable header keeps the requested value. */
+        /**
+         * Which processor runs prefill and decode. Streamed (MoE) models: the NPU switch ([LoadConfig.npuPrefill]),
+         * decode on the CPU. Dense (resident) models: [LoadConfig.densePrefill] / [LoadConfig.denseDecode]; OpenCL
+         * decode puts the whole model on the GPU (prefill too). The model card's NPU switch: Off = all CPU,
+         * On = NPU prefill. A device this build/phone does not have falls back to the CPU.
+         */
+        fun resolveAccelerators(r: LoadConfig, kind: ModelKind, modelNpu: Boolean?, caps: EngineCaps): LoadConfig {
+            if (kind != ModelKind.DENSE) return r.copy(prefillGpu = false, decodeGpu = false)
+            if (modelNpu == false) return r.copy(npuPrefill = false, prefillGpu = false, decodeGpu = false)
+            val decodeGpu = modelNpu != true && r.denseDecode == 1 && caps.gpuPrefill
+            val prefill = when {
+                decodeGpu -> 0
+                modelNpu == true -> 1
+                else -> r.densePrefill
+            }
+            val dev = when (prefill) {
+                1 -> if (caps.htpPrefill) 1 else 0
+                2 -> if (caps.gpuPrefill) 2 else 0
+                else -> 0
+            }
+            return r.copy(npuPrefill = dev != 0, prefillGpu = dev == 2, decodeGpu = decodeGpu)
+        }
+
         fun applyAutoMode(config: LoadConfig, kind: ModelKind): LoadConfig = when (kind) {
             ModelKind.MOE -> config.copy(mmapBaseline = false)
             ModelKind.DENSE -> config.copy(mmapBaseline = true)
