@@ -17,3 +17,5 @@ Moved out of CLAUDE.md to save tokens (state 2026-11-11).
   Tests needing an HTTP server use `testutil/HttpServer.kt` (the JDK's com.sun server is not on the Android classpath).
 * Not ported yet from upstream: `image-max-tokens` (Snap scales pictures to Settings → image size instead), the
   checkpoint after an image (Snap clears the KV around image turns).
+
+* Settings: remove stale DataStore keys left by v0.6.71-0.6.73 (`prefill_gpu`, `dense_prefill`, `dense_decode`) so they no longer show up in the settings export (drop them on start or skip unknown keys when exporting).
