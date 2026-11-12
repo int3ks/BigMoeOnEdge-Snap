@@ -41,7 +41,40 @@ object LogFiles {
     fun init(context: Context, workspaceRoot: () -> File) {
         appContext = context.applicationContext
         this.workspaceRoot = workspaceRoot
+        installCrashHandler()
     }
+
+    /**
+     * Kotlin/Java crashes: Android keeps only "crash (Java exception)" in the exit info, and some vendors (Honor)
+     * encrypt logcat's crash buffer. So the stack trace is written by the app itself before the process dies: into the
+     * running log (ring and file) and into files/last-crash.txt, which the next log file's header shows once.
+     */
+    private fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+            runCatching {
+                val trace = android.util.Log.getStackTraceString(e)
+                val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+                File(appContext.filesDir, CRASH_FILE).writeText("$stamp, thread \"${thread.name}\"\n$trace")
+                if (recording) {
+                    note("JAVA CRASH in thread \"${thread.name}\":")
+                    trace.lineSequence().take(60).forEach { note(it) }
+                }
+            }
+            previous?.uncaughtException(thread, e)
+        }
+    }
+
+    private const val CRASH_FILE = "last-crash.txt"
+
+    /** The stack trace of the last Java crash, once (the file is removed after it was shown). */
+    private fun lastJavaCrash(): String? = runCatching {
+        val f = File(appContext.filesDir, CRASH_FILE)
+        if (!f.isFile) return null
+        val text = f.readText()
+        f.delete()
+        "=== last Java crash: " + text.trimEnd() + "\n=== end of crash ===\n"
+    }.getOrNull()
 
     /** Starts the native recording, with a new log file when [toFile]. Call off the main thread. */
     fun startRecording(bridge: EngineNativeBridge, toFile: Boolean) {
@@ -91,6 +124,7 @@ object LogFiles {
             .append(", ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
             .append(", Android ").append(Build.VERSION.RELEASE).append(" (SDK ").append(Build.VERSION.SDK_INT).append(") ===\n")
         sb.append("=== ").append(previousExit()).append(" ===\n")
+        lastJavaCrash()?.let { sb.append(it) }
         return sb.toString()
     }
 
