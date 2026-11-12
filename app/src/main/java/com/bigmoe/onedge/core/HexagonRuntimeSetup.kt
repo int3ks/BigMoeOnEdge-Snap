@@ -28,12 +28,6 @@ object HexagonRuntimeSetup {
     @JvmStatic
     fun prepare(context: Context) {
         val app = context.applicationContext
-        // llama.cpp 0911 turned the Hexagon host buffer on by default (0411: off). With it, the KV cache and the CPU
-        // compute buffers move into HTP0-HOST memory and the NPU prefill hung at "Preparing NPU" (Gemma 4 E4B, v0.6.77).
-        // Keep the behaviour the prefill path was built and tested with, unless the variable was set from outside.
-        runCatching {
-            if (Os.getenv("GGML_HEXAGON_HOSTBUF").isNullOrEmpty()) Os.setenv("GGML_HEXAGON_HOSTBUF", "0", true)
-        }.onFailure { Log.w(TAG, "Cannot set GGML_HEXAGON_HOSTBUF", it) }
         try {
             val names = app.assets.list(ASSET_DIR)?.toSet().orEmpty()
             if (!skeletons.all(names::contains)) {
