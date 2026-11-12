@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Fix: crash when a reply contained a LaTeX fraction** (`\frac`, `\dfrac`), seen with Gemma 4 E4B, which writes math in LaTeX: `PatternSyntaxException` in `MathText.toUnicode`. Android's regex engine (ICU) rejects the unescaped `}` that the JVM accepts, so the pattern failed to compile on the device (unit tests on the JVM could not see it). All braces in the four LaTeX patterns are escaped now, the patterns are compiled once instead of per call, and `toUnicode` falls back to the formula as written on any error instead of crashing the chat.
 - **Java crashes are logged:** an uncaught Kotlin/Java exception writes its stack trace into the running log (ring and file, `JAVA CRASH ...` lines) and into `files/last-crash.txt`; the next log file's header shows it once (`=== last Java crash: ...`). Needed because Android's exit info only says "crash (Java exception)" and Honor encrypts logcat's crash buffer (`LogFiles.installCrashHandler`).
 - **Settings regrouped:** "CPU · NPU & memory" (NPU prefill switch and its tuning, CPU cores, batch width, context), "MoE streaming & I/O", "Quality & speed", "Decoding" (temperature, Top P/K, Min P, penalties, seed). The red Experimental frame is gone; its switches sit in their sections with "(experimental)" in the title.
 - Chat input placeholder: the active system prompt's name as it is (name it e.g. "I am Default, ask me"), "Ask anything" without a name.

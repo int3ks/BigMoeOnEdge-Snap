@@ -199,18 +199,25 @@ object MathText {
     private val superscripts = mapOf('0' to '⁰', '1' to '¹', '2' to '²', '3' to '³', '4' to '⁴', '5' to '⁵', '6' to '⁶', '7' to '⁷', '8' to '⁸', '9' to '⁹', '+' to '⁺', '-' to '⁻', '=' to '⁼', 'n' to 'ⁿ', 'i' to 'ⁱ')
     private val subscripts = mapOf('0' to '₀', '1' to '₁', '2' to '₂', '3' to '₃', '4' to '₄', '5' to '₅', '6' to '₆', '7' to '₇', '8' to '₈', '9' to '₉', '+' to '₊', '-' to '₋', '=' to '₌', 'a' to 'ₐ', 'e' to 'ₑ', 'i' to 'ᵢ', 'j' to 'ⱼ', 'k' to 'ₖ', 'n' to 'ₙ', 'x' to 'ₓ')
 
-    fun toUnicode(tex: String, multiline: Boolean = false): String {
+    // Android's regex engine (ICU) rejects an unescaped "}" that Java's own engine accepts: every brace is escaped.
+    // A PatternSyntaxException here crashed the app as soon as a reply contained \frac (v0.6.75 crash log).
+    private val frac = Regex("""\\(?:d?frac)\s*\{([^\{\}]*)\}\s*\{([^\{\}]*)\}""")
+    private val sqrt = Regex("""\\sqrt\s*\{([^\{\}]*)\}""")
+    private val accent = Regex("""\\(?:overline|bar|vec|hat|tilde)\s*\{([^\{\}]*)\}""")
+    private val script = Regex("""([_^])(?:\{([^\{\}]*)\}|([A-Za-z0-9+=-]))""")
+
+    /** LaTeX to readable Unicode. Never throws: on any error the formula is shown as written. */
+    fun toUnicode(tex: String, multiline: Boolean = false): String =
+        runCatching { convert(tex, multiline) }.getOrElse { tex }
+
+    private fun convert(tex: String, multiline: Boolean): String {
         var s = tex.replace("\\displaystyle", "").replace("\\textstyle", "")
             .replace("\\left", "").replace("\\right", "").replace("\\,", " ")
             .replace("\\;", " ").replace("\\quad", "   ").replace("\\qquad", "    ")
         // Flatten common brace-based constructs before removing grouping braces.
-        val frac = Regex("\\\\(?:d?frac)\\s*\\{([^{}]*)}\\s*\\{([^{}]*)}")
         repeat(3) { s = frac.replace(s) { "(${it.groupValues[1]})/(${it.groupValues[2]})" } }
-        val sqrt = Regex("\\\\sqrt\\s*\\{([^{}]*)}")
         s = sqrt.replace(s) { "√(${it.groupValues[1]})" }
-        val accent = Regex("\\\\(?:overline|bar|vec|hat|tilde)\\s*\\{([^{}]*)}")
         s = accent.replace(s) { it.groupValues[1] }
-        val script = Regex("([_^])(?:\\{([^{}]*)}|([A-Za-z0-9+=-]))")
         s = script.replace(s) { m ->
             val kind = m.groupValues[1]
             val body = if (m.groupValues[2].isNotEmpty()) m.groupValues[2] else m.groupValues[3]
