@@ -58,6 +58,15 @@ internal fun ModelArchiveCard(
                 else -> "$folder\n${ui.archiveEntries.size} model${if (ui.archiveEntries.size == 1) "" else "s"} in the archive."
             }
             Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Free space per place; refreshed with the page (Refresh, and after every copy or move).
+            ui.storageSpace.forEach { space ->
+                val used = 1f - (space.freeBytes.toFloat() / space.totalBytes).coerceIn(0f, 1f)
+                Text(
+                    "${space.label}: ${ModelManager.formatBytes(space.freeBytes)} free of ${ModelManager.formatBytes(space.totalBytes)}",
+                    style = MaterialTheme.typography.labelSmall
+                )
+                LinearProgressIndicator(progress = { used }, modifier = Modifier.fillMaxWidth())
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = onChooseFolder) { Text(if (folder == null) "Choose archive folder" else "Change") }
                 TextButton(onClick = onRefresh) { Text("Refresh") }

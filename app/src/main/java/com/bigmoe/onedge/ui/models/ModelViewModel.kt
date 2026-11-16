@@ -68,6 +68,8 @@ data class ModelsUiState(
     val archiveReachable: Boolean = false,
     val archiveEntries: List<com.bigmoe.onedge.core.ArchiveEntry> = emptyList(),
     val archiveSuggestions: List<String> = emptyList(),
+    /** Free space where model files go (app storage, model folder, archive when connected). */
+    val storageSpace: List<com.bigmoe.onedge.core.StorageSpace> = emptyList(),
     /** Where "Fetch" copies to: the app's storage or the model folder. */
     val archiveFetchTarget: com.bigmoe.onedge.core.FetchTarget = com.bigmoe.onedge.core.FetchTarget.APP,
     /** GGUFs waiting in Downloads. */
@@ -121,13 +123,15 @@ class ModelViewModel(
             val archiveSuggestions = if (archiveFolder == null) archive?.suggestions().orEmpty() else emptyList()
             val downloads = archive?.listDownloads().orEmpty()
             val fetchTarget = archive?.fetchTarget() ?: com.bigmoe.onedge.core.FetchTarget.APP
+            val storageSpace = archive?.storageSpace().orEmpty()
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
                     modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable,
                     archiveFolder = archiveFolder?.path, archiveReachable = archiveReachable, archiveEntries = archiveEntries,
-                    archiveSuggestions = archiveSuggestions, downloads = downloads, archiveFetchTarget = fetchTarget
+                    archiveSuggestions = archiveSuggestions, downloads = downloads, archiveFetchTarget = fetchTarget,
+                    storageSpace = storageSpace
                 )
             }
         }

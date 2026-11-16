@@ -42,6 +42,9 @@ data class ArchiveEntry(
     val cached: Boolean get() = copyIn != null
 }
 
+/** Free and total space of one of the places model files go (Models page). */
+data class StorageSpace(val label: String, val path: String, val freeBytes: Long, val totalBytes: Long)
+
 /** Where "Fetch" puts an archive model. */
 enum class FetchTarget { APP, MODEL_FOLDER }
 
@@ -124,6 +127,27 @@ class ModelArchive(
             .map { File(it, "models") }
             .sortedByDescending { it.isDirectory }
             .map { it.path }
+    }
+
+    /**
+     * Free space of the app storage, the model folder and the archive (only while it is connected). A folder that does
+     * not exist yet reports the volume it would be created on.
+     */
+    suspend fun storageSpace(): List<StorageSpace> = withContext(io) {
+        fun of(label: String, dir: File?): StorageSpace? {
+            val d = dir ?: return null
+            var probe: File? = d
+            while (probe != null && !probe.exists()) probe = probe.parentFile
+            val p = probe ?: return null
+            val total = runCatching { p.totalSpace }.getOrDefault(0L)
+            if (total <= 0L) return null
+            return StorageSpace(label, d.path, runCatching { p.usableSpace }.getOrDefault(0L), total)
+        }
+        listOfNotNull(
+            of("App storage", cacheDir),
+            of("Model folder", modelManager.modelFolder()),
+            folder()?.takeIf { it.isDirectory && it.canRead() }?.let { of("Archive", it) }
+        )
     }
 
     // ---------------------------------------------------------------------------------- listing
