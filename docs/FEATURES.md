@@ -20,8 +20,9 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
   `core/KvSnapshotStore.kt`, `EngineController.swapSnapshot`/`saveSnapshot`): saved on chat switch, load/unload and
   `MainActivity.onStop`, loaded before a replay for another chat; details in `docs/prompt-and-kv-design.md`.
 * **Model archive / cache / Downloads** (`core/ModelArchive.kt`, `ui/models/ModelArchiveCard.kt`, `ModelViewModel` archive
-  functions, `ModelManager.keepLinksFor` + `exportOptions`/`importOptions`): archive folder in `models/.archive-folder`,
-  index in `models/.archive-index.properties`, options sidecar `<first file>.options.properties` in the archive.
+  functions, `ModelManager.keepLinksFor` + `exportOptions`/`importOptions`): several sources in
+  `models/.archive-sources.properties`, one index each (`.archive-index-<hash>.properties`), options sidecar
+  `<first file>.options.properties` beside the model in its source; fetch target in `models/.archive-fetch-target`.
 * **Load progress** (`core/include/bmoe/load_progress.h`, JNI `nativeLoadProgress`, `EngineState.Loading.step/fraction`)
   shown in the model's card on the Models page (status, Reload/Unload live in the model card).
 * **Auto settings = real device test** (`core/DeviceTuner.kt`, `core/DeviceTuneRunner.kt`, `data/local/DeviceTuneStore.kt`,

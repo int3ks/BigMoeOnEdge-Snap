@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.ArchiveEntry
 import com.bigmoe.onedge.core.FetchTarget
+import com.bigmoe.onedge.core.SourceSuggestion
 import com.bigmoe.onedge.core.GgufSet
 import com.bigmoe.onedge.core.ModelManager
 
@@ -34,9 +35,11 @@ import com.bigmoe.onedge.core.ModelManager
 @Composable
 internal fun ModelArchiveCard(
     ui: ModelsUiState,
-    onChooseFolder: () -> Unit,
-    onUseFolder: (String) -> Unit,
-    onTurnOff: () -> Unit,
+    /** Opens the folder picker for a new source. */
+    onAddFolder: () -> Unit,
+    /** A suggested folder (a removable volume's models folder) to add. */
+    onAddSuggestion: (SourceSuggestion) -> Unit,
+    onRemoveSource: (String) -> Unit,
     onRefresh: () -> Unit,
     onFetch: (String) -> Unit,
     onFetchTarget: (FetchTarget) -> Unit,
@@ -50,14 +53,32 @@ internal fun ModelArchiveCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Archive & downloads", style = MaterialTheme.typography.titleMedium)
-            val folder = ui.archiveFolder
-            val status = when {
-                folder == null -> "Keep big models on external storage (a USB drive) and fetch one into the app when you want to " +
-                    "use it. Clearing it from the app afterwards keeps what you set on its card."
-                !ui.archiveReachable -> "$folder\nNot connected. The models below are what the folder held the last time."
-                else -> "$folder\n${ui.archiveEntries.size} model${if (ui.archiveEntries.size == 1) "" else "s"} in the archive."
+            if (ui.archiveSources.isEmpty()) {
+                Text(
+                    "Keep big models on USB sticks, SSDs or the SD card so you do not download them again, and fetch one " +
+                        "into the app when you want to use it. Clearing it from the app afterwards keeps what you set on its card.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // The sources: one line each; a source that is not attached keeps its models listed from the last time.
+            ui.archiveSources.forEach { st ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(st.source.name, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            st.source.path + " · " + when {
+                                !st.reachable -> "not connected, ${st.modelCount} model(s) last time"
+                                !st.writable -> "${st.modelCount} model(s), read-only"
+                                else -> "${st.modelCount} model(s)"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = { onRemoveSource(st.source.path) }) { Text("Remove") }
+                }
+            }
             // Free space per place; refreshed with the page (Refresh, and after every copy or move).
             ui.storageSpace.forEach { space ->
                 val used = 1f - (space.freeBytes.toFloat() / space.totalBytes).coerceIn(0f, 1f)
@@ -68,12 +89,11 @@ internal fun ModelArchiveCard(
                 LinearProgressIndicator(progress = { used }, modifier = Modifier.fillMaxWidth())
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onChooseFolder) { Text(if (folder == null) "Choose archive folder" else "Change") }
+                OutlinedButton(onClick = onAddFolder) { Text("Add source folder") }
                 TextButton(onClick = onRefresh) { Text("Refresh") }
-                if (folder != null) TextButton(onClick = onTurnOff) { Text("Turn off") }
             }
-            if (folder == null) ui.archiveSuggestions.forEach { path ->
-                TextButton(onClick = { onUseFolder(path) }) { Text("Use $path") }
+            ui.archiveSuggestions.forEach { sug ->
+                TextButton(onClick = { onAddSuggestion(sug) }) { Text("Add ${sug.name}: ${sug.path}") }
             }
 
             val progress = ui.importProgress
@@ -134,7 +154,7 @@ internal fun ModelArchiveCard(
                             TextButton(onClick = { onDownloadToModels(set) }, enabled = idle && set.complete && ui.modelFolder != null) {
                                 Text("Move to model folder")
                             }
-                            TextButton(onClick = { onDownloadToArchive(set) }, enabled = idle && set.complete && folder != null) {
+                            TextButton(onClick = { onDownloadToArchive(set) }, enabled = idle && set.complete && ui.archiveSources.any { it.writable }) {
                                 Text("Move to archive")
                             }
                         }
@@ -161,11 +181,11 @@ private fun ArchiveRow(
             FetchTarget.MODEL_FOLDER in entry.copies -> "kept in the model folder"
             !entry.complete -> "incomplete in the archive"
             entry.partial -> "fetch interrupted, continues where it stopped"
-            !entry.reachable -> "archive not connected"
+            !entry.reachable -> "source not connected"
             else -> "only in the archive"
         } + if (entry.inPlace) " · used in place" else ""
         Text(
-            "${ModelManager.formatBytes(entry.sizeBytes)} · $state",
+            "${ModelManager.formatBytes(entry.sizeBytes)} · $state\non ${entry.sources.joinToString()}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

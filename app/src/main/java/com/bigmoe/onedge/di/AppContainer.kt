@@ -118,7 +118,10 @@ class AppContainer(private val context: Context) {
                     val storage = context.applicationContext.getSystemService(android.os.storage.StorageManager::class.java)
                     storage?.storageVolumes.orEmpty()
                         .filter { it.isRemovable && it.state == android.os.Environment.MEDIA_MOUNTED }
-                        .mapNotNull { if (android.os.Build.VERSION.SDK_INT >= 30) it.directory else null }
+                        .mapNotNull { volume ->
+                            val dir = if (android.os.Build.VERSION.SDK_INT >= 30) volume.directory else null
+                            dir?.let { (runCatching { volume.getDescription(context.applicationContext) }.getOrNull() ?: "") to it }
+                        }
                 }
             )
         }

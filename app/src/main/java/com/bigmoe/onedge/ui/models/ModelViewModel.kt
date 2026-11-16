@@ -28,6 +28,13 @@ import java.io.File
 
 data class ImportProgress(val name: String, val copiedBytes: Long, val totalBytes: Long, val bytesPerSecond: Long = 0)
 
+/** A model to move into the archive, waiting for the source to be picked from [choices] (the last used first). */
+data class PendingArchiveMove(
+    val set: com.bigmoe.onedge.core.GgufSet,
+    val choices: List<com.bigmoe.onedge.core.ArchiveSource>,
+    val loadedPath: String?
+)
+
 /** A load the person still has to confirm because the pre-flight checks found something ([advice]). */
 data class PendingLoad(
     val path: String,
@@ -63,11 +70,12 @@ data class ModelsUiState(
     val modelFolder: String? = null,
     val modelFolderFiles: Int = 0,
     val modelFolderReadable: Boolean = false,
-    /** The external archive ([com.bigmoe.onedge.core.ModelArchive]): its folder, what it holds, where it could be. */
-    val archiveFolder: String? = null,
-    val archiveReachable: Boolean = false,
+    /** The archive ([com.bigmoe.onedge.core.ModelArchive]): its sources, what they hold, folders that could be added. */
+    val archiveSources: List<com.bigmoe.onedge.core.SourceStatus> = emptyList(),
     val archiveEntries: List<com.bigmoe.onedge.core.ArchiveEntry> = emptyList(),
-    val archiveSuggestions: List<String> = emptyList(),
+    val archiveSuggestions: List<com.bigmoe.onedge.core.SourceSuggestion> = emptyList(),
+    /** A move into the archive waiting for the person to pick the source (more than one is connected). */
+    val pendingArchiveMove: PendingArchiveMove? = null,
     /** Free space where model files go (app storage, model folder, archive when connected). */
     val storageSpace: List<com.bigmoe.onedge.core.StorageSpace> = emptyList(),
     /** Where "Fetch" copies to: the app's storage or the model folder. */
@@ -117,10 +125,9 @@ class ModelViewModel(
             val folderReadable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { folder?.let { it.isDirectory && it.canRead() } == true }
             val folderFiles = if (folderReadable) modelManager.modelFolderFileCount() else 0
             val archive = modelArchive
-            val archiveFolder = archive?.folder()
             val archiveEntries = archive?.list().orEmpty()
-            val archiveReachable = withContext(Dispatchers.IO) { archive?.reachable() == true }
-            val archiveSuggestions = if (archiveFolder == null) archive?.suggestions().orEmpty() else emptyList()
+            val archiveSources = archive?.sourceStatus().orEmpty()
+            val archiveSuggestions = archive?.suggestions().orEmpty()
             val downloads = archive?.listDownloads().orEmpty()
             val fetchTarget = archive?.fetchTarget() ?: com.bigmoe.onedge.core.FetchTarget.APP
             val storageSpace = archive?.storageSpace().orEmpty()
@@ -129,7 +136,7 @@ class ModelViewModel(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
                     modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable,
-                    archiveFolder = archiveFolder?.path, archiveReachable = archiveReachable, archiveEntries = archiveEntries,
+                    archiveSources = archiveSources, archiveEntries = archiveEntries,
                     archiveSuggestions = archiveSuggestions, downloads = downloads, archiveFetchTarget = fetchTarget,
                     storageSpace = storageSpace
                 )
@@ -423,8 +430,20 @@ class ModelViewModel(
         }
     }
 
-    fun setArchiveFolder(path: String?) {
-        viewModelScope.launch { modelArchive?.setFolder(path); refresh() }
+    fun addArchiveSource(name: String, path: String) {
+        viewModelScope.launch {
+            try {
+                modelArchive?.addSource(name, path)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not add the folder") }
+            }
+            refresh()
+        }
+    }
+
+    /** Forgets a source; its files stay on the drive. */
+    fun removeArchiveSource(path: String) {
+        viewModelScope.launch { modelArchive?.removeSource(path); refresh() }
     }
 
     /** Archive -> a local copy (the app's storage or the model folder, [setFetchTarget]), where the model can be loaded. */
@@ -443,7 +462,7 @@ class ModelViewModel(
         viewModelScope.launch {
             try {
                 archive.useInPlace(name)
-                _uiState.update { it.copy(message = "Added to the models below; it is read from the archive drive.") }
+                _uiState.update { it.copy(message = "Added to the models below; it is read from the archive source.") }
             } catch (e: Exception) {
                 _uiState.update { it.copy(message = e.message ?: "Could not use the file in place") }
             }
@@ -482,17 +501,40 @@ class ModelViewModel(
         archiveJob(set.displayName, "Moved to the model folder.") { onProgress -> archive.moveToModelFolder(set, onProgress) }
     }
 
-    fun moveDownloadToArchive(set: com.bigmoe.onedge.core.GgufSet) {
-        val archive = modelArchive ?: return
-        archiveJob(set.displayName, "Moved to the archive.") { onProgress -> archive.moveToArchive(set, onProgress) }
-    }
+    fun moveDownloadToArchive(set: com.bigmoe.onedge.core.GgufSet) = chooseArchiveTarget(set, loadedPath = null)
 
     /** A model of the model folder goes to the archive (it leaves the list; fetch it from there to use it again). */
     fun moveModelToArchive(path: String) {
         val archive = modelArchive ?: return
-        archiveJob(File(path).name, "Moved to the archive.") { onProgress ->
-            if (engineModelPath() == path) engineController.unload()
-            archive.moveToArchive(archive.setOf(File(path)), onProgress)
+        chooseArchiveTarget(archive.setOf(File(path)), loadedPath = path)
+    }
+
+    /** One connected source: move there. Several: ask which (the last used first). None: say so. */
+    private fun chooseArchiveTarget(set: com.bigmoe.onedge.core.GgufSet, loadedPath: String?) {
+        val archive = modelArchive ?: return
+        viewModelScope.launch {
+            val targets = archive.writableSources()
+            when {
+                targets.isEmpty() -> _uiState.update { it.copy(message = "No archive source is connected (or none can be written).") }
+                targets.size == 1 -> moveToArchive(set, targets.first(), loadedPath)
+                else -> _uiState.update { it.copy(pendingArchiveMove = PendingArchiveMove(set, targets, loadedPath)) }
+            }
+        }
+    }
+
+    fun confirmArchiveMove(source: com.bigmoe.onedge.core.ArchiveSource) {
+        val pending = _uiState.value.pendingArchiveMove ?: return
+        _uiState.update { it.copy(pendingArchiveMove = null) }
+        moveToArchive(pending.set, source, pending.loadedPath)
+    }
+
+    fun dismissArchiveMove() { _uiState.update { it.copy(pendingArchiveMove = null) } }
+
+    private fun moveToArchive(set: com.bigmoe.onedge.core.GgufSet, source: com.bigmoe.onedge.core.ArchiveSource, loadedPath: String?) {
+        val archive = modelArchive ?: return
+        archiveJob(set.displayName, "Moved to ${source.name}.") { onProgress ->
+            if (loadedPath != null && engineModelPath() == loadedPath) engineController.unload()
+            archive.moveToArchive(set, source.path, onProgress)
         }
     }
 

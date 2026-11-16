@@ -169,12 +169,13 @@ fun ModelScreen(
             else viewModel.setModelFolder(path)
         }
     }
-    // Archive folder on external storage (a USB drive): the same picker, the real path is what is stored.
+    // A new archive source (USB stick, SSD, SD card): the folder picker gives the folder, a dialog asks for a name.
+    var addSource by remember { mutableStateOf<Pair<String, String>?>(null) } // name to path
     val archiveFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             val path = runCatching { pathForExternalStorageDocumentId(context, DocumentsContract.getTreeDocumentId(uri)) }.getOrNull()
-            if (path == null) viewModel.showMessage("This location has no direct file path. Pick a folder on the USB drive or SD card itself.")
-            else viewModel.setArchiveFolder(path)
+            if (path == null) viewModel.showMessage("This location has no direct file path. Pick a folder on the USB drive, SSD or SD card itself.")
+            else addSource = java.io.File(path).let { f -> (f.parentFile?.name?.let { "$it/" }.orEmpty() + f.name) } to path
         }
     }
     val folderAccessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -395,9 +396,9 @@ fun ModelScreen(
             item(key = "model_archive") {
                 ModelArchiveCard(
                     ui = ui,
-                    onChooseFolder = { archiveFolderPicker.launch(null) },
-                    onUseFolder = { viewModel.setArchiveFolder(it) },
-                    onTurnOff = { viewModel.setArchiveFolder(null) },
+                    onAddFolder = { archiveFolderPicker.launch(null) },
+                    onAddSuggestion = { addSource = it.name to it.path },
+                    onRemoveSource = viewModel::removeArchiveSource,
                     onRefresh = viewModel::refresh,
                     onFetch = viewModel::fetchFromArchive,
                     onFetchTarget = viewModel::setFetchTarget,
@@ -487,7 +488,7 @@ fun ModelScreen(
                             OutlinedButton(onClick = { viewModel.clearCopy(model.path) }, enabled = ui.importProgress == null) {
                                 Text(if (inModelFolder) "Delete this copy (settings are kept)" else "Clear copy (settings are kept)")
                             }
-                        } else if (inModelFolder && ui.archiveFolder != null) {
+                        } else if (inModelFolder && ui.archiveSources.isNotEmpty()) {
                             TextButton(onClick = { viewModel.moveModelToArchive(model.path) }, enabled = ui.importProgress == null) {
                                 Text("Move to archive")
                             }
@@ -513,6 +514,36 @@ fun ModelScreen(
     }
 
     ui.pendingLoad?.let { pending -> PendingLoadDialog(viewModel, pending) }
+    addSource?.let { (initialName, path) ->
+        var name by remember(path) { mutableStateOf(initialName) }
+        AlertDialog(
+            onDismissRequest = { addSource = null },
+            title = { Text("Add archive source") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(path, style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
+                }
+            },
+            confirmButton = { TextButton(onClick = { viewModel.addArchiveSource(name, path); addSource = null }) { Text("Add") } },
+            dismissButton = { TextButton(onClick = { addSource = null }) { Text("Cancel") } }
+        )
+    }
+    ui.pendingArchiveMove?.let { pending ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissArchiveMove,
+            title = { Text("Move ${pending.set.displayName} to") },
+            text = {
+                Column {
+                    pending.choices.forEach { src ->
+                        TextButton(onClick = { viewModel.confirmArchiveMove(src) }) { Text("${src.name}  (${src.path})") }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = viewModel::dismissArchiveMove) { Text("Cancel") } }
+        )
+    }
     ui.pendingClearCache?.let { (path, reason) ->
         AlertDialog(
             onDismissRequest = viewModel::dismissClearCache,
@@ -624,7 +655,8 @@ private fun modelPlace(model: ModelFile, ui: ModelsUiState): String {
     val place = when {
         model.inAppStorage -> "App storage"
         under(ui.modelFolder) -> "Model folder"
-        under(ui.archiveFolder) -> "Archive, used in place"
+        ui.archiveSources.firstOrNull { under(it.source.path) } != null ->
+            "Archive (${ui.archiveSources.first { under(it.source.path) }.source.name}), used in place"
         else -> "Other folder, used in place"
     }
     return if (copies > 1) "$place • listed $copies times" else place

@@ -26,3 +26,6 @@ Moved out of CLAUDE.md to save tokens (state 2026-11-11).
   the copy loop: 8 MiB blocks, RandomAccessFile -> FileOutputStream). The progress line shows MB/s since then; compare
   fetch into app storage vs model folder vs "Use in place" before changing the copy code. Attachments (drafter, mmproj)
   are separate archive entries and are fetched one by one.
+* Archive network sources (not started, Tom decides later): SMB direct (Java SMB library, check it on MagicOS first),
+  HTTP directory listing (`python -m http.server` on the PC), or SAF via a provider app. Fetch and move only - no
+  "Use in place" without a file path.

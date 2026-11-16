@@ -23,16 +23,18 @@ data class GgufSet(
     val displayName: String get() = ModelArchive.displayName(name)
 }
 
-/** A model of the external archive, as the Models page shows it. */
+/** A model of the archive, as the Models page shows it: one entry however many sources hold it. */
 data class ArchiveEntry(
     val name: String,
     val sizeBytes: Long,
     val shardCount: Int,
-    /** The archive folder can be read right now; otherwise the entry comes from the remembered index. */
+    /** Names of the sources that hold it (connected or not). */
+    val sources: List<String>,
+    /** A connected source holds it complete: it can be fetched or used in place now. */
     val reachable: Boolean,
     /** Where complete local copies are: the app's storage, the model folder, both or neither. */
     val copies: Set<FetchTarget>,
-    /** Its file in the archive is registered to be used in place, without a copy. */
+    /** One of its archive files is registered to be used in place, without a copy. */
     val inPlace: Boolean,
     /** A fetch was interrupted and can be continued. */
     val partial: Boolean,
@@ -41,6 +43,15 @@ data class ArchiveEntry(
     val displayName: String get() = ModelArchive.displayName(name)
     val cached: Boolean get() = copies.isNotEmpty()
 }
+
+/** One archive folder: a USB stick, an SSD, the SD card - any folder with a file path. */
+data class ArchiveSource(val name: String, val path: String)
+
+/** A source and how it is right now. */
+data class SourceStatus(val source: ArchiveSource, val reachable: Boolean, val modelCount: Int, val writable: Boolean)
+
+/** A folder the page offers as a new source: `<volume>/models` on an attached removable volume. */
+data class SourceSuggestion(val name: String, val path: String)
 
 /** Free and total space of one of the places model files go (Models page). */
 data class StorageSpace(val label: String, val path: String, val freeBytes: Long, val totalBytes: Long)
@@ -51,36 +62,39 @@ enum class FetchTarget { APP, MODEL_FOLDER }
 /**
  * Three places for model files, each with one job:
  *  - the **model folder** (Internal storage/Models): the models that are kept; used in place ([ModelManager]);
- *  - the **archive** on external storage (a USB drive): everything worth keeping around for tests;
+ *  - the **archive**: any number of source folders (USB sticks, SSDs, the SD card), so that a model is not downloaded
+ *    again; each source keeps an index of what it held, so its models stay listed while it is not attached;
  *  - the **cache**, the app's own model directory: where an archive model is fetched to for use, and cleared from
  *    again ([clearCopy]) without losing what was set on its card.
  * Downloads only feeds the other two ([moveToModelFolder], [moveToArchive]).
  *
- * The archive is the original: fetching copies, clearing the cache deletes only the copy. What is set on a model's
- * card is stored by path, so it survives a clear and a later fetch by itself; a copy of it travels beside the model
- * in the archive (`<first file>.options.properties`) for the way between the three places and for a reinstall.
+ * The archive is the original: fetching copies, clearing deletes only the copy. What is set on a model's card is
+ * stored by path, so it survives a clear and a later fetch by itself; a copy of it travels beside the model in its
+ * source (`<first file>.options.properties`) for the way between the places and for a reinstall.
  *
  * Fetching copies into the app's storage or, by choice ([fetchTarget]), into the model folder; an archive model can
  * also be used where it lies ([useInPlace]) - which of the three is quickest depends on the drive, so all are offered.
  *
- * Everything here uses plain file paths: the app holds the all-files access the model folder already needs.
+ * Everything here uses plain file paths: the app holds the all-files access the model folder already needs. A source
+ * on the network (no file path) is not supported yet.
  */
 class ModelArchive(
     private val cacheDir: File,
     private val modelManager: ModelManager,
     private val downloadsDir: () -> File?,
-    /** Roots of the removable volumes that are attached right now (for the folder suggestion). */
-    private val removableRoots: () -> List<File> = { emptyList() },
+    /** Removable volumes attached right now: their description (e.g. "SanDisk USB drive") and root. */
+    private val removableRoots: () -> List<Pair<String, File>> = { emptyList() },
     private val io: CoroutineDispatcher = Dispatchers.IO
 ) {
-    private val folderFile: File get() = File(cacheDir, ".archive-folder")
-    private val indexFile: File get() = File(cacheDir, ".archive-index.properties")
+    private val sourcesFile: File get() = File(cacheDir, ".archive-sources.properties")
+    private val lastTargetFile: File get() = File(cacheDir, ".archive-last-target")
 
     @Volatile
     private var indexNames: Set<String> = emptySet()
 
     init {
-        indexNames = readIndex().keys
+        migrateSingleFolder()
+        indexNames = sources().flatMap { readIndex(it).keys }.toSet()
         // Attachments of a model that is only in the archive right now stay ([ModelManager.keepLinksFor]).
         modelManager.keepLinksFor = { path ->
             val f = File(path)
@@ -108,30 +122,95 @@ class ModelArchive(
         targetFile.writeText(if (target == FetchTarget.MODEL_FOLDER) "folder" else "app")
     }
 
-    // ---------------------------------------------------------------------------------- the archive folder
+    // ---------------------------------------------------------------------------------- sources
 
-    fun folder(): File? = runCatching { folderFile.readText().trim() }.getOrDefault("").takeIf { it.isNotEmpty() }?.let(::File)
+    fun sources(): List<ArchiveSource> = try {
+        val p = Properties()
+        sourcesFile.inputStream().use(p::load)
+        p.stringPropertyNames().filter { it.endsWith(".path") }.sortedBy { it.substringBefore('.').toIntOrNull() ?: 0 }
+            .mapNotNull { key ->
+                val n = key.substringBefore('.')
+                val path = p.getProperty(key)?.trim().orEmpty()
+                if (path.isEmpty()) null else ArchiveSource(p.getProperty("$n.name")?.trim().orEmpty().ifEmpty { File(path).name }, path)
+            }
+    } catch (_: Exception) {
+        emptyList()
+    }
 
-    suspend fun setFolder(path: String?) = withContext(io) {
+    private fun saveSources(list: List<ArchiveSource>) {
         cacheDir.mkdirs()
-        val p = path?.trim().orEmpty()
-        if (p.isEmpty()) folderFile.delete() else folderFile.writeText(p)
+        val p = Properties()
+        list.forEachIndexed { i, s ->
+            p.setProperty("$i.name", s.name)
+            p.setProperty("$i.path", s.path)
+        }
+        sourcesFile.outputStream().use { p.store(it, "BigMoeOnEdge model archive sources") }
+    }
+
+    /** Adds a source folder (or renames the one with this path). */
+    suspend fun addSource(name: String, path: String) = withContext(io) {
+        val p = path.trim().trimEnd('/')
+        if (p.isEmpty()) throw IOException("No folder.")
+        val list = sources().filterNot { samePath(it.path, p) }
+        saveSources(list + ArchiveSource(name.trim().ifEmpty { File(p).name }, p))
+    }
+
+    /** Forgets a source (its files stay where they are). */
+    suspend fun removeSource(path: String) = withContext(io) {
+        saveSources(sources().filterNot { samePath(it.path, path) })
+        indexFile(path).delete()
+        indexNames = sources().flatMap { readIndex(it).keys }.toSet()
+        if (samePath(runCatching { lastTargetFile.readText().trim() }.getOrDefault(""), path)) lastTargetFile.delete()
         Unit
     }
 
-    fun reachable(): Boolean = folder()?.let { it.isDirectory && it.canRead() } == true
+    private fun reachable(s: ArchiveSource): Boolean = File(s.path).let { it.isDirectory && it.canRead() }
 
-    /** `<volume>/models` on every attached removable volume, the ones that exist first. */
-    suspend fun suggestions(): List<String> = withContext(io) {
+    /** Every source with its state; scans the connected ones. */
+    suspend fun sourceStatus(): List<SourceStatus> = withContext(io) {
+        sources().map { s ->
+            val ok = reachable(s)
+            val count = if (ok) scan(File(s.path), ARCHIVE_SCAN_DEPTH).size else readIndex(s).size
+            SourceStatus(s, ok, count, ok && File(s.path).canWrite())
+        }
+    }
+
+    /** `<volume>/models` on every attached removable volume that is not a source yet, the existing folders first. */
+    suspend fun suggestions(): List<SourceSuggestion> = withContext(io) {
+        val known = sources()
         runCatching { removableRoots() }.getOrDefault(emptyList())
-            .map { File(it, "models") }
-            .sortedByDescending { it.isDirectory }
-            .map { it.path }
+            .map { (label, root) -> label to File(root, "models") }
+            .filter { (_, dir) -> known.none { samePath(it.path, dir.path) } }
+            .sortedByDescending { (_, dir) -> dir.isDirectory }
+            .map { (label, dir) -> SourceSuggestion(label.ifBlank { dir.parentFile?.name.orEmpty() }, dir.path) }
+    }
+
+    /** The source a model was moved to last; offered first the next time. */
+    fun lastTarget(): String? = runCatching { lastTargetFile.readText().trim() }.getOrDefault("").ifEmpty { null }
+
+    /** Sources a model can be moved into now (connected and writable), the last used first. */
+    suspend fun writableSources(): List<ArchiveSource> = withContext(io) {
+        val last = lastTarget()
+        sources().filter { reachable(it) && File(it.path).canWrite() }.sortedByDescending { last != null && samePath(it.path, last) }
+    }
+
+    /** The old single archive folder (v0.6.80-0.6.83) becomes the first source, its index goes with it. */
+    private fun migrateSingleFolder() {
+        val old = File(cacheDir, ".archive-folder")
+        if (!old.isFile) return
+        runCatching {
+            val path = old.readText().trim()
+            if (path.isNotEmpty() && sources().none { samePath(it.path, path) }) {
+                saveSources(sources() + ArchiveSource(File(path).name.ifEmpty { "Archive" }, path))
+                File(cacheDir, ".archive-index.properties").let { if (it.isFile) it.renameTo(indexFile(path)) }
+            }
+            old.delete()
+        }
     }
 
     /**
-     * Free space of the app storage, the model folder and the archive (only while it is connected). A folder that does
-     * not exist yet reports the volume it would be created on.
+     * Free space of the app storage, the model folder and every connected source. A folder that does not exist yet
+     * reports the volume it would be created on.
      */
     suspend fun storageSpace(): List<StorageSpace> = withContext(io) {
         fun of(label: String, dir: File?): StorageSpace? {
@@ -143,45 +222,59 @@ class ModelArchive(
             if (total <= 0L) return null
             return StorageSpace(label, d.path, runCatching { p.usableSpace }.getOrDefault(0L), total)
         }
-        listOfNotNull(
-            of("App storage", cacheDir),
-            of("Model folder", modelManager.modelFolder()),
-            folder()?.takeIf { it.isDirectory && it.canRead() }?.let { of("Archive", it) }
-        )
+        listOfNotNull(of("App storage", cacheDir), of("Model folder", modelManager.modelFolder())) +
+            sources().filter { reachable(it) }.mapNotNull { of("Archive: ${it.name}", File(it.path)) }
     }
 
     // ---------------------------------------------------------------------------------- listing
 
-    /** The archive's models. Without the drive: what was there the last time it was read. */
+    /** The archive's models over all sources. A source that is not attached contributes what it held last time. */
     suspend fun list(): List<ArchiveEntry> = withContext(io) {
-        val dir = folder() ?: return@withContext emptyList()
-        val entries = if (dir.isDirectory && dir.canRead()) {
-            val sets = scan(dir, ARCHIVE_SCAN_DEPTH)
-            writeIndex(sets)
-            sets.map { set ->
-                ArchiveEntry(
-                    name = set.name, sizeBytes = set.sizeBytes, shardCount = set.shardCount, reachable = true,
-                    copies = if (!set.complete) emptySet() else FetchTarget.values().filterTo(HashSet()) { target ->
-                        dirOf(target)?.let { d -> set.files.all { File(d, it.name).let { c -> c.isFile && c.length() == it.length() } } } == true
-                    },
-                    inPlace = set.files.firstOrNull()?.parentFile?.let { modelManager.isRegisteredPath(File(it, set.name).path) } == true,
-                    partial = localDirs().any { d -> set.files.any { partFile(File(d, it.name)).isFile } },
-                    complete = set.complete
-                )
-            }
-        } else {
-            readIndex().map { (name, meta) ->
-                val names = shardNames(name, meta.second)
-                ArchiveEntry(
-                    name = name, sizeBytes = meta.first, shardCount = meta.second, reachable = false,
-                    copies = FetchTarget.values().filterTo(HashSet()) { target -> dirOf(target)?.let { d -> names.all { File(d, it).isFile } } == true },
-                    inPlace = false,
-                    partial = localDirs().any { d -> names.any { partFile(File(d, it)).isFile } },
-                    complete = true
-                )
+        class Acc(val name: String, var size: Long, var shards: Int) {
+            val sources = ArrayList<String>()
+            var reachable = false
+            var complete = false
+            var inPlace = false
+            var anyReachableSet = false
+        }
+        val acc = LinkedHashMap<String, Acc>()
+        for (src in sources()) {
+            if (reachable(src)) {
+                val sets = scan(File(src.path), ARCHIVE_SCAN_DEPTH)
+                writeIndex(src, sets)
+                for (set in sets) {
+                    val a = acc.getOrPut(set.name) { Acc(set.name, set.sizeBytes, set.shardCount) }
+                    a.sources += src.name
+                    a.anyReachableSet = true
+                    if (set.complete) {
+                        a.reachable = true
+                        a.complete = true
+                        a.size = set.sizeBytes
+                    }
+                    val first = File(set.files.first().parentFile, set.name)
+                    if (modelManager.isRegisteredPath(first.path)) a.inPlace = true
+                }
+            } else {
+                for ((name, meta) in readIndex(src)) {
+                    val a = acc.getOrPut(name) { Acc(name, meta.first, meta.second) }
+                    a.sources += "${src.name} (not connected)"
+                    if (!a.anyReachableSet) a.complete = true // what the index remembers was complete when it was read
+                }
             }
         }
-        entries.sortedBy { it.displayName.lowercase() }
+        indexNames = sources().flatMap { readIndex(it).keys }.toSet()
+        acc.values.map { a ->
+            val names = shardNames(a.name, a.shards)
+            ArchiveEntry(
+                name = a.name, sizeBytes = a.size, shardCount = a.shards, sources = a.sources, reachable = a.reachable,
+                copies = FetchTarget.values().filterTo(HashSet()) { target ->
+                    dirOf(target)?.let { d -> names.all { File(d, it).isFile } } == true
+                },
+                inPlace = a.inPlace,
+                partial = localDirs().any { d -> names.any { partFile(File(d, it)).isFile } },
+                complete = a.complete
+            )
+        }.sortedBy { it.displayName.lowercase() }
     }
 
     /** GGUFs waiting in Downloads. */
@@ -190,8 +283,8 @@ class ModelArchive(
         scan(dir, DOWNLOADS_SCAN_DEPTH).sortedBy { it.displayName.lowercase() }
     }
 
-    /** Whether [name] (a first-file name) is a model of the archive, attached or not. */
-    fun isArchived(name: String): Boolean = name in indexNames
+    /** Whether [path] is inside one of the sources (a model used in place from the archive). */
+    fun isInArchive(path: String): Boolean = sources().any { path.startsWith(it.path.trimEnd('/') + "/") }
 
     /** The model that starts with [first], with every shard that is there. */
     fun setOf(first: File): GgufSet {
@@ -201,23 +294,39 @@ class ModelArchive(
         return GgufSet(first.name, files, files.sumOf { it.length() }, count)
     }
 
-    // ---------------------------------------------------------------------------------- archive -> cache
+    /** The first connected source that holds [name] complete. */
+    private fun findComplete(name: String): Pair<ArchiveSource, GgufSet>? {
+        for (src in sources()) {
+            if (!reachable(src)) continue
+            val set = scan(File(src.path), ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name && it.complete } ?: continue
+            return src to set
+        }
+        return null
+    }
+
+    private fun notFound(name: String): IOException {
+        val known = sources().filter { readIndex(it).containsKey(name) }.map { it.name }
+        return IOException(
+            if (known.isEmpty()) "${displayName(name)} is in no connected source."
+            else "${displayName(name)} is on ${known.joinToString()}, which is not connected."
+        )
+    }
+
+    // ---------------------------------------------------------------------------------- archive -> local
 
     /**
-     * Copies an archive model to where [fetchTarget] says (the app's storage or the model folder). Files that are
-     * already there are skipped and an interrupted copy is continued, so a cancelled fetch (or a pulled cable) loses
-     * nothing. Returns the local first file.
+     * Copies an archive model (from the first connected source that holds it) to where [fetchTarget] says. Files that
+     * are already there are skipped and an interrupted copy is continued, so a cancelled fetch (or a pulled cable)
+     * loses nothing. Returns the local first file.
      */
     suspend fun fetch(name: String, onProgress: (copied: Long, total: Long) -> Unit): File = withContext(io) {
-        val dir = folder()?.takeIf { it.isDirectory && it.canRead() } ?: throw IOException("The archive folder is not connected.")
-        val set = scan(dir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name } ?: throw IOException("$name is no longer in the archive.")
-        if (!set.complete) throw IOException("The archive holds only ${set.files.size} of ${set.shardCount} shards of ${set.displayName}.")
+        val (src, set) = findComplete(name) ?: throw notFound(name)
         val target = dirOf(fetchTarget()) ?: throw IOException("The model folder is switched off; fetch into the app storage or turn it on.")
         if (!target.isDirectory && !target.mkdirs()) throw IOException("Cannot create ${target.path}.")
-        val todo = set.files.filterNot { src -> File(target, src.name).let { it.isFile && it.length() == src.length() } }
-        val missing = todo.sumOf { src ->
-            val started = partFile(File(target, src.name)).let { if (it.isFile) it.length() else 0L }
-            src.length() - started.coerceAtMost(src.length())
+        val todo = set.files.filterNot { s -> File(target, s.name).let { it.isFile && it.length() == s.length() } }
+        val missing = todo.sumOf { s ->
+            val started = partFile(File(target, s.name)).let { if (it.isFile) it.length() else 0L }
+            s.length() - started.coerceAtMost(s.length())
         }
         if (target.usableSpace < missing + SPACE_MARGIN) {
             throw IOException("Not enough free storage: ${ModelManager.formatBytes(missing)} needed, ${ModelManager.formatBytes(target.usableSpace)} free.")
@@ -225,12 +334,12 @@ class ModelArchive(
         // Starts at what is there already, whole files and the part of an interrupted one.
         var copied = set.sizeBytes - missing
         onProgress(copied, set.sizeBytes)
-        for (src in todo) {
-            copyFile(src, File(target, src.name), resume = true) { n -> copied += n; onProgress(copied, set.sizeBytes) }
+        for (s in todo) {
+            copyFile(s, File(target, s.name), resume = true) { n -> copied += n; onProgress(copied, set.sizeBytes) }
         }
         val first = File(target, set.name)
         // What was set on the card comes back with the model; what is set here already wins.
-        modelManager.importOptions(first.path, readSidecar(dir, set.name), overwrite = false)
+        modelManager.importOptions(first.path, readSidecar(File(set.files.first().parentFile, set.name)), overwrite = false)
         first
     }
 
@@ -240,7 +349,7 @@ class ModelArchive(
     /**
      * Deletes ONE local copy of an archive model - the file at [path] (with its shards) and nothing else, so a copy kept
      * in the model folder survives clearing the one in the app's storage. Its card settings and attachments stay for
-     * the next fetch. Refused unless the archive can be read and holds the same files - or [force] says it may go.
+     * the next fetch. Refused unless a connected source holds the same files - or [force] says it may go.
      */
     suspend fun clearCopy(path: String, force: Boolean = false) = withContext(io) {
         val first = File(path)
@@ -250,17 +359,24 @@ class ModelArchive(
         if (!isLocal) throw IOException("$name is not a copy in the app storage or the model folder.")
         val count = SHARD.find(name)?.groupValues?.get(2)?.toIntOrNull() ?: 1
         val files = shardNames(name, count).map { File(dir, it) }
-        if (!force) {
-            val archiveDir = folder()?.takeIf { it.isDirectory && it.canRead() }
-                ?: throw ArchiveNotVerified("The archive is not connected, so the copy there cannot be checked.")
-            val set = scan(archiveDir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name }
-                ?: throw ArchiveNotVerified("${displayName(name)} is not in the archive (any more).")
-            val same = set.complete && set.files.all { a -> File(dir, a.name).let { !it.exists() || it.length() == a.length() } }
-            if (!same) throw ArchiveNotVerified("The files in the archive differ from this copy.")
+        // A source whose files match this copy: it gets the card's settings, and it is the proof the model is safe.
+        val match = sources().filter { reachable(it) }.firstNotNullOfOrNull { src ->
+            scan(File(src.path), ARCHIVE_SCAN_DEPTH).firstOrNull { set ->
+                set.name == name && set.complete && set.files.all { a -> File(dir, a.name).let { !it.exists() || it.length() == a.length() } }
+            }
         }
-        folder()?.takeIf { it.isDirectory && it.canWrite() }?.let { archiveDir ->
-            // What is set on this copy goes back beside the archive model (kept when this copy has nothing set).
-            runCatching { writeSidecar(archiveDir, name, modelManager.exportOptions(first.path)) }
+        if (!force && match == null) {
+            throw ArchiveNotVerified(
+                if (sources().none { reachable(it) }) "No archive source is connected, so the copy there cannot be checked."
+                else "No connected source holds the same files as this copy."
+            )
+        }
+        match?.let { set ->
+            val archiveFirst = File(set.files.first().parentFile, set.name)
+            if (archiveFirst.parentFile?.canWrite() == true) {
+                // What is set on this copy goes back beside the archive model (kept when this copy has nothing set).
+                runCatching { writeSidecar(archiveFirst, modelManager.exportOptions(first.path)) }
+            }
         }
         files.forEach { f ->
             if (f.exists() && !f.delete()) throw IOException("Could not delete ${f.name}.")
@@ -269,33 +385,33 @@ class ModelArchive(
     }
 
     /**
-     * Uses an archive model where it lies: its first file is registered like any file used in place, no copy. The
-     * card's "delete" then only removes that registration. Slow storage shows in the token rate, not here.
+     * Uses an archive model where it lies (the first connected source that holds it): its first file is registered
+     * like any file used in place, no copy. The card's "delete" then only removes that registration.
      */
     suspend fun useInPlace(name: String): ModelFile = withContext(io) {
-        val dir = folder()?.takeIf { it.isDirectory && it.canRead() } ?: throw IOException("The archive folder is not connected.")
-        val set = scan(dir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name } ?: throw IOException("$name is no longer in the archive.")
-        if (!set.complete) throw IOException("The archive holds only ${set.files.size} of ${set.shardCount} shards of ${set.displayName}.")
+        val (_, set) = findComplete(name) ?: throw notFound(name)
         val first = File(set.files.first().parentFile, set.name)
         val model = modelManager.registerExistingPath(first.path)
-        modelManager.importOptions(model.path, readSidecar(dir, set.name), overwrite = false)
+        modelManager.importOptions(model.path, readSidecar(first), overwrite = false)
         model
     }
 
     // ---------------------------------------------------------------------------------- moving files in
 
     /**
-     * Moves a model (from Downloads or the model folder) into the archive: copy, check, then delete the source,
-     * file by file - a split model never needs more free space than one shard.
+     * Moves a model (from Downloads or the model folder) into the source at [sourcePath]: copy, check, then delete the
+     * source file, file by file - a split model never needs more free space than one shard.
      */
-    suspend fun moveToArchive(set: GgufSet, onProgress: (copied: Long, total: Long) -> Unit) = withContext(io) {
-        val dir = folder() ?: throw IOException("Choose an archive folder first.")
-        if (!dir.isDirectory && !dir.mkdirs()) throw IOException("The archive folder is not connected: ${dir.path}")
-        if (!dir.canWrite()) throw IOException("The archive folder cannot be written: ${dir.path}")
+    suspend fun moveToArchive(set: GgufSet, sourcePath: String, onProgress: (copied: Long, total: Long) -> Unit) = withContext(io) {
+        val src = sources().firstOrNull { samePath(it.path, sourcePath) } ?: throw IOException("Unknown archive source: $sourcePath")
+        val dir = File(src.path)
+        if (!dir.isDirectory && !dir.mkdirs()) throw IOException("${src.name} is not connected: ${dir.path}")
+        if (!dir.canWrite()) throw IOException("${src.name} cannot be written: ${dir.path}")
         if (!set.complete) throw IOException("Only ${set.files.size} of ${set.shardCount} shards of ${set.displayName} are there.")
         val options = modelManager.exportOptions(File(set.files.first().parentFile, set.name).path)
         moveFiles(set, dir, onProgress)
-        if (options.isNotEmpty()) runCatching { writeSidecar(dir, set.name, options) }
+        if (options.isNotEmpty()) runCatching { writeSidecar(File(dir, set.name), options) }
+        runCatching { cacheDir.mkdirs(); lastTargetFile.writeText(src.path) }
         indexNames = indexNames + set.name
         Unit
     }
@@ -388,9 +504,15 @@ class ModelArchive(
         return sets
     }
 
-    private fun readIndex(): Map<String, Pair<Long, Int>> = try {
+    private fun samePath(a: String, b: String): Boolean = a.trimEnd('/') == b.trimEnd('/')
+
+    /** One index per source, named by its path, in the app's storage (a source may be read-only). */
+    private fun indexFile(path: String): File =
+        File(cacheDir, ".archive-index-" + Integer.toHexString(path.trimEnd('/').hashCode()) + ".properties")
+
+    private fun readIndex(src: ArchiveSource): Map<String, Pair<Long, Int>> = try {
         val p = Properties()
-        indexFile.inputStream().use(p::load)
+        indexFile(src.path).inputStream().use(p::load)
         p.stringPropertyNames().associateWith { k ->
             val v = p.getProperty(k).split('|')
             (v.getOrNull(0)?.toLongOrNull() ?: 0L) to (v.getOrNull(1)?.toIntOrNull() ?: 1)
@@ -399,31 +521,31 @@ class ModelArchive(
         emptyMap()
     }
 
-    private fun writeIndex(sets: List<GgufSet>) {
+    private fun writeIndex(src: ArchiveSource, sets: List<GgufSet>) {
         val p = Properties()
         sets.forEach { p.setProperty(it.name, "${it.sizeBytes}|${it.shardCount}") }
         runCatching {
             cacheDir.mkdirs()
-            indexFile.outputStream().use { p.store(it, "BigMoeOnEdge model archive: what the archive folder held when it was last read") }
+            indexFile(src.path).outputStream().use { p.store(it, "What the archive source ${src.name} held when it was last read") }
         }
-        indexNames = sets.map { it.name }.toSet()
     }
 
-    private fun sidecar(dir: File, name: String): File = File(dir, "$name.options.properties")
+    /** The options file beside an archive model's first file. */
+    private fun sidecar(first: File): File = File(first.parentFile, "${first.name}.options.properties")
 
-    private fun readSidecar(dir: File, name: String): Map<String, String> = try {
+    private fun readSidecar(first: File): Map<String, String> = try {
         val p = Properties()
-        sidecar(dir, name).inputStream().use(p::load)
+        sidecar(first).inputStream().use(p::load)
         p.stringPropertyNames().associateWith { p.getProperty(it) }
     } catch (_: Exception) {
         emptyMap()
     }
 
-    private fun writeSidecar(dir: File, name: String, options: Map<String, String>) {
+    private fun writeSidecar(first: File, options: Map<String, String>) {
         if (options.isEmpty()) return
         val p = Properties()
         options.forEach { (k, v) -> p.setProperty(k, v) }
-        sidecar(dir, name).outputStream().use { p.store(it, "BigMoeOnEdge per-model options of $name") }
+        sidecar(first).outputStream().use { p.store(it, "BigMoeOnEdge per-model options of ${first.name}") }
     }
 
     /** Clearing the cache was refused because the archive copy could not be confirmed; the user may insist. */
