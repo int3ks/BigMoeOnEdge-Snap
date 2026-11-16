@@ -30,8 +30,8 @@ data class ArchiveEntry(
     val shardCount: Int,
     /** The archive folder can be read right now; otherwise the entry comes from the remembered index. */
     val reachable: Boolean,
-    /** Where a complete local copy is: the app's storage, the model folder, or nowhere (null). */
-    val copyIn: FetchTarget?,
+    /** Where complete local copies are: the app's storage, the model folder, both or neither. */
+    val copies: Set<FetchTarget>,
     /** Its file in the archive is registered to be used in place, without a copy. */
     val inPlace: Boolean,
     /** A fetch was interrupted and can be continued. */
@@ -39,7 +39,7 @@ data class ArchiveEntry(
     val complete: Boolean
 ) {
     val displayName: String get() = ModelArchive.displayName(name)
-    val cached: Boolean get() = copyIn != null
+    val cached: Boolean get() = copies.isNotEmpty()
 }
 
 /** Free and total space of one of the places model files go (Models page). */
@@ -53,7 +53,7 @@ enum class FetchTarget { APP, MODEL_FOLDER }
  *  - the **model folder** (Internal storage/Models): the models that are kept; used in place ([ModelManager]);
  *  - the **archive** on external storage (a USB drive): everything worth keeping around for tests;
  *  - the **cache**, the app's own model directory: where an archive model is fetched to for use, and cleared from
- *    again ([clearCache]) without losing what was set on its card.
+ *    again ([clearCopy]) without losing what was set on its card.
  * Downloads only feeds the other two ([moveToModelFolder], [moveToArchive]).
  *
  * The archive is the original: fetching copies, clearing the cache deletes only the copy. What is set on a model's
@@ -161,7 +161,7 @@ class ModelArchive(
             sets.map { set ->
                 ArchiveEntry(
                     name = set.name, sizeBytes = set.sizeBytes, shardCount = set.shardCount, reachable = true,
-                    copyIn = if (!set.complete) null else FetchTarget.values().firstOrNull { target ->
+                    copies = if (!set.complete) emptySet() else FetchTarget.values().filterTo(HashSet()) { target ->
                         dirOf(target)?.let { d -> set.files.all { File(d, it.name).let { c -> c.isFile && c.length() == it.length() } } } == true
                     },
                     inPlace = set.files.firstOrNull()?.parentFile?.let { modelManager.isRegisteredPath(File(it, set.name).path) } == true,
@@ -174,7 +174,7 @@ class ModelArchive(
                 val names = shardNames(name, meta.second)
                 ArchiveEntry(
                     name = name, sizeBytes = meta.first, shardCount = meta.second, reachable = false,
-                    copyIn = FetchTarget.values().firstOrNull { target -> dirOf(target)?.let { d -> names.all { File(d, it).isFile } } == true },
+                    copies = FetchTarget.values().filterTo(HashSet()) { target -> dirOf(target)?.let { d -> names.all { File(d, it).isFile } } == true },
                     inPlace = false,
                     partial = localDirs().any { d -> names.any { partFile(File(d, it)).isFile } },
                     complete = true
@@ -234,30 +234,35 @@ class ModelArchive(
         first
     }
 
+    /** The local copy of archive model [name] in [target], when there is one. */
+    fun copyPath(name: String, target: FetchTarget): String? = dirOf(target)?.let { File(it, name) }?.takeIf { it.isFile }?.path
+
     /**
-     * Removes an archive model from the cache; its card settings and attachments stay for the next fetch. Refused
-     * unless the archive can be read and holds the same files - or [force] says the copy may go regardless.
+     * Deletes ONE local copy of an archive model - the file at [path] (with its shards) and nothing else, so a copy kept
+     * in the model folder survives clearing the one in the app's storage. Its card settings and attachments stay for
+     * the next fetch. Refused unless the archive can be read and holds the same files - or [force] says it may go.
      */
-    suspend fun clearCache(name: String, force: Boolean = false) = withContext(io) {
+    suspend fun clearCopy(path: String, force: Boolean = false) = withContext(io) {
+        val first = File(path)
+        val name = first.name
+        val dir = first.parentFile ?: throw IOException("No folder for $name.")
+        val isLocal = runCatching { localDirs().any { it.canonicalPath == dir.canonicalPath } }.getOrDefault(false)
+        if (!isLocal) throw IOException("$name is not a copy in the app storage or the model folder.")
         val count = SHARD.find(name)?.groupValues?.get(2)?.toIntOrNull() ?: 1
-        val locals = localDirs()
-        val cached = locals.flatMap { d -> shardNames(name, count).map { File(d, it) } }
+        val files = shardNames(name, count).map { File(dir, it) }
         if (!force) {
-            val dir = folder()?.takeIf { it.isDirectory && it.canRead() } ?: throw ArchiveNotVerified("The archive is not connected, so the copy there cannot be checked.")
-            val set = scan(dir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name }
+            val archiveDir = folder()?.takeIf { it.isDirectory && it.canRead() }
+                ?: throw ArchiveNotVerified("The archive is not connected, so the copy there cannot be checked.")
+            val set = scan(archiveDir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name }
                 ?: throw ArchiveNotVerified("${displayName(name)} is not in the archive (any more).")
-            val same = set.complete && locals.all { d -> set.files.all { a -> File(d, a.name).let { !it.exists() || it.length() == a.length() } } }
-            if (!same) throw ArchiveNotVerified("The files in the archive differ from the local ones.")
+            val same = set.complete && set.files.all { a -> File(dir, a.name).let { !it.exists() || it.length() == a.length() } }
+            if (!same) throw ArchiveNotVerified("The files in the archive differ from this copy.")
         }
-        folder()?.takeIf { it.isDirectory && it.canWrite() }?.let { dir ->
-            runCatching {
-                // What is set on the copy that exists (the app's storage first) goes back beside the archive model.
-                val options = locals.filter { File(it, name).isFile }.map { modelManager.exportOptions(File(it, name).path) }
-                    .firstOrNull { it.isNotEmpty() }.orEmpty()
-                writeSidecar(dir, name, options)
-            }
+        folder()?.takeIf { it.isDirectory && it.canWrite() }?.let { archiveDir ->
+            // What is set on this copy goes back beside the archive model (kept when this copy has nothing set).
+            runCatching { writeSidecar(archiveDir, name, modelManager.exportOptions(first.path)) }
         }
-        cached.forEach { f ->
+        files.forEach { f ->
             if (f.exists() && !f.delete()) throw IOException("Could not delete ${f.name}.")
             partFile(f).delete()
         }

@@ -402,7 +402,7 @@ fun ModelScreen(
                     onFetch = viewModel::fetchFromArchive,
                     onFetchTarget = viewModel::setFetchTarget,
                     onUseInPlace = viewModel::useArchiveModelInPlace,
-                    onClearCache = { viewModel.clearCache(it) },
+                    onClearCache = { viewModel.clearAppCopy(it) },
                     onCancel = viewModel::cancelImport,
                     onDownloadToModels = viewModel::moveDownloadToModels,
                     onDownloadToArchive = viewModel::moveDownloadToArchive
@@ -478,10 +478,14 @@ fun ModelScreen(
                         // A local copy of an archive model (app storage or model folder) can go without losing its
                         // settings; any other model of the model folder can move out to the archive.
                         val inModelFolder = !model.inAppStorage && ui.modelFolder?.let { model.path.startsWith("$it/") } == true
-                        val isCopy = (model.inAppStorage || inModelFolder) && ui.archiveEntries.any { it.name == model.name && it.cached }
+                        val place = if (model.inAppStorage) com.bigmoe.onedge.core.FetchTarget.APP
+                        else com.bigmoe.onedge.core.FetchTarget.MODEL_FOLDER
+                        val isCopy = (model.inAppStorage || inModelFolder) && ui.archiveEntries.any { it.name == model.name && place in it.copies }
                         if (isCopy) {
-                            OutlinedButton(onClick = { viewModel.clearCache(model.name) }, enabled = ui.importProgress == null) {
-                                Text("Clear copy (settings are kept)")
+                            if (inModelFolder) Text("Also in the archive.", style = MaterialTheme.typography.labelSmall)
+                            // Deletes this file only; a copy of the same model elsewhere stays.
+                            OutlinedButton(onClick = { viewModel.clearCopy(model.path) }, enabled = ui.importProgress == null) {
+                                Text(if (inModelFolder) "Delete this copy (settings are kept)" else "Clear copy (settings are kept)")
                             }
                         } else if (inModelFolder && ui.archiveFolder != null) {
                             TextButton(onClick = { viewModel.moveModelToArchive(model.path) }, enabled = ui.importProgress == null) {
@@ -509,12 +513,12 @@ fun ModelScreen(
     }
 
     ui.pendingLoad?.let { pending -> PendingLoadDialog(viewModel, pending) }
-    ui.pendingClearCache?.let { (name, reason) ->
+    ui.pendingClearCache?.let { (path, reason) ->
         AlertDialog(
             onDismissRequest = viewModel::dismissClearCache,
             title = { Text("Clear the local copy?") },
             text = { Text("$reason\n\nIf you delete the copy in the app anyway and the archive does not have this model, it is gone.") },
-            confirmButton = { TextButton(onClick = { viewModel.clearCache(name, force = true) }) { Text("Delete anyway") } },
+            confirmButton = { TextButton(onClick = { viewModel.clearCopy(path, force = true) }) { Text("Delete anyway") } },
             dismissButton = { TextButton(onClick = viewModel::dismissClearCache) { Text("Keep") } }
         )
     }

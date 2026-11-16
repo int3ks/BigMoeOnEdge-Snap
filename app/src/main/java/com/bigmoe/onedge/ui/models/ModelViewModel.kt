@@ -74,7 +74,7 @@ data class ModelsUiState(
     val archiveFetchTarget: com.bigmoe.onedge.core.FetchTarget = com.bigmoe.onedge.core.FetchTarget.APP,
     /** GGUFs waiting in Downloads. */
     val downloads: List<com.bigmoe.onedge.core.GgufSet> = emptyList(),
-    /** Clearing this model's cache copy needs a second yes: the archive copy could not be checked ([second] says why). */
+    /** Clearing the copy at this path needs a second yes: the archive copy could not be checked ([second] says why). */
     val pendingClearCache: Pair<String, String>? = null
 )
 
@@ -451,25 +451,28 @@ class ModelViewModel(
         }
     }
 
-    /** Deletes the cache copy of an archive model; what is set on its card stays. */
-    fun clearCache(name: String, force: Boolean = false) {
+    /** Deletes the local copy at [path] of an archive model (only that file); what is set on its card stays. */
+    fun clearCopy(path: String, force: Boolean = false) {
         val archive = modelArchive ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(pendingClearCache = null) }
             try {
-                val loaded = engineModelPath()
-                // The loaded model is a local copy of this one (not the archive file used in place): let go of it first.
-                val archiveDir = archive.folder()?.path
-                if (loaded != null && File(loaded).name == name && (archiveDir == null || !loaded.startsWith("$archiveDir/"))) engineController.unload()
-                archive.clearCache(name, force)
-                _uiState.update { it.copy(message = "Local copy removed. The settings of this model are kept.") }
+                if (engineModelPath() == path) engineController.unload()
+                archive.clearCopy(path, force)
+                _uiState.update { it.copy(message = "Copy removed. The settings of this model are kept.") }
             } catch (e: com.bigmoe.onedge.core.ModelArchive.ArchiveNotVerified) {
-                _uiState.update { it.copy(pendingClearCache = name to (e.message ?: "The archive copy could not be checked.")) }
+                _uiState.update { it.copy(pendingClearCache = path to (e.message ?: "The archive copy could not be checked.")) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(message = e.message ?: "Could not clear the cache") }
+                _uiState.update { it.copy(message = e.message ?: "Could not remove the copy") }
             }
             refresh()
         }
+    }
+
+    /** The archive list's button: the copy in the app storage (the model folder keeps its copies; clear those on their card). */
+    fun clearAppCopy(name: String) {
+        val path = modelArchive?.copyPath(name, com.bigmoe.onedge.core.FetchTarget.APP) ?: return
+        clearCopy(path)
     }
 
     fun dismissClearCache() { _uiState.update { it.copy(pendingClearCache = null) } }

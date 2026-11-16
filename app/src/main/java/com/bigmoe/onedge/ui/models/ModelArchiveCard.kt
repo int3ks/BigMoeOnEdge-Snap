@@ -156,8 +156,9 @@ private fun ArchiveRow(
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(entry.displayName, style = MaterialTheme.typography.bodyMedium)
         val state = when {
-            entry.copyIn == FetchTarget.APP -> "copy in the app storage"
-            entry.copyIn == FetchTarget.MODEL_FOLDER -> "copy in the model folder"
+            entry.copies.size == 2 -> "copies in the app storage and the model folder"
+            FetchTarget.APP in entry.copies -> "copy in the app storage"
+            FetchTarget.MODEL_FOLDER in entry.copies -> "kept in the model folder"
             !entry.complete -> "incomplete in the archive"
             entry.partial -> "fetch interrupted, continues where it stopped"
             !entry.reachable -> "archive not connected"
@@ -169,8 +170,11 @@ private fun ArchiveRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (entry.cached) {
-                TextButton(onClick = { onClearCache(entry.name) }, enabled = idle) { Text("Clear copy") }
+            if (FetchTarget.APP in entry.copies) {
+                // Only the app storage copy: the model folder is where models are kept, its copy is cleared on its card.
+                TextButton(onClick = { onClearCache(entry.name) }, enabled = idle) { Text("Clear app copy") }
+            } else if (entry.cached) {
+                Text("Clear it on its card if needed", style = MaterialTheme.typography.labelSmall)
             } else {
                 Button(onClick = { onFetch(entry.name) }, enabled = idle && entry.reachable && entry.complete) {
                     Text(if (entry.partial) "Continue" else "Fetch")
