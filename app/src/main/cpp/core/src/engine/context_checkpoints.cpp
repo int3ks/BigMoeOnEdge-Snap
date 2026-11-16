@@ -84,6 +84,67 @@ void ContextCheckpoints::drop_after(int64_t n) {
         list_.end());
 }
 
+namespace {
+
+// One blob may be a model's whole recurrent state; anything past this is a corrupt length, not data.
+constexpr uint64_t k_max_blob = 8ull << 30;
+
+bool put(std::FILE * f, const void * p, size_t n) { return n == 0 || std::fwrite(p, 1, n, f) == n; }
+bool get(std::FILE * f, void * p, size_t n) { return n == 0 || std::fread(p, 1, n, f) == n; }
+bool put_blob(std::FILE * f, const std::vector<uint8_t> & v) {
+    const uint64_t n = v.size();
+    return put(f, &n, sizeof n) && put(f, v.data(), v.size());
+}
+bool get_blob(std::FILE * f, std::vector<uint8_t> & v) {
+    uint64_t n = 0;
+    if (!get(f, &n, sizeof n) || n > k_max_blob) return false;
+    try {
+        v.resize((size_t) n);
+    } catch (...) {
+        return false;
+    }
+    return get(f, v.data(), v.size());
+}
+
+} // namespace
+
+bool ContextCheckpoints::write(std::FILE * f) const {
+    const uint32_t n = (uint32_t) list_.size();
+    if (!put(f, &n, sizeof n)) return false;
+    for (const common_prompt_checkpoint & k : list_) {
+        const int64_t n_tokens = k.n_tokens;
+        const int32_t pos_min = k.pos_min, pos_max = k.pos_max;
+        if (!put(f, &n_tokens, sizeof n_tokens) || !put(f, &pos_min, sizeof pos_min) || !put(f, &pos_max, sizeof pos_max) ||
+            !put_blob(f, k.data_tgt) || !put_blob(f, k.data_dft) || !put_blob(f, k.data_spec))
+            return false;
+    }
+    return true;
+}
+
+bool ContextCheckpoints::read(std::FILE * f) {
+    list_.clear();
+    uint32_t n = 0;
+    if (!get(f, &n, sizeof n) || n > 4096) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+        common_prompt_checkpoint k;
+        int64_t n_tokens = 0;
+        int32_t pos_min = 0, pos_max = 0;
+        if (!get(f, &n_tokens, sizeof n_tokens) || !get(f, &pos_min, sizeof pos_min) || !get(f, &pos_max, sizeof pos_max) ||
+            !get_blob(f, k.data_tgt) || !get_blob(f, k.data_dft) || !get_blob(f, k.data_spec)) {
+            list_.clear();
+            return false;
+        }
+        k.update_pos(n_tokens, pos_min, pos_max);
+        if (enabled()) list_.push_back(std::move(k));
+    }
+    // Written oldest first; the same limits as create() apply, the newest always stays.
+    while ((int) list_.size() > max_count_ && !list_.empty())
+        list_.erase(list_.begin());
+    while (max_bytes_ > 0 && list_.size() > 1 && bytes() > max_bytes_)
+        list_.erase(list_.begin());
+    return true;
+}
+
 size_t ContextCheckpoints::bytes() const {
     size_t b = 0;
     for (const common_prompt_checkpoint & k : list_)

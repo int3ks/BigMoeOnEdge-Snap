@@ -38,7 +38,10 @@ class EngineController(
     /** Guess ahead chosen on a model's card (Models page); null = the requested (global) setting applies. */
     private val specProvider: suspend (modelPath: String) -> SpecSource? = { null },
     /** NPU prefill and expert cache chosen on a model's card; null fields = the requested (global) setting applies. */
-    private val memoryOptionsProvider: suspend (modelPath: String) -> ModelMemoryOptions = { ModelMemoryOptions() }
+    private val memoryOptionsProvider: suspend (modelPath: String) -> ModelMemoryOptions = { ModelMemoryOptions() },
+    /** KV snapshots on disk (chat switch, reload, app restart without a new prefill); null = never. */
+    private val kvSnapshotStore: KvSnapshotStore? = null,
+    private val kvSnapshotsEnabled: suspend () -> Boolean = { false }
 ) {
     private val backend: EngineBackend by lazy(backendProvider)
 
@@ -51,6 +54,70 @@ class EngineController(
 
     @Volatile
     private var engineStateKey: String? = null
+
+    // ---- KV snapshots on disk ---------------------------------------------------------------------------
+    // The chat whose conversation the engine's context holds (as far as the app knows), whether it changed since
+    // the last save or load, and what ties a snapshot to the loaded model setup. A wrong guess here costs time,
+    // never correctness: the engine keeps only the tokens a replay shares with what it holds.
+    @Volatile
+    private var kvSessionId: String? = null
+    @Volatile
+    private var kvDirty = false
+    @Volatile
+    private var kvFingerprint: String? = null
+
+    private suspend fun snapshotsOn(): Boolean =
+        kvSnapshotStore != null && kvFingerprint != null && runCatching { kvSnapshotsEnabled() }.getOrDefault(false)
+
+    /** Writes the held chat's snapshot when it changed and is worth it. Only between generations. */
+    private fun saveSnapshot() {
+        val store = kvSnapshotStore ?: return
+        val fingerprint = kvFingerprint ?: return
+        val session = kvSessionId ?: return
+        if (!kvDirty) return
+        try {
+            if (backend.kvTokens() < KvSnapshotStore.MIN_TOKENS || !store.hasRoom()) return
+            val prefix = store.prefix(fingerprint, session)
+            store.prepare(prefix)
+            if (backend.saveKv(prefix) > 0) {
+                kvDirty = false
+                store.trim(keep = prefix)
+            } else {
+                store.delete(prefix)
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * Before a replay for [target]: the chat the engine holds is saved (it is about to be overwritten) and
+     * [target]'s snapshot, when there is one, is loaded - the replay then finds its tokens already in the context.
+     */
+    private suspend fun swapSnapshot(target: String) {
+        if (kvSessionId == target || !snapshotsOn()) return
+        val store = kvSnapshotStore ?: return
+        val fingerprint = kvFingerprint ?: return
+        withContext(ioDispatcher) {
+            saveSnapshot()
+            val prefix = store.prefix(fingerprint, target)
+            if (!store.exists(prefix)) return@withContext
+            val loaded = try { backend.loadKv(prefix) } catch (_: Throwable) { 0 }
+            if (loaded > 0) {
+                kvSessionId = target
+            } else {
+                // Unusable (or the engine was busy): the context may have been emptied on the way.
+                store.delete(prefix)
+                kvSessionId = null
+            }
+            kvDirty = false
+        }
+    }
+
+    /** The app is going to the background: keep the running chat for a restart. Skipped while generating. */
+    suspend fun saveSnapshotNow() = withContext(ioDispatcher) {
+        if (generating.get() || !snapshotsOn()) return@withContext
+        lifecycleMutex.withLock { if (!generating.get()) saveSnapshot() }
+    }
 
     // ---- Local API server arbitration -------------------------------------------------------------------
     // The engine is single-flight. API requests queue up here (one at a time, FIFO, bounded wait); the in-app chat
@@ -120,6 +187,11 @@ class EngineController(
         useModelSpec: Boolean = true
     ): String? = withContext(ioDispatcher) {
         lifecycleMutex.withLock {
+            // A reload or a model switch: the chat the old session holds survives as a snapshot.
+            if (_state.value is EngineState.Ready && !generating.get() && snapshotsOn()) saveSnapshot()
+            kvSessionId = null
+            kvDirty = false
+            kvFingerprint = null
             val file = File(modelPath)
             if (!file.isFile || !file.canRead()) {
                 val msg = "Model file is not readable: $modelPath"
@@ -246,6 +318,13 @@ class EngineController(
                     return@withLock error
                 }
                 val info = backend.modelInfo()
+                kvFingerprint = if (kvSnapshotStore == null) null else KvSnapshotStore.fingerprint(
+                    file,
+                    "kv=${activeConfig.kvCacheType.label}",
+                    "lora=${activeLora?.let { File(it.path).name + ":" + it.scale }.orEmpty()}",
+                    "mtp=${activeConfig.spec == SpecSource.MTP}",
+                    "draft=${activeDraftPath?.let { File(it).name }.orEmpty()}"
+                )
                 _state.value = EngineState.Ready(
                     ModelInfo(
                         path = modelPath,
@@ -292,6 +371,10 @@ class EngineController(
         try { backend.stop() } catch (_: Throwable) {}
         lifecycleMutex.withLock {
             engineStateKey = null
+            if (_state.value is EngineState.Ready && !generating.get() && snapshotsOn()) saveSnapshot()
+            kvSessionId = null
+            kvDirty = false
+            kvFingerprint = null
             try { backend.free() } catch (_: Throwable) {}
             _state.value = EngineState.Unloaded
         }
@@ -308,6 +391,11 @@ class EngineController(
             return@withContext DecisionResult(ok = false, error = "The engine is already generating.")
         }
         try {
+            // A decision overwrites the context: no chat owns it afterwards. Not saved first - decisions and helper
+            // turns come often, and a snapshot per message would wear the flash for little; the chat's last snapshot
+            // (from the last chat switch, unload or app stop) is what the next turn loads.
+            kvSessionId = null
+            kvDirty = false
             val result = lifecycleMutex.withLock {
                 backend.decide(request)
             }
@@ -355,8 +443,12 @@ class EngineController(
         try {
             var attempt = 0
             var shrink = 1.0
+            // Only a chat turn carries a state key (ContextPlanner.stateKey); a helper turn (search query, device
+            // tuner) uses the context without owning a snapshot.
+            val chat = request.expectedKey.takeIf { it.contains('|') }?.substringBefore('|')
             while (true) {
                 val replay = engineStateKey != request.expectedKey || shrink < 1.0
+                if (replay && attempt == 0 && chat != null) swapSnapshot(chat)
                 var streamed = false
                 var fin: EngineEvent.Finished? = null
                 runOnce(request, ready.info, shrink, replay).collect { ev ->
@@ -379,6 +471,10 @@ class EngineController(
                 // engine: state is unchanged after a continued turn, and only the seeded replay after a
                 // replayed one, so a replayed turn forgets the key.
                 engineStateKey = if (result.ok && result.cancelled && !replay) request.expectedKey else null
+                if (result.ok) {
+                    kvSessionId = chat
+                    kvDirty = chat != null
+                }
                 emit(result)
                 completed = true
                 return@flow
@@ -465,6 +561,9 @@ class EngineController(
             return@flow
         }
         engineStateKey = null
+        // An API request decodes its own conversation into the context (see decide() for why nothing is saved here).
+        kvSessionId = null
+        kvDirty = false
         try {
             coroutineScope {
                 val events = Channel<ChatEvent>(Channel.UNLIMITED)

@@ -2781,4 +2781,187 @@ RunResult Session::generate(const GenerateRequest & req,
     return res;
 }
 
+// ---------------------------------------------------------------------------------------------
+// KV snapshot on disk
+// ---------------------------------------------------------------------------------------------
+//
+// Three files, so the big part never passes through a buffer of ours: llama.cpp streams a sequence's
+// state straight to a file (llama_state_seq_save_file), and on a tablet a second in-memory copy of a
+// long chat's KV is exactly the memory there is none of.
+//   <prefix>.kv   the target context's state for seq 0, with the tokens it stands for
+//   <prefix>.dft  the MTP draft context's state, when there is one
+//   <prefix>.aux  what llama.cpp's file does not carry: the speculative driver's state and the
+//                 context checkpoints (without them a recurrent or sliding-window model could not
+//                 cut the restored KV at the first difference and would prefill everything again).
+// The .aux is removed first and written last (through a rename), so a save that was interrupted
+// leaves no snapshot rather than a half one.
+
+namespace {
+
+constexpr char k_kv_aux_magic[8] = {'B', 'M', 'O', 'E', 'K', 'V', 'A', '1'};
+constexpr uint32_t k_kv_aux_end = 0x454b5621u;
+
+uint64_t file_bytes(const std::string & path) {
+    std::FILE * f = std::fopen(path.c_str(), "rb");
+    if (!f) return 0;
+    uint64_t n = 0;
+#if defined(_WIN32)
+    if (_fseeki64(f, 0, SEEK_END) == 0) n = (uint64_t) _ftelli64(f);
+#else
+    if (fseeko(f, 0, SEEK_END) == 0) n = (uint64_t) ftello(f);
+#endif
+    std::fclose(f);
+    return n;
+}
+
+} // namespace
+
+int Session::kv_tokens_held() const {
+    const Impl & im = *impl_;
+    return (im.chat_on && !im.kv_has_media) ? (int) im.kv_tokens.size() : 0;
+}
+
+Session::KvSnapshotResult Session::save_kv(const std::string & prefix) {
+    KvSnapshotResult r;
+    Impl & im = *impl_;
+    auto fail = [&](const std::string & e) {
+        r.error = e;
+        return r;
+    };
+    if (!im.ctx) return fail("no model is loaded");
+    if (!im.chat_on) return fail("snapshots need chat mode");
+    if (im.kv_has_media) return fail("the context holds an image");
+    if (im.kv_tokens.empty()) return fail("the context holds no conversation");
+
+    const std::string kv = prefix + ".kv", dft = prefix + ".dft", aux = prefix + ".aux", tmp = aux + ".tmp";
+    std::remove(aux.c_str());
+    std::remove(dft.c_str());
+    auto drop = [&]() {
+        std::remove(kv.c_str());
+        std::remove(dft.c_str());
+        std::remove(tmp.c_str());
+    };
+
+    if (llama_state_seq_save_file(im.ctx.get(), kv.c_str(), 0, im.kv_tokens.data(), im.kv_tokens.size()) == 0) {
+        drop();
+        return fail("writing the context state failed");
+    }
+    // No tokens in the draft file (the target's file has them), but llama.cpp wants a pointer.
+    const llama_token no_token = 0;
+    if (im.ctx_dft && llama_state_seq_save_file(im.ctx_dft.get(), dft.c_str(), 0, &no_token, 0) == 0) {
+        drop();
+        return fail("writing the draft context state failed");
+    }
+
+    std::vector<uint8_t> spec;
+    if (im.mtp) common_speculative_get_state(im.mtp.get(), 0, spec);
+    std::FILE * f = std::fopen(tmp.c_str(), "wb");
+    if (!f) {
+        drop();
+        return fail("cannot write " + tmp);
+    }
+    const uint32_t n_tokens = (uint32_t) im.kv_tokens.size();
+    const uint32_t has_dft = im.ctx_dft ? 1u : 0u;
+    const uint64_t n_spec = spec.size();
+    bool ok = std::fwrite(k_kv_aux_magic, 1, sizeof k_kv_aux_magic, f) == sizeof k_kv_aux_magic &&
+              std::fwrite(&n_tokens, sizeof n_tokens, 1, f) == 1 && std::fwrite(&has_dft, sizeof has_dft, 1, f) == 1 &&
+              std::fwrite(&n_spec, sizeof n_spec, 1, f) == 1 &&
+              (spec.empty() || std::fwrite(spec.data(), 1, spec.size(), f) == spec.size()) && im.checkpoints.write(f) &&
+              std::fwrite(&k_kv_aux_end, sizeof k_kv_aux_end, 1, f) == 1;
+    ok = (std::fclose(f) == 0) && ok;
+    if (!ok || std::rename(tmp.c_str(), aux.c_str()) != 0) {
+        drop();
+        return fail("writing the snapshot index failed (storage full?)");
+    }
+    r.ok = true;
+    r.n_tokens = (int) n_tokens;
+    r.bytes = file_bytes(kv) + file_bytes(dft) + file_bytes(aux);
+    std::fprintf(stderr, "bmoe: kv snapshot saved: %d tokens, %.1f MiB, %zu checkpoint(s)\n", r.n_tokens,
+                 (double) r.bytes / (1024.0 * 1024.0), im.checkpoints.count());
+    return r;
+}
+
+Session::KvSnapshotResult Session::load_kv(const std::string & prefix) {
+    KvSnapshotResult r;
+    Impl & im = *impl_;
+    auto fail = [&](const std::string & e) {
+        r.error = e;
+        return r;
+    };
+    if (!im.ctx) return fail("no model is loaded");
+    if (!im.chat_on) return fail("snapshots need chat mode");
+
+    const std::string kv = prefix + ".kv", dft = prefix + ".dft", aux = prefix + ".aux";
+    std::FILE * f = std::fopen(aux.c_str(), "rb");
+    if (!f) return fail("no snapshot");
+    char magic[sizeof k_kv_aux_magic];
+    uint32_t n_tokens = 0, has_dft = 0;
+    uint64_t n_spec = 0;
+    std::vector<uint8_t> spec;
+    bool ok = std::fread(magic, 1, sizeof magic, f) == sizeof magic &&
+              std::memcmp(magic, k_kv_aux_magic, sizeof magic) == 0 && std::fread(&n_tokens, sizeof n_tokens, 1, f) == 1 &&
+              std::fread(&has_dft, sizeof has_dft, 1, f) == 1 && std::fread(&n_spec, sizeof n_spec, 1, f) == 1 &&
+              n_spec <= (64ull << 20);
+    if (ok && n_spec > 0) {
+        spec.resize((size_t) n_spec);
+        ok = std::fread(spec.data(), 1, spec.size(), f) == spec.size();
+    }
+    // Everything checked before the context is touched: a snapshot that cannot be used leaves the
+    // running conversation alone.
+    if (!ok) {
+        std::fclose(f);
+        return fail("the snapshot index is damaged");
+    }
+    if (n_tokens == 0 || (int64_t) n_tokens >= (int64_t) im.cfg.n_ctx) {
+        std::fclose(f);
+        return fail("the snapshot does not fit this context size");
+    }
+    if ((has_dft != 0) != (im.ctx_dft != nullptr)) {
+        std::fclose(f);
+        return fail("the snapshot was taken with a different draft setup");
+    }
+
+    // From here on the old conversation is gone whatever happens.
+    llama_context * ctx = im.ctx.get();
+    auto wipe = [&]() {
+        im.clear_memory(ctx);
+        if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
+        im.forget_kv_tokens();
+        im.chat_history.clear();
+        im.kv_has_media = false;
+    };
+    wipe();
+    uint32_t end = 0;
+    ok = im.checkpoints.read(f) && std::fread(&end, sizeof end, 1, f) == 1 && end == k_kv_aux_end;
+    std::fclose(f);
+    if (!ok) {
+        wipe();
+        return fail("the snapshot index is damaged");
+    }
+
+    std::vector<llama_token> tokens(n_tokens);
+    size_t n_read = 0;
+    if (llama_state_seq_load_file(ctx, kv.c_str(), 0, tokens.data(), tokens.size(), &n_read) == 0 || n_read != n_tokens) {
+        wipe();
+        return fail("the saved state does not fit this model or KV type");
+    }
+    if (im.ctx_dft) {
+        // A null token buffer would make llama.cpp report the count and load nothing.
+        llama_token no_token = 0;
+        size_t n_dft = 0;
+        if (llama_state_seq_load_file(im.ctx_dft.get(), dft.c_str(), 0, &no_token, 1, &n_dft) == 0) {
+            wipe();
+            return fail("the saved draft state does not fit");
+        }
+    }
+    if (im.mtp && !spec.empty()) common_speculative_set_state(im.mtp.get(), 0, spec);
+    im.kv_tokens = std::move(tokens);
+    r.ok = true;
+    r.n_tokens = (int) n_tokens;
+    r.bytes = file_bytes(kv) + file_bytes(dft) + file_bytes(aux);
+    std::fprintf(stderr, "bmoe: kv snapshot loaded: %d tokens, %.1f MiB, %zu checkpoint(s)\n", r.n_tokens,
+                 (double) r.bytes / (1024.0 * 1024.0), im.checkpoints.count());
+    return r;
+}
+
 } // namespace bmoe

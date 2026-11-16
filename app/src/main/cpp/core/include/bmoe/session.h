@@ -22,6 +22,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -294,6 +295,27 @@ public:
     // cancel() stops it between prefill chunks. Refused (not fatal) unless the session was opened
     // with SessionConfig::decide.enabled.
     DecideResult decide(const DecideRequest & req);
+
+    // KV snapshot on disk: what the context holds for the running chat (the KV / recurrent state, the
+    // tokens it stands for, the context checkpoints, and the MTP draft context when there is one),
+    // written to `<prefix>.kv`, `<prefix>.dft` and `<prefix>.aux` (written last: without it the
+    // snapshot does not exist). Chat mode only; a context holding an image is not saved.
+    //
+    // load_kv() replaces whatever the context holds and ends the engine-held conversation: the caller
+    // then replays the chat with clear_kv=true, and the prefix reuse keeps exactly the tokens the
+    // replay shares with the snapshot - so a snapshot of another conversation costs time, never
+    // correctness. It must come from the same model, KV type and adapters; a state that does not fit
+    // this context is refused and the context is left empty. Never call either while generate() runs.
+    struct KvSnapshotResult {
+        bool ok = false;
+        int n_tokens = 0;     // tokens the snapshot stands for
+        uint64_t bytes = 0;   // on disk, all files
+        std::string error;
+    };
+    KvSnapshotResult save_kv(const std::string & prefix);
+    KvSnapshotResult load_kv(const std::string & prefix);
+    // Tokens of the running chat the context holds (0 outside chat mode or after an image turn).
+    int kv_tokens_held() const;
 
 private:
     Session();

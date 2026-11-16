@@ -49,3 +49,21 @@ message → the key no longer matches → replay.
 * The template renders the replayed history the same way it rendered the live turns (true for standard Jinja
   templates; tool-call text is stored as plain assistant text, which is what the model produced).
 * Reasoning text is not replayed (the engine keeps it out of `chat_history`).
+
+## KV snapshots on disk
+A replay costs a prefill of everything the context does not hold. `Session::save_kv(prefix)` writes what it holds
+(state + tokens, draft context, speculative state, context checkpoints), `load_kv(prefix)` puts it back and ends the
+engine-held conversation; the app then replays as in the table above and the prefix reuse keeps what matches. So the
+table's "replay" rows for *another chat*, *app restart* and *model reload* become "load snapshot, then replay".
+
+* `EngineController` tracks `kvSessionId` (the chat the context holds), `kvDirty` and `kvFingerprint` (model file name,
+  size, first MiB + KV type, LoRA, draft setup). `swapSnapshot(target)` runs before the first replay of a turn for a
+  chat other than `kvSessionId`: save the held chat (if dirty and >= 512 tokens), load the target's snapshot if any.
+* Also saved in `loadModel` / `unload` (before the old session goes) and from `MainActivity.onStop`
+  (`saveSnapshotNow`, skipped while generating).
+* Only chat turns (`expectedKey` contains `|`) own a snapshot. Helper turns, `decide()` and API requests set
+  `kvSessionId = null` and write nothing; the next chat turn loads the chat's last snapshot.
+* A wrong or stale snapshot costs time, not correctness: reuse is token by token. A snapshot from another model of the
+  same shape would be wrong, hence the fingerprint. The engine refuses a state that does not fit (KV type, layers,
+  draft setup, more tokens than n_ctx) and leaves the context empty.
+* Not saved: a context that holds an image (`kv_has_media`).

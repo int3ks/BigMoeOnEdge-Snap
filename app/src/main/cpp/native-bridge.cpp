@@ -1033,6 +1033,40 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCacheBudget(JNIEnv *, jo
     if (s && mib > 0) s->set_cache_budget_mb(mib);
 }
 
+// KV snapshot on disk (bmoe::Session::save_kv / load_kv): the running chat's context state as files under
+// `prefix`. Both return the tokens the snapshot stands for, 0 when nothing was saved or loaded (the reason goes to
+// the log). They never run alongside a generation: a busy engine is a 0, not a wait.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSaveKv(JNIEnv * env, jobject, jbyteArray prefix) {
+    std::unique_lock<std::mutex> gen_lk(g_generate_mu, std::try_to_lock);
+    if (!gen_lk.owns_lock()) return 0;
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (!s) return 0;
+    const bmoe::Session::KvSnapshotResult r = s->save_kv(from_bytes(env, prefix));
+    if (!r.ok) LOGI("kv snapshot not saved: %s", r.error.c_str());
+    return r.ok ? (jint) r.n_tokens : 0;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadKv(JNIEnv * env, jobject, jbyteArray prefix) {
+    std::unique_lock<std::mutex> gen_lk(g_generate_mu, std::try_to_lock);
+    if (!gen_lk.owns_lock()) return 0;
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (!s) return 0;
+    const bmoe::Session::KvSnapshotResult r = s->load_kv(from_bytes(env, prefix));
+    if (!r.ok) LOGI("kv snapshot not loaded: %s", r.error.c_str());
+    return r.ok ? (jint) r.n_tokens : 0;
+}
+
+// Tokens of the running chat the context holds right now (0 = nothing a snapshot could describe).
+extern "C" JNIEXPORT jint JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeKvTokens(JNIEnv *, jobject) {
+    std::unique_lock<std::mutex> gen_lk(g_generate_mu, std::try_to_lock);
+    if (!gen_lk.owns_lock()) return 0;
+    std::shared_ptr<bmoe::Session> s = current_session();
+    return s ? (jint) s->kv_tokens_held() : 0;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeAllowedCpus(JNIEnv *, jobject) {
     return static_cast<jlong>(allowed_cpu_mask());

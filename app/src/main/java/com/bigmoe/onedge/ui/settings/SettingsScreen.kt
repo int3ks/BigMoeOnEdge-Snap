@@ -422,6 +422,11 @@ private fun SettingsContent(
                 if (contextValid) "Type any number, there is no limit. Prompt plus reply the session can hold. Also memory: the KV cache is sized for it at open, so a very large value needs a lot of RAM and the model may fail to load; lower it if that happens. Speed tip: a smaller context also leaves more RAM for the expert cache."
                 else "Enter a whole number greater than 0. The last valid value (${settings.contextLength}) stays in use."
             )
+            SwitchRow(
+                "KV snapshots on disk (experimental)",
+                "Saves a chat's context when you switch to another chat, reload or unload the model, or leave the app, and loads it back when you return: the conversation continues without prefilling it again. Stored in the app's own storage, oldest removed first above 6 GB. Tied to the model file, KV type, LoRA and draft setup.",
+                settings.kvSnapshots
+            ) { viewModel.updateKvSnapshots(it) }
             } // CPU · NPU group
             Spacer(Modifier.height(10.dp))
 

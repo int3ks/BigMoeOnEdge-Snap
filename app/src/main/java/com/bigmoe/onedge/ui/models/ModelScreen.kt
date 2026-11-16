@@ -169,6 +169,14 @@ fun ModelScreen(
             else viewModel.setModelFolder(path)
         }
     }
+    // Archive folder on external storage (a USB drive): the same picker, the real path is what is stored.
+    val archiveFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val path = runCatching { pathForExternalStorageDocumentId(context, DocumentsContract.getTreeDocumentId(uri)) }.getOrNull()
+            if (path == null) viewModel.showMessage("This location has no direct file path. Pick a folder on the USB drive or SD card itself.")
+            else viewModel.setArchiveFolder(path)
+        }
+    }
     val folderAccessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         sharedPathAccessGranted = hasSharedPathAccess(context)
         viewModel.refresh()
@@ -381,6 +389,21 @@ fun ModelScreen(
                     }
                 }
             }
+            item(key = "model_archive") {
+                ModelArchiveCard(
+                    ui = ui,
+                    onChooseFolder = { archiveFolderPicker.launch(null) },
+                    onUseFolder = { viewModel.setArchiveFolder(it) },
+                    onTurnOff = { viewModel.setArchiveFolder(null) },
+                    onRefresh = viewModel::refresh,
+                    onFetch = viewModel::fetchFromArchive,
+                    onClearCache = { viewModel.clearCache(it) },
+                    onCancel = viewModel::cancelImport,
+                    onDownloadToModels = viewModel::moveDownloadToModels,
+                    onDownloadToArchive = viewModel::moveDownloadToArchive
+                )
+            }
+
             item(key = "models_header") { SectionHeader("Models", null) }
             if (ui.models.isEmpty() && ui.incompleteImports.isEmpty()) {
                 item { Text("No models yet.", color = MaterialTheme.colorScheme.secondary) }
@@ -443,6 +466,21 @@ fun ModelScreen(
                             onNpu = { viewModel.setNpuForModel(model.path, it) },
                             onCacheMb = { viewModel.setCacheMbForModel(model.path, it) }
                         )
+                    },
+                    archiveAction = {
+                        // A cache copy of an archive model can go without losing its settings; a model of the model
+                        // folder can move out to the archive.
+                        val inCache = model.inAppStorage && ui.archiveEntries.any { it.name == model.name }
+                        val inModelFolder = !model.inAppStorage && ui.modelFolder?.let { model.path.startsWith("$it/") } == true
+                        if (inCache) {
+                            OutlinedButton(onClick = { viewModel.clearCache(model.name) }, enabled = ui.importProgress == null) {
+                                Text("Clear from cache (settings are kept)")
+                            }
+                        } else if (inModelFolder && ui.archiveFolder != null) {
+                            TextButton(onClick = { viewModel.moveModelToArchive(model.path) }, enabled = ui.importProgress == null) {
+                                Text("Move to archive")
+                            }
+                        }
                     }
                 )
             }
@@ -464,6 +502,15 @@ fun ModelScreen(
     }
 
     ui.pendingLoad?.let { pending -> PendingLoadDialog(viewModel, pending) }
+    ui.pendingClearCache?.let { (name, reason) ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissClearCache,
+            title = { Text("Clear from cache?") },
+            text = { Text("$reason\n\nIf you delete the copy in the app anyway and the archive does not have this model, it is gone.") },
+            confirmButton = { TextButton(onClick = { viewModel.clearCache(name, force = true) }) { Text("Delete anyway") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissClearCache) { Text("Keep") } }
+        )
+    }
 }
 
 /** Shown before a load only when the pre-flight checks warn about something. Shared by the Models page and the chat's model picker. */
@@ -699,7 +746,9 @@ private fun ModelRow(
     onKvType: (com.bigmoe.onedge.core.KvCacheType) -> Unit,
     settings: EngineSettings,
     /** The model's memory choices and overview (NPU, expert cache, estimate); composed only while the card is open. */
-    memory: @Composable () -> Unit = {}
+    memory: @Composable () -> Unit = {},
+    /** Archive actions for this model (clear from cache / move to archive), when there are any. */
+    archiveAction: @Composable () -> Unit = {}
 ) {
     // Collapsed by default so a long list stays short; the loaded model opens. Tap the name to toggle.
     var expanded by androidx.compose.runtime.saveable.rememberSaveable(model.path) { mutableStateOf(isLoaded) }
@@ -767,6 +816,7 @@ private fun ModelRow(
                 KvCacheRow(kvType, loadedKvType, onKvType)
                 androidx.compose.material3.HorizontalDivider()
                 memory()
+                archiveAction()
                 if (!model.inAppStorage) Text("This file stays in its original folder; removing it here only unregisters it.", style = MaterialTheme.typography.labelSmall)
             }
         }

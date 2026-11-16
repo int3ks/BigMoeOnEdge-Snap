@@ -102,6 +102,34 @@ class ModelManager(
     // ---- Model folder: every GGUF in it (and up to FOLDER_SCAN_DEPTH folders below) is listed in place, without
     // registering or copying it. Delete or move a file there to remove it from the list. ----
 
+    /**
+     * Paths whose attachments (drafter, projector, LoRA) stay although the file is gone: models of the external
+     * archive that are not in the app's cache right now ([ModelArchive]).
+     */
+    @Volatile
+    var keepLinksFor: (path: String) -> Boolean = { false }
+
+    /** The per-model options of [modelPath] (KV type, guess ahead, memory, ...) by option name, to travel with the file. */
+    suspend fun exportOptions(modelPath: String): Map<String, String> = withContext(io) {
+        val prefix = encodePath(canonicalPath(modelPath))
+        val props = modelOptions()
+        props.stringPropertyNames().filter { it.startsWith(prefix) && it.length > prefix.length && it[prefix.length] == '.' }
+            .associate { it.substring(prefix.length) to props.getProperty(it) }
+    }
+
+    /** Options written by [exportOptions], applied to [modelPath]; existing ones win unless [overwrite]. */
+    suspend fun importOptions(modelPath: String, options: Map<String, String>, overwrite: Boolean = false) = withContext(io) {
+        if (options.isEmpty()) return@withContext
+        val prefix = encodePath(canonicalPath(modelPath))
+        val props = modelOptions()
+        var changed = false
+        options.forEach { (name, value) ->
+            if (!name.startsWith('.')) return@forEach
+            if (overwrite || props.getProperty(prefix + name) == null) { props.setProperty(prefix + name, value); changed = true }
+        }
+        if (changed) saveModelOptions(props)
+    }
+
     private val modelFolderFile: File get() = File(modelsDir, ".model-folder")
 
     /** The folder whose GGUFs are listed automatically, or null when switched off. */
@@ -179,6 +207,8 @@ class ModelManager(
         fun gone(path: String): Boolean {
             val f = File(path)
             if (f.exists()) return false
+            // A model fetched from the archive and cleared from the cache comes back to the same path.
+            if (keepLinksFor(path)) return false
             val parent = f.parentFile ?: return false
             return parent.isDirectory && parent.canRead()
         }

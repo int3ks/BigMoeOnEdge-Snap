@@ -92,16 +92,44 @@ class AppContainer(private val context: Context) {
             loraProvider = { path -> modelManager.loraForModel(path) },
             kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) },
             specProvider = { path -> modelManager.specForModel(path) },
-            memoryOptionsProvider = { path -> modelManager.memoryOptionsForModel(path) }
+            memoryOptionsProvider = { path -> modelManager.memoryOptionsForModel(path) },
+            kvSnapshotStore = com.bigmoe.onedge.core.KvSnapshotStore(File(context.applicationContext.filesDir, "kv-snapshots")),
+            kvSnapshotsEnabled = { settingsDataStore.settingsFlow.first().kvSnapshots }
         )
     }
+
+    @Volatile
+    private var archive: com.bigmoe.onedge.core.ModelArchive? = null
 
     val modelManager: ModelManager by lazy {
         ModelManager(
             File(context.applicationContext.filesDir, "models"),
             defaultModelFolder = File(android.os.Environment.getExternalStorageDirectory(), "Models")
-        )
+        ).also { manager ->
+            // Created with the manager: it tells the manager which attachments to keep for models that are only in
+            // the archive right now, and that has to hold from the first model listing on.
+            archive = com.bigmoe.onedge.core.ModelArchive(
+                cacheDir = File(context.applicationContext.filesDir, "models"),
+                modelManager = manager,
+                downloadsDir = {
+                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                },
+                removableRoots = {
+                    val storage = context.applicationContext.getSystemService(android.os.storage.StorageManager::class.java)
+                    storage?.storageVolumes.orEmpty()
+                        .filter { it.isRemovable && it.state == android.os.Environment.MEDIA_MOUNTED }
+                        .mapNotNull { if (android.os.Build.VERSION.SDK_INT >= 30) it.directory else null }
+                }
+            )
+        }
     }
+
+    /** The external model archive and the cache it fills (Models page). */
+    val modelArchive: com.bigmoe.onedge.core.ModelArchive
+        get() {
+            modelManager
+            return checkNotNull(archive)
+        }
 
     /** Private (`<app files>/workspace`) or shared (`<internal storage>/BigMoe/workspace`), see [workspaceSwitcher]. */
     val workspaceLocation: com.bigmoe.onedge.core.WorkspaceLocation by lazy {
@@ -192,6 +220,11 @@ class AppContainer(private val context: Context) {
     }
 
     /** adb test hook, see [com.bigmoe.onedge.server.ApiServerIntentHook]. No-op unless the intent carries its extras. */
+    /** The app leaves the foreground: keep the running chat's context for a restart (no-op when unchanged or generating). */
+    fun saveKvSnapshot() {
+        appScope.launch(Dispatchers.IO) { runCatching { engineController.saveSnapshotNow() } }
+    }
+
     fun handleApiServerIntent(intent: android.content.Intent?) {
         // MainActivity is exported, so any app could send these extras (set the key, switch authentication off...).
         // The hook therefore exists in debuggable builds only.

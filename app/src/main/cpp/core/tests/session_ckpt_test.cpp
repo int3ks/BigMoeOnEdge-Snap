@@ -169,6 +169,73 @@ static void replay_path(const char * path, int ckpts, bool recurrent = true) {
     check(o.ok && o.generated_text == want2.generated_text, tag + "switching chats answers as a fresh session does");
 }
 
+// The KV snapshot on disk: a chat saved in one session and loaded into a fresh one (app restart, chat
+// switch) must continue exactly as a session that prefilled everything, and must not prefill it again.
+static void snapshot_path(const char * path, int ckpts, bool recurrent, bool spec) {
+    const std::string tag = std::string(recurrent ? "" : "llama ") + "snapshot (checkpoints " + std::to_string(ckpts) +
+                            (spec ? ", ngram" : "") + "): ";
+    const bool moe = recurrent;
+    const std::string prefix = std::string(path) + ".snap" + std::to_string(ckpts) + (spec ? "s" : "");
+    auto s = open_session(path, ckpts, moe, spec);
+    check(!s->save_kv(prefix).ok, tag + "nothing to save before the first turn");
+    GenerateRequest r0;
+    r0.prompt = "Hello there";
+    r0.n_predict = 12;
+    r0.think = false;
+    r0.clear_kv = true;
+    r0.system_prompt = "the world Hello";
+    const RunResult a0 = s->generate(r0);
+    GenerateRequest r1 = r0;
+    r1.prompt = "Hello world";
+    r1.clear_kv = false;
+    const RunResult a1 = s->generate(r1);
+    check(a0.ok && a1.ok, tag + "two turns " + a0.error + a1.error);
+    const Session::KvSnapshotResult saved = s->save_kv(prefix);
+    check(saved.ok && saved.n_tokens == s->kv_tokens_held() && saved.bytes > 0, tag + "saved (" + saved.error + ")");
+
+    // The app's replay of that chat with a third message.
+    GenerateRequest next = r0;
+    next.prompt = "the world";
+    next.history = {{"user", "Hello there"}, {"assistant", a0.generated_text},
+                    {"user", "Hello world"}, {"assistant", a1.generated_text}};
+    const RunResult live = s->generate(next); // the session that still holds the chat
+
+    auto fresh = open_session(path, ckpts, moe, spec);
+    const RunResult want = fresh->generate(next);
+    auto loaded = open_session(path, ckpts, moe, spec);
+    const Session::KvSnapshotResult got = loaded->load_kv(prefix);
+    check(got.ok && got.n_tokens == saved.n_tokens && loaded->kv_tokens_held() == saved.n_tokens,
+          tag + "loaded into a fresh session (" + got.error + ")");
+    const RunResult l = loaded->generate(next);
+    std::printf("    snapshot %d tokens, %.2f MiB; replay reused=%d/%d kv_reuse=%d (live reused=%d kv_reuse=%d)\n",
+                saved.n_tokens, (double) saved.bytes / (1024.0 * 1024.0), l.summary.n_reused, l.summary.n_prompt_total,
+                l.summary.kv_reuse, live.summary.n_reused, live.summary.kv_reuse);
+    check(l.ok && want.ok && l.generated_text == want.generated_text, tag + "continues as a fresh session does");
+    check(l.summary.n_reused == live.summary.n_reused && l.summary.kv_reuse == live.summary.kv_reuse,
+          tag + "reuses exactly what the session that kept the chat reuses");
+    if (!recurrent || ckpts > 0) check(l.summary.n_reused > 0, tag + "the snapshot spares the prefill");
+
+    // A second turn after the load, and a load over a running chat.
+    GenerateRequest more = r1;
+    more.prompt = "Hello there";
+    const RunResult m1 = loaded->generate(more), m2 = fresh->generate(more);
+    check(m1.ok && m2.ok && m1.generated_text == m2.generated_text, tag + "the turn after that matches too");
+    const Session::KvSnapshotResult again = loaded->load_kv(prefix);
+    const RunResult l2 = loaded->generate(next);
+    check(again.ok && l2.ok && l2.generated_text == want.generated_text, tag + "loading over a running chat works");
+
+    // Refused without harm: a missing snapshot, a damaged index, a different draft setup.
+    check(!loaded->load_kv(prefix + ".none").ok, tag + "a missing snapshot is refused");
+    if (std::FILE * f = std::fopen((prefix + ".aux").c_str(), "r+b")) {
+        std::fputc('X', f);
+        std::fclose(f);
+    }
+    check(!loaded->load_kv(prefix).ok && loaded->kv_tokens_held() > 0, tag + "a damaged index is refused, the chat is kept");
+    const RunResult l3 = loaded->generate(next);
+    check(l3.ok && l3.generated_text == want.generated_text, tag + "and the session still answers the same");
+    for (const char * ext : {".kv", ".dft", ".aux"}) std::remove((prefix + ext).c_str());
+}
+
 int main(int argc, char ** argv) {
     if (argc < 2) {
         std::printf("usage: %s tiny-jamba.gguf [tiny-llama.gguf]\n", argv[0]);
@@ -181,6 +248,14 @@ int main(int argc, char ** argv) {
     app_path(argv[1]);
     replay_path(argv[1], 4);
     replay_path(argv[1], 0);
+    if (argc > 2) {
+        snapshot_path(argv[2], 4, /*recurrent*/ false, /*spec*/ false);
+        // Guess ahead only on the model that can cut its KV anywhere: the tiny Jamba cannot roll a
+        // rejected draft back (no bounded-rollback state), with or without a snapshot.
+        snapshot_path(argv[2], 4, /*recurrent*/ false, /*spec*/ true);
+    }
+    snapshot_path(argv[1], 4, true, false);
+    snapshot_path(argv[1], 0, true, false);
     if (failures) {
         std::printf("\n%d check(s) FAILED\n", failures);
         return 1;

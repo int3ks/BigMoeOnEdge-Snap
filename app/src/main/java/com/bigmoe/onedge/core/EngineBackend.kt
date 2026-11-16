@@ -26,6 +26,15 @@ interface EngineBackend {
     /** Live, between generations: expert-cache budget of the loaded session in MiB. */
     fun setCacheBudget(mib: Int) {}
 
+    /** KV snapshot on disk under [prefix]; tokens saved, 0 = nothing saved. Only between generations. */
+    fun saveKv(prefix: String): Int = 0
+
+    /** Loads a KV snapshot; tokens loaded, 0 = not loaded. The next turn must replay the chat. */
+    fun loadKv(prefix: String): Int = 0
+
+    /** Tokens of the running chat the context holds (0 = nothing to snapshot). */
+    fun kvTokens(): Int = 0
+
     /** How far a running [load] has got (step * 1000 + permille, see [LoadStep]); 0 = nothing reported. */
     fun loadProgress(): Int = 0
 
@@ -110,6 +119,12 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun setThreads(decode: Int, prefill: Int) = bridge.nativeSetThreads(decode, prefill)
 
     override fun setCacheBudget(mib: Int) = bridge.nativeSetCacheBudget(mib)
+
+    override fun saveKv(prefix: String): Int = try { bridge.nativeSaveKv(encodeUtf8(prefix)) } catch (_: Throwable) { 0 }
+
+    override fun loadKv(prefix: String): Int = try { bridge.nativeLoadKv(encodeUtf8(prefix)) } catch (_: Throwable) { 0 }
+
+    override fun kvTokens(): Int = try { bridge.nativeKvTokens() } catch (_: Throwable) { 0 }
 
     override fun modelInfo(): Map<String, String> =
         decodeUtf8(bridge.nativeModelInfo()).lineSequence()

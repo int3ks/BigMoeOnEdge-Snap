@@ -36,6 +36,11 @@ class MainActivity : ComponentActivity() {
         if (intent.hasExtra(EXTRA_OPEN_SESSION_ID)) recreate()
     }
 
+    override fun onStop() {
+        super.onStop()
+        (application as OnEdgeApplication).container.saveKvSnapshot()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

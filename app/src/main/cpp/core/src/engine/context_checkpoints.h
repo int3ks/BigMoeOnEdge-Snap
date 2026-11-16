@@ -22,6 +22,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 struct common_speculative;
@@ -61,6 +62,12 @@ public:
     void clear() { list_.clear(); }
 
     size_t count() const { return list_.size(); }
+
+    // For the KV snapshot on disk (Session::save_kv / load_kv): append the list to an open file, or
+    // replace the list with one read back (kept within what configure() allows; nothing is kept when
+    // checkpoints are off). Both return false on an I/O error or a malformed record.
+    bool write(std::FILE * f) const;
+    bool read(std::FILE * f);
     size_t bytes() const;
 
 private:

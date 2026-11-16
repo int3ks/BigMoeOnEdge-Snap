@@ -64,7 +64,8 @@ class AppViewModelFactory(
                 modelManager = container.modelManager,
                 engineController = container.engineController,
                 settingsDataStore = container.settingsDataStore,
-                totalRamBytes = { container.totalRamBytes() }
+                totalRamBytes = { container.totalRamBytes() },
+                modelArchive = container.modelArchive
             ) as T
             modelClass.isAssignableFrom(FileViewModel::class.java) -> FileViewModel(
                 workspace = container.workspace,

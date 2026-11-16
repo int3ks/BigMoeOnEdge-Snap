@@ -104,6 +104,18 @@ class EngineNativeBridge {
     /** Expert-cache budget of the loaded session in MiB (evicts down to it now). Only between generations. */
     external fun nativeSetCacheBudget(mib: Int)
 
+    /**
+     * KV snapshot on disk: writes the running chat's context state to files under [prefix] (UTF-8 path without
+     * extension). Returns the tokens it stands for, 0 when nothing was saved. Only between generations.
+     */
+    external fun nativeSaveKv(prefix: ByteArray): Int
+
+    /** Loads a snapshot written by [nativeSaveKv]; the caller then replays the chat. 0 = not loaded (context kept or empty). */
+    external fun nativeLoadKv(prefix: ByteArray): Int
+
+    /** Tokens of the running chat the context holds; 0 while generating or when there is nothing to snapshot. */
+    external fun nativeKvTokens(): Int
+
     /** The CPU cores Android lets this app use (bit i = cpu i); 0 when it cannot be read. */
     external fun nativeAllowedCpus(): Long
 

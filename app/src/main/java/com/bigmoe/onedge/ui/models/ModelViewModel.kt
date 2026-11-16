@@ -62,14 +62,24 @@ data class ModelsUiState(
     /** The folder whose GGUFs are listed automatically (null = off), and how many it holds. */
     val modelFolder: String? = null,
     val modelFolderFiles: Int = 0,
-    val modelFolderReadable: Boolean = false
+    val modelFolderReadable: Boolean = false,
+    /** The external archive ([com.bigmoe.onedge.core.ModelArchive]): its folder, what it holds, where it could be. */
+    val archiveFolder: String? = null,
+    val archiveReachable: Boolean = false,
+    val archiveEntries: List<com.bigmoe.onedge.core.ArchiveEntry> = emptyList(),
+    val archiveSuggestions: List<String> = emptyList(),
+    /** GGUFs waiting in Downloads. */
+    val downloads: List<com.bigmoe.onedge.core.GgufSet> = emptyList(),
+    /** Clearing this model's cache copy needs a second yes: the archive copy could not be checked ([second] says why). */
+    val pendingClearCache: Pair<String, String>? = null
 )
 
 class ModelViewModel(
     private val modelManager: ModelManager,
     private val engineController: EngineController,
     private val settingsDataStore: EngineSettingsDataStore,
-    private val totalRamBytes: () -> Long
+    private val totalRamBytes: () -> Long,
+    private val modelArchive: com.bigmoe.onedge.core.ModelArchive? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ModelsUiState(modelsDir = modelManager.directoryPath()))
@@ -102,11 +112,19 @@ class ModelViewModel(
             val folder = modelManager.modelFolder()
             val folderReadable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { folder?.let { it.isDirectory && it.canRead() } == true }
             val folderFiles = if (folderReadable) modelManager.modelFolderFileCount() else 0
+            val archive = modelArchive
+            val archiveFolder = archive?.folder()
+            val archiveEntries = archive?.list().orEmpty()
+            val archiveReachable = withContext(Dispatchers.IO) { archive?.reachable() == true }
+            val archiveSuggestions = if (archiveFolder == null) archive?.suggestions().orEmpty() else emptyList()
+            val downloads = archive?.listDownloads().orEmpty()
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
                     modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
-                    modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable
+                    modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable,
+                    archiveFolder = archiveFolder?.path, archiveReachable = archiveReachable, archiveEntries = archiveEntries,
+                    archiveSuggestions = archiveSuggestions, downloads = downloads
                 )
             }
         }
@@ -344,6 +362,87 @@ class ModelViewModel(
 
     fun cancelImport() {
         importJob?.cancel()
+    }
+
+    // ---- External archive, cache and Downloads (ModelArchive) ---------------------------------------------
+
+    /** One file job at a time, shown with the same progress bar and Cancel as an import. */
+    private fun archiveJob(name: String, done: String, block: suspend (onProgress: (Long, Long) -> Unit) -> Unit) {
+        if (importJob?.isActive == true) {
+            _uiState.update { it.copy(message = "Another copy is still running.") }
+            return
+        }
+        importJob = viewModelScope.launch {
+            _uiState.update { it.copy(message = null, importProgress = ImportProgress(name, 0, 0)) }
+            try {
+                block { copied, total -> _uiState.update { s -> s.copy(importProgress = ImportProgress(name, copied, total)) } }
+                _uiState.update { it.copy(message = done) }
+            } catch (e: CancellationException) {
+                _uiState.update { it.copy(message = "Cancelled. What was copied so far is kept and continued the next time.") }
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "The copy failed") }
+            } finally {
+                _uiState.update { it.copy(importProgress = null) }
+                refresh()
+            }
+        }
+    }
+
+    fun setArchiveFolder(path: String?) {
+        viewModelScope.launch { modelArchive?.setFolder(path); refresh() }
+    }
+
+    /** Archive -> cache (the app's own storage), where the model can be loaded. */
+    fun fetchFromArchive(name: String) {
+        val archive = modelArchive ?: return
+        archiveJob(com.bigmoe.onedge.core.ModelArchive.displayName(name), "Fetched into the cache.") { onProgress -> archive.fetch(name, onProgress) }
+    }
+
+    /** Deletes the cache copy of an archive model; what is set on its card stays. */
+    fun clearCache(name: String, force: Boolean = false) {
+        val archive = modelArchive ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(pendingClearCache = null) }
+            try {
+                val loaded = engineModelPath()
+                if (loaded != null && File(loaded).name == name && File(loaded).parent == modelManager.directoryPath()) engineController.unload()
+                archive.clearCache(name, force)
+                _uiState.update { it.copy(message = "Removed from the cache. The settings of this model are kept.") }
+            } catch (e: com.bigmoe.onedge.core.ModelArchive.ArchiveNotVerified) {
+                _uiState.update { it.copy(pendingClearCache = name to (e.message ?: "The archive copy could not be checked.")) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not clear the cache") }
+            }
+            refresh()
+        }
+    }
+
+    fun dismissClearCache() { _uiState.update { it.copy(pendingClearCache = null) } }
+
+    fun moveDownloadToModels(set: com.bigmoe.onedge.core.GgufSet) {
+        val archive = modelArchive ?: return
+        archiveJob(set.displayName, "Moved to the model folder.") { onProgress -> archive.moveToModelFolder(set, onProgress) }
+    }
+
+    fun moveDownloadToArchive(set: com.bigmoe.onedge.core.GgufSet) {
+        val archive = modelArchive ?: return
+        archiveJob(set.displayName, "Moved to the archive.") { onProgress -> archive.moveToArchive(set, onProgress) }
+    }
+
+    /** A model of the model folder goes to the archive (it leaves the list; fetch it from there to use it again). */
+    fun moveModelToArchive(path: String) {
+        val archive = modelArchive ?: return
+        archiveJob(File(path).name, "Moved to the archive.") { onProgress ->
+            if (engineModelPath() == path) engineController.unload()
+            archive.moveToArchive(archive.setOf(File(path)), onProgress)
+        }
+    }
+
+    private fun engineModelPath(): String? = when (val s = engineController.state.value) {
+        is EngineState.Ready -> s.info.path
+        is EngineState.Loading -> s.path
+        else -> null
     }
 
     /** Step 1: run the pre-flight checks and ask for confirmation. */
