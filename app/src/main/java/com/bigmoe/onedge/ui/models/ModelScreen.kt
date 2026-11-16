@@ -509,6 +509,14 @@ fun ModelScreen(
                 item(key = "mmproj_header") { SectionHeader("Vision projectors (mmproj)", "Attach one to a model above; it loads together with that model.") }
                 items(projectors, key = { "mmproj:${it.path}" }) { AuxFileCard(it) { viewModel.delete(it.path) } }
             }
+            item(key = "app_storage") {
+                AppStorageCard(
+                    items = ui.appStorage,
+                    scanning = ui.appStorageScanning,
+                    onScan = viewModel::scanAppStorage,
+                    onDelete = viewModel::deleteStorageItem
+                )
+            }
             item(key = "bottom_spacer") { androidx.compose.foundation.layout.Spacer(Modifier.height(24.dp)) }
         }
     }

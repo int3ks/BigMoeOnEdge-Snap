@@ -127,6 +127,11 @@ class AppContainer(private val context: Context) {
         }
     }
 
+    /** What uses the app's own storage (Models page, bottom). */
+    val appStorageReport: com.bigmoe.onedge.core.AppStorageReport by lazy {
+        com.bigmoe.onedge.core.AppStorageReport(context.applicationContext)
+    }
+
     /** The external model archive and the cache it fills (Models page). */
     val modelArchive: com.bigmoe.onedge.core.ModelArchive
         get() {

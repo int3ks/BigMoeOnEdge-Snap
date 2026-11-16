@@ -74,6 +74,9 @@ data class ModelsUiState(
     val archiveSources: List<com.bigmoe.onedge.core.SourceStatus> = emptyList(),
     val archiveEntries: List<com.bigmoe.onedge.core.ArchiveEntry> = emptyList(),
     val archiveSuggestions: List<com.bigmoe.onedge.core.SourceSuggestion> = emptyList(),
+    /** What uses the app's storage; null until "Show" was pressed (it walks every folder). */
+    val appStorage: List<com.bigmoe.onedge.core.StorageItem>? = null,
+    val appStorageScanning: Boolean = false,
     /** A move into the archive waiting for the person to pick the source (more than one is connected). */
     val pendingArchiveMove: PendingArchiveMove? = null,
     /** Free space where model files go (app storage, model folder, archive when connected). */
@@ -91,7 +94,8 @@ class ModelViewModel(
     private val engineController: EngineController,
     private val settingsDataStore: EngineSettingsDataStore,
     private val totalRamBytes: () -> Long,
-    private val modelArchive: com.bigmoe.onedge.core.ModelArchive? = null
+    private val modelArchive: com.bigmoe.onedge.core.ModelArchive? = null,
+    private val storageReport: com.bigmoe.onedge.core.AppStorageReport? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ModelsUiState(modelsDir = modelManager.directoryPath()))
@@ -526,6 +530,26 @@ class ModelViewModel(
         val pending = _uiState.value.pendingArchiveMove ?: return
         _uiState.update { it.copy(pendingArchiveMove = null) }
         moveToArchive(pending.set, source, pending.loadedPath)
+    }
+
+    /** Walks the app's storage and lists what uses it (Models page, bottom). */
+    fun scanAppStorage() {
+        val report = storageReport ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(appStorageScanning = true) }
+            val items = runCatching { report.scan() }.getOrDefault(emptyList())
+            _uiState.update { it.copy(appStorage = items, appStorageScanning = false) }
+        }
+    }
+
+    fun deleteStorageItem(item: com.bigmoe.onedge.core.StorageItem) {
+        val report = storageReport ?: return
+        viewModelScope.launch {
+            runCatching { report.delete(item) }
+                .onFailure { e -> _uiState.update { it.copy(message = e.message ?: "Could not delete") } }
+            refresh()
+            scanAppStorage()
+        }
     }
 
     fun dismissArchiveMove() { _uiState.update { it.copy(pendingArchiveMove = null) } }
