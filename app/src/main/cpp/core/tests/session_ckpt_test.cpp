@@ -236,6 +236,33 @@ static void snapshot_path(const char * path, int ckpts, bool recurrent, bool spe
     for (const char * ext : {".kv", ".dft", ".aux"}) std::remove((prefix + ext).c_str());
 }
 
+// A cancelled load fails as "load cancelled" and leaves nothing behind; the next load works.
+static void cancel_load_path(const char * path) {
+    load_cancel_set(true);
+    bool threw = false;
+    try {
+        auto s = open_session(path, 4, true, false);
+        threw = (s == nullptr);
+    } catch (...) {
+        threw = true;
+    }
+    load_cancel_set(false);
+    check(threw, "cancel: a load requested to stop does not open");
+    auto s = open_session(path, 4, true, false);
+    GenerateRequest r;
+    r.prompt = "Hello there";
+    r.n_predict = 4;
+    r.think = false;
+    r.clear_kv = true;
+    const RunResult a = s->generate(r);
+    check(a.ok, "cancel: the next load works");
+    // A late request after the load must not stop a generation (the abort callback only looks while opening).
+    load_cancel_set(true);
+    const RunResult b = s->generate(r);
+    load_cancel_set(false);
+    check(b.ok && !b.cancelled && b.generated_text == a.generated_text, "cancel: a request after the load does not stop a reply");
+}
+
 int main(int argc, char ** argv) {
     if (argc < 2) {
         std::printf("usage: %s tiny-jamba.gguf [tiny-llama.gguf]\n", argv[0]);
@@ -256,6 +283,7 @@ int main(int argc, char ** argv) {
     }
     snapshot_path(argv[1], 4, true, false);
     snapshot_path(argv[1], 0, true, false);
+    cancel_load_path(argv[1]);
     if (failures) {
         std::printf("\n%d check(s) FAILED\n", failures);
         return 1;

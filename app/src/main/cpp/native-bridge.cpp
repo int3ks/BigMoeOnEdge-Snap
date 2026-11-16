@@ -1033,6 +1033,13 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCacheBudget(JNIEnv *, jo
     if (s && mib > 0) s->set_cache_budget_mb(mib);
 }
 
+// Cancelling a model load (bmoe/load_progress.h): true asks the running nativeLoadModel to give up at its next
+// check; the app sets false before it starts a load. Never blocks - the load runs on another thread.
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeCancelLoad(JNIEnv *, jobject, jboolean requested) {
+    bmoe::load_cancel_set(requested == JNI_TRUE);
+}
+
 // KV snapshot on disk (bmoe::Session::save_kv / load_kv): the running chat's context state as files under
 // `prefix`. Both return the tokens the snapshot stands for, 0 when nothing was saved or loaded (the reason goes to
 // the log). They never run alongside a generation: a busy engine is a 0, not a wait.

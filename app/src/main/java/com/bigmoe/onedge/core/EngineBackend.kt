@@ -26,6 +26,9 @@ interface EngineBackend {
     /** Live, between generations: expert-cache budget of the loaded session in MiB. */
     fun setCacheBudget(mib: Int) {}
 
+    /** Asks a running [load] to give up (it then returns [EngineController.LOAD_CANCELLED]); false clears the request. */
+    fun cancelLoad(requested: Boolean) {}
+
     /** KV snapshot on disk under [prefix]; tokens saved, 0 = nothing saved. Only between generations. */
     fun saveKv(prefix: String): Int = 0
 
@@ -119,6 +122,8 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun setThreads(decode: Int, prefill: Int) = bridge.nativeSetThreads(decode, prefill)
 
     override fun setCacheBudget(mib: Int) = bridge.nativeSetCacheBudget(mib)
+
+    override fun cancelLoad(requested: Boolean) = try { bridge.nativeCancelLoad(requested) } catch (_: Throwable) {}
 
     override fun saveKv(prefix: String): Int = try { bridge.nativeSaveKv(encodeUtf8(prefix)) } catch (_: Throwable) { 0 }
 

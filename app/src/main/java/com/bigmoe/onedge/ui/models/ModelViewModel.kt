@@ -559,6 +559,8 @@ class ModelViewModel(
                 settingsDataStore.updateLastMmprojPath(mmprojPath.orEmpty())
                 val warning = (engineState.value as? EngineState.Ready)?.info?.loadWarning
                 _uiState.update { it.copy(message = warning) }
+            } else if (error == com.bigmoe.onedge.core.EngineController.LOAD_CANCELLED) {
+                _uiState.update { it.copy(message = "Load cancelled.") }
             } else if (mmprojPath != null) {
                 // The projector may be the problem (wrong model, damaged file): try again as a text-only model.
                 val textOnly = engineController.loadModel(path, s.toLoadConfig(), null, draftPath)
@@ -579,6 +581,9 @@ class ModelViewModel(
     fun unload() {
         viewModelScope.launch { engineController.unload() }
     }
+
+    /** Stops the running model load; nothing is loaded afterwards. */
+    fun cancelLoad() = engineController.cancelLoad()
 
     /** Models page → Model folder: a new folder (null/blank = off). */
     fun setModelFolder(path: String?) {

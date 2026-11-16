@@ -104,6 +104,9 @@ class EngineNativeBridge {
     /** Expert-cache budget of the loaded session in MiB (evicts down to it now). Only between generations. */
     external fun nativeSetCacheBudget(mib: Int)
 
+    /** Asks a running [nativeLoadModel] to give up (true), or clears the request before a load (false). Never blocks. */
+    external fun nativeCancelLoad(requested: Boolean)
+
     /**
      * KV snapshot on disk: writes the running chat's context state to files under [prefix] (UTF-8 path without
      * extension). Returns the tokens it stands for, 0 when nothing was saved. Only between generations.

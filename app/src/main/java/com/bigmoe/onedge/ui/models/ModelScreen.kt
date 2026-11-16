@@ -210,7 +210,10 @@ fun ModelScreen(
                 val enginePath = engineModelPath(engine)
                 val listed = enginePath != null && ui.models.any { it.path == enginePath && !ModelManager.isProjectorName(it.name) }
                 if (engine !is EngineState.Unloaded && !listed) {
-                    StatusCard(engine, settings, addOnsChanged, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent)
+                    StatusCard(
+                        engine, settings, addOnsChanged, onUnload = viewModel::unload, onReload = viewModel::reloadCurrent,
+                        onCancelLoad = viewModel::cancelLoad
+                    )
                 }
             }
 
@@ -421,6 +424,7 @@ fun ModelScreen(
                     addOnsChanged = addOnsChanged,
                     onUnload = viewModel::unload,
                     onReload = viewModel::reloadCurrent,
+                    onCancelLoad = viewModel::cancelLoad,
                     onLoad = { viewModel.requestLoad(model.path) },
                     onDelete = { viewModel.delete(model.path) },
                     drafts = ui.drafts,
@@ -579,13 +583,14 @@ private fun StatusCard(
     settings: com.bigmoe.onedge.data.local.datastore.EngineSettings,
     addOnsChanged: Boolean,
     onUnload: () -> Unit,
-    onReload: () -> Unit
+    onReload: () -> Unit,
+    onCancelLoad: () -> Unit = {}
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (engine is EngineState.Ready) Text("Loaded: ${engine.info.name}", style = MaterialTheme.typography.titleMedium)
             if (engine is EngineState.Loading) Text("Loading ${engine.path.substringAfterLast('/')}…")
-            ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload)
+            ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload, onCancelLoad)
         }
     }
 }
@@ -625,7 +630,8 @@ private fun ModelStatusSection(
     settings: com.bigmoe.onedge.data.local.datastore.EngineSettings,
     addOnsChanged: Boolean,
     onUnload: () -> Unit,
-    onReload: () -> Unit
+    onReload: () -> Unit,
+    onCancelLoad: () -> Unit = {}
 ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             when (engine) {
@@ -659,6 +665,11 @@ private fun ModelStatusSection(
                             (if (settings.npuPrefill) ", NPU" else ""),
                         style = MaterialTheme.typography.labelSmall
                     )
+                    // The engine stops at its next check: at once while it reads, after the step for the NPU.
+                    var cancelling by remember(engine.startedAtMs) { mutableStateOf(false) }
+                    OutlinedButton(onClick = { cancelling = true; onCancelLoad() }, enabled = !cancelling) {
+                        Text(if (cancelling) "Cancelling…" else "Cancel load")
+                    }
                 }
                 is EngineState.Failed -> {
                     Text("Load failed", color = MaterialTheme.colorScheme.error)
@@ -724,6 +735,7 @@ private fun ModelRow(
     addOnsChanged: Boolean,
     onUnload: () -> Unit,
     onReload: () -> Unit,
+    onCancelLoad: () -> Unit = {},
     onLoad: () -> Unit,
     onDelete: () -> Unit,
     drafts: List<ModelFile>,
@@ -808,7 +820,7 @@ private fun ModelRow(
             // always be attached: with Guess ahead off it simply waits until MTP is switched on.
             if (expanded) {
                 if (engine != null) {
-                    ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload)
+                    ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload, onCancelLoad)
                     androidx.compose.material3.HorizontalDivider()
                 }
                 GuessAheadRow(spec, settings.spec, loadedSpec, attachedName != null, onSpec)

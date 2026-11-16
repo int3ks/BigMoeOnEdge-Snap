@@ -291,6 +291,7 @@ bool DenseWeights::read_anonymous(size_t align) {
         buf_sz_.push_back((size_t) d.size);
         for (uint64_t done = 0; done < d.size;) {
             const uint64_t n = std::min<uint64_t>(chunk, d.size - done);
+            if (load_cancel_requested()) return false; // the buffers are tracked above and freed with the store
             if (readers_[(size_t) d.file_idx]->read(0, (char *) buf + done, d.file_off + done, n) < 0) return false;
             done += n;
             if (all_bytes) load_progress_set(LoadStep::Weights, (float) ((double) (total + done) / (double) all_bytes));
@@ -372,7 +373,9 @@ void DenseWeights::warm() {
         bool shard_ok = true;
         for (const auto & r : ranges_[s]) {
             for (uint64_t a = r.first; a < r.second && shard_ok;) {
-                const long long got = pio::pread_at(fd, buf, (size_t) std::min<uint64_t>(chunk, r.second - a), a);
+                const long long got = load_cancel_requested()
+                                          ? -1
+                                          : pio::pread_at(fd, buf, (size_t) std::min<uint64_t>(chunk, r.second - a), a);
                 if (got <= 0) {
                     shard_ok = all_ok = false;
                     break;

@@ -113,6 +113,15 @@ class EngineController(
         }
     }
 
+    /**
+     * Cancels the running model load (Models page). The engine gives up at its next check - within a moment while it
+     * reads the model or the weights, after the step for the NPU step - and [loadModel] then returns [LOAD_CANCELLED]
+     * with the state Unloaded. Does nothing when no load runs.
+     */
+    fun cancelLoad() {
+        if (_state.value is EngineState.Loading) backend.cancelLoad(true)
+    }
+
     /** The app is going to the background: keep the running chat for a restart. Skipped while generating. */
     suspend fun saveSnapshotNow() = withContext(ioDispatcher) {
         if (generating.get() || !snapshotsOn()) return@withContext
@@ -227,6 +236,8 @@ class EngineController(
             val kvType = runCatching { kvCacheTypeProvider(modelPath) }.getOrDefault(KvCacheType.F16)
             val config = applyAutoMode(requested, kind).copy(kvCacheType = kvType)
             engineStateKey = null
+            // Cleared before the state says Loading, so a Cancel pressed from now on is never lost.
+            backend.cancelLoad(false)
             _state.value = EngineState.Loading(modelPath, System.currentTimeMillis())
             // The engine reports how far the load has got (step + fraction); poll it while backend.load blocks
             // this thread, on another IO thread. Cancelled below before the state turns Ready or Failed.
@@ -261,7 +272,8 @@ class EngineController(
 
                 // A quantized KV cache the backend cannot run (no flash attention for this model/device) must not brick the
                 // model: load it with the default F16 cache and say so.
-                if (error != null && activeConfig.kvCacheType != KvCacheType.F16) {
+                val cancelled = { error == LOAD_CANCELLED }
+                if (error != null && !cancelled() && activeConfig.kvCacheType != KvCacheType.F16) {
                     val f16 = activeConfig.copy(kvCacheType = KvCacheType.F16)
                     val withF16 = try {
                         backend.load(modelPath, f16, csv, mmprojPath, activeDraftPath, activeLora)
@@ -277,7 +289,7 @@ class EngineController(
 
                 // A LoRA adapter made for another model must not brick the model either: load it without the adapter
                 // and say so, rather than claiming the adapter is active.
-                if (error != null && activeLora != null) {
+                if (error != null && !cancelled() && activeLora != null) {
                     val withoutLora = try {
                         backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, null)
                     } catch (e: Throwable) {
@@ -293,7 +305,7 @@ class EngineController(
 
                 // A broken/mismatched sidecar must not brick the target model. Retry a plain decode and
                 // surface the failure rather than claiming MTP is active.
-                if (error != null && wantsSeparateDraft) {
+                if (error != null && !cancelled() && wantsSeparateDraft) {
                     val draftError = error
                     val plainConfig = activeConfig.copy(spec = SpecSource.OFF)
                     val plainError = try {
@@ -311,6 +323,11 @@ class EngineController(
                     } else {
                         error = "Separate MTP draft failed: $draftError\nFallback without speculation also failed: $plainError"
                     }
+                }
+                if (cancelled()) {
+                    // Not a failure: the engine freed what it had built, nothing is loaded.
+                    _state.value = EngineState.Unloaded
+                    return@withLock LOAD_CANCELLED
                 }
                 if (error != null) {
                     error = ModelFamilies.explainLoadError(error)
@@ -353,6 +370,8 @@ class EngineController(
     }
 
     companion object {
+        /** What [loadModel] returns (and the engine reports) when the user cancelled the load. */
+        const val LOAD_CANCELLED = "load cancelled"
         /** How long an in-app generation waits for a cancelled API generation to unwind. */
         const val PREEMPT_WAIT_MS = 30_000L
         const val API_MAX_QUEUED = 8

@@ -32,4 +32,13 @@ void load_progress_clear();
 // Reader side, any thread.
 LoadProgress load_progress_get();
 
+// Cancelling a load. The UI sets the request; Session::open() polls it between its steps and inside
+// the ones that can take long (llama.cpp's tensor loading, the warm-up decode, the dense weights'
+// reads) and then fails with k_load_cancelled. The NPU step is one call and is not interrupted.
+// The caller clears the request before it starts a load: it is never cleared by the load itself,
+// so a request that arrives while the load is still being prepared is not lost.
+void load_cancel_set(bool requested);
+bool load_cancel_requested();
+inline constexpr const char * k_load_cancelled = "load cancelled";
+
 } // namespace bmoe

@@ -416,6 +416,9 @@ struct Session::Impl {
     mtmd::context_ptr mtmd;
 #endif
     bool kv_has_media = false;
+    // True until Session::open() has finished: only then may a cancelled load stop a decode (the
+    // abort callback), so a late cancel request can never stop a generation.
+    std::atomic<bool> opening{true};
     std::unique_ptr<RouterHook> hook; // heap: its address is baked into cparams.cb_eval_user_data
     ExpertStreamSource source;
 
@@ -866,10 +869,13 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
                                        IRouteTraceSink * route_trace,
                                        IComputeTraceSink * compute_trace,
                                        IIoTraceSink * io_trace) {
+    // A load the user cancelled (bmoe/load_progress.h) fails wherever it notices, and whatever fails
+    // while the request stands is reported as the cancel it is.
     auto fail = [&](std::string msg) -> std::unique_ptr<Session> {
-        error = std::move(msg);
+        error = load_cancel_requested() ? std::string(k_load_cancelled) : std::move(msg);
         return nullptr;
     };
+    if (load_cancel_requested()) return fail("");
 
     // Create the session first so its Impl destructor owns backend teardown from this point
     // on: any failure below returns nullptr, destroying `self`, which frees the backend once.
@@ -965,7 +971,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     // llama.cpp's own loading progress (tensor bytes), for the app's progress bar (bmoe/load_progress.h).
     mparams.progress_callback = [](float p, void *) {
         load_progress_set(LoadStep::Model, p);
-        return true;
+        return !load_cancel_requested(); // false makes llama.cpp give the load up
     };
     llama_model * model = llama_model_load_from_file(cfg.model_path.c_str(), mparams);
     if (!model) return fail("failed to load model: " + cfg.model_path);
@@ -1155,7 +1161,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
             if (im.prefill) draft_mparams.devices = cpu_only_devices;
             draft_mparams.progress_callback = [](float p, void *) {
                 load_progress_set(LoadStep::Draft, p);
-                return true;
+                return !load_cancel_requested();
             };
             draft_model = llama_model_load_from_file(cfg.spec.draft_model_path.c_str(), draft_mparams);
             if (!draft_model) return fail("failed to load separate MTP draft GGUF: " + cfg.spec.draft_model_path);
@@ -1208,7 +1214,10 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         ctx,
         [](void * ud) -> bool {
             auto * p = static_cast<Impl *>(ud);
-            return p->cancelled() || p->source.fatal();
+            // While the session is being opened, a cancelled load also stops the warm-up decode (which
+            // pages the weights in through the mapping - minutes from slow storage).
+            return p->cancelled() || p->source.fatal() ||
+                   (p->opening.load(std::memory_order_relaxed) && load_cancel_requested());
         },
         &im);
 
@@ -1241,6 +1250,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         im.draft_buf.reserve((size_t) cfg.spec.draft_max);
     }
 
+    if (load_cancel_requested()) return fail("");
     if (cfg.moe.enabled) {
         load_progress_set(LoadStep::Experts, 0.0f);
         // Capture warm-up: one mmap-resident decode so the eval-callback can harvest the expert
@@ -1368,6 +1378,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         }
 
         if (im.prefill) im.prefill->keep_stream_layout(layers, offs.shard_paths);
+        if (load_cancel_requested()) return fail("");
         load_progress_set(LoadStep::Weights, 0.0f); // the dense weights' reads report by bytes from here
         if (!im.source.init(offs.shard_paths, n_expert, std::move(layers), cfg.moe))
             return fail("expert stream source init failed");
@@ -1462,6 +1473,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     im.checkpoints.configure(cfg.ctx_checkpoints, cfg.checkpoint_min_step, llama_model_n_swa(model),
                              (size_t) cfg.checkpoint_budget_mib << 20);
 
+    if (load_cancel_requested()) return fail("");
     if (im.prefill) {
         load_progress_set(LoadStep::Npu, 0.0f);
         std::string perr;
@@ -1474,6 +1486,7 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         if (!opened_dev) return fail(perr);
         load_progress_set(LoadStep::Npu, 1.0f);
     }
+    if (load_cancel_requested()) return fail(""); // also what a cancel during the NPU step comes to
     load_progress_set(LoadStep::Finish, 0.0f);
 
     // Decode traces. Outside the streaming block on purpose: the compute trace measures the graph,
@@ -1613,6 +1626,8 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     }
 
     im.load_seconds = secs(t_load0, clock_t_::now());
+    if (load_cancel_requested()) return fail("");
+    im.opening.store(false, std::memory_order_relaxed); // from here on only cancel() stops a decode
     load_progress_set(LoadStep::Finish, 1.0f);
     return self;
 }
