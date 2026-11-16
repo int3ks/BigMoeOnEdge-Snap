@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -18,14 +20,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.ArchiveEntry
+import com.bigmoe.onedge.core.FetchTarget
 import com.bigmoe.onedge.core.GgufSet
 import com.bigmoe.onedge.core.ModelManager
 
 /**
- * The external archive, the cache it fills and what waits in Downloads (core/ModelArchive.kt): models are fetched from
- * the archive into the app's storage to be used and cleared from there again; downloads go to the model folder or to
- * the archive. A model in the cache is an ordinary card in the list below, which is where "Clear from cache" is.
+ * The external archive and what waits in Downloads (core/ModelArchive.kt): an archive model is fetched into the app's
+ * storage or the model folder (the chips choose) or used where it lies; a fetched copy is cleared again without losing
+ * its settings; downloads go to the model folder or to the archive. A local copy is an ordinary card in the list below,
+ * with "Clear copy" on it too.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModelArchiveCard(
     ui: ModelsUiState,
@@ -34,6 +39,8 @@ internal fun ModelArchiveCard(
     onTurnOff: () -> Unit,
     onRefresh: () -> Unit,
     onFetch: (String) -> Unit,
+    onFetchTarget: (FetchTarget) -> Unit,
+    onUseInPlace: (String) -> Unit,
     onClearCache: (String) -> Unit,
     onCancel: () -> Unit,
     onDownloadToModels: (GgufSet) -> Unit,
@@ -69,7 +76,8 @@ internal fun ModelArchiveCard(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        "${ModelManager.formatBytes(progress.copiedBytes)} / ${ModelManager.formatBytes(progress.totalBytes)}",
+                        "${ModelManager.formatBytes(progress.copiedBytes)} / ${ModelManager.formatBytes(progress.totalBytes)}" +
+                            if (progress.bytesPerSecond > 0) " · ${ModelManager.formatBytes(progress.bytesPerSecond)}/s" else "",
                         style = MaterialTheme.typography.labelSmall
                     )
                 } else {
@@ -81,7 +89,21 @@ internal fun ModelArchiveCard(
             if (ui.archiveEntries.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Text("In the archive", style = MaterialTheme.typography.titleSmall)
-                ui.archiveEntries.forEach { entry -> ArchiveRow(entry, idle, onFetch, onClearCache) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Fetch into", style = MaterialTheme.typography.labelMedium)
+                    FilterChip(
+                        selected = ui.archiveFetchTarget == FetchTarget.APP,
+                        onClick = { onFetchTarget(FetchTarget.APP) },
+                        label = { Text("App storage") }
+                    )
+                    FilterChip(
+                        selected = ui.archiveFetchTarget == FetchTarget.MODEL_FOLDER,
+                        onClick = { onFetchTarget(FetchTarget.MODEL_FOLDER) },
+                        enabled = ui.modelFolder != null,
+                        label = { Text("Model folder") }
+                    )
+                }
+                ui.archiveEntries.forEach { entry -> ArchiveRow(entry, idle, onFetch, onUseInPlace, onClearCache) }
             }
 
             if (ui.downloads.isNotEmpty()) {
@@ -115,28 +137,38 @@ internal fun ModelArchiveCard(
 }
 
 @Composable
-private fun ArchiveRow(entry: ArchiveEntry, idle: Boolean, onFetch: (String) -> Unit, onClearCache: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(entry.displayName, style = MaterialTheme.typography.bodyMedium)
-            val state = when {
-                entry.cached -> "in the cache"
-                !entry.complete -> "incomplete in the archive"
-                entry.partial -> "fetch interrupted, continues where it stopped"
-                !entry.reachable -> "archive not connected"
-                else -> "only in the archive"
+private fun ArchiveRow(
+    entry: ArchiveEntry,
+    idle: Boolean,
+    onFetch: (String) -> Unit,
+    onUseInPlace: (String) -> Unit,
+    onClearCache: (String) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(entry.displayName, style = MaterialTheme.typography.bodyMedium)
+        val state = when {
+            entry.copyIn == FetchTarget.APP -> "copy in the app storage"
+            entry.copyIn == FetchTarget.MODEL_FOLDER -> "copy in the model folder"
+            !entry.complete -> "incomplete in the archive"
+            entry.partial -> "fetch interrupted, continues where it stopped"
+            !entry.reachable -> "archive not connected"
+            else -> "only in the archive"
+        } + if (entry.inPlace) " · used in place" else ""
+        Text(
+            "${ModelManager.formatBytes(entry.sizeBytes)} · $state",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (entry.cached) {
+                TextButton(onClick = { onClearCache(entry.name) }, enabled = idle) { Text("Clear copy") }
+            } else {
+                Button(onClick = { onFetch(entry.name) }, enabled = idle && entry.reachable && entry.complete) {
+                    Text(if (entry.partial) "Continue" else "Fetch")
+                }
             }
-            Text(
-                "${ModelManager.formatBytes(entry.sizeBytes)} · $state",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (entry.cached) {
-            TextButton(onClick = { onClearCache(entry.name) }, enabled = idle) { Text("Clear from cache") }
-        } else {
-            Button(onClick = { onFetch(entry.name) }, enabled = idle && entry.reachable && entry.complete) {
-                Text(if (entry.partial) "Continue" else "Fetch")
+            if (!entry.inPlace) {
+                TextButton(onClick = { onUseInPlace(entry.name) }, enabled = entry.reachable && entry.complete) { Text("Use in place") }
             }
         }
     }

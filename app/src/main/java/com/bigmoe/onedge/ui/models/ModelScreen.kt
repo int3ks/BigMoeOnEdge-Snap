@@ -397,6 +397,8 @@ fun ModelScreen(
                     onTurnOff = { viewModel.setArchiveFolder(null) },
                     onRefresh = viewModel::refresh,
                     onFetch = viewModel::fetchFromArchive,
+                    onFetchTarget = viewModel::setFetchTarget,
+                    onUseInPlace = viewModel::useArchiveModelInPlace,
                     onClearCache = { viewModel.clearCache(it) },
                     onCancel = viewModel::cancelImport,
                     onDownloadToModels = viewModel::moveDownloadToModels,
@@ -468,13 +470,13 @@ fun ModelScreen(
                         )
                     },
                     archiveAction = {
-                        // A cache copy of an archive model can go without losing its settings; a model of the model
-                        // folder can move out to the archive.
-                        val inCache = model.inAppStorage && ui.archiveEntries.any { it.name == model.name }
+                        // A local copy of an archive model (app storage or model folder) can go without losing its
+                        // settings; any other model of the model folder can move out to the archive.
                         val inModelFolder = !model.inAppStorage && ui.modelFolder?.let { model.path.startsWith("$it/") } == true
-                        if (inCache) {
+                        val isCopy = (model.inAppStorage || inModelFolder) && ui.archiveEntries.any { it.name == model.name && it.cached }
+                        if (isCopy) {
                             OutlinedButton(onClick = { viewModel.clearCache(model.name) }, enabled = ui.importProgress == null) {
-                                Text("Clear from cache (settings are kept)")
+                                Text("Clear copy (settings are kept)")
                             }
                         } else if (inModelFolder && ui.archiveFolder != null) {
                             TextButton(onClick = { viewModel.moveModelToArchive(model.path) }, enabled = ui.importProgress == null) {
@@ -505,7 +507,7 @@ fun ModelScreen(
     ui.pendingClearCache?.let { (name, reason) ->
         AlertDialog(
             onDismissRequest = viewModel::dismissClearCache,
-            title = { Text("Clear from cache?") },
+            title = { Text("Clear the local copy?") },
             text = { Text("$reason\n\nIf you delete the copy in the app anyway and the archive does not have this model, it is gone.") },
             confirmButton = { TextButton(onClick = { viewModel.clearCache(name, force = true) }) { Text("Delete anyway") } },
             dismissButton = { TextButton(onClick = viewModel::dismissClearCache) { Text("Keep") } }

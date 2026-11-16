@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.io.File
 
-data class ImportProgress(val name: String, val copiedBytes: Long, val totalBytes: Long)
+data class ImportProgress(val name: String, val copiedBytes: Long, val totalBytes: Long, val bytesPerSecond: Long = 0)
 
 /** A load the person still has to confirm because the pre-flight checks found something ([advice]). */
 data class PendingLoad(
@@ -68,6 +68,8 @@ data class ModelsUiState(
     val archiveReachable: Boolean = false,
     val archiveEntries: List<com.bigmoe.onedge.core.ArchiveEntry> = emptyList(),
     val archiveSuggestions: List<String> = emptyList(),
+    /** Where "Fetch" copies to: the app's storage or the model folder. */
+    val archiveFetchTarget: com.bigmoe.onedge.core.FetchTarget = com.bigmoe.onedge.core.FetchTarget.APP,
     /** GGUFs waiting in Downloads. */
     val downloads: List<com.bigmoe.onedge.core.GgufSet> = emptyList(),
     /** Clearing this model's cache copy needs a second yes: the archive copy could not be checked ([second] says why). */
@@ -118,13 +120,14 @@ class ModelViewModel(
             val archiveReachable = withContext(Dispatchers.IO) { archive?.reachable() == true }
             val archiveSuggestions = if (archiveFolder == null) archive?.suggestions().orEmpty() else emptyList()
             val downloads = archive?.listDownloads().orEmpty()
+            val fetchTarget = archive?.fetchTarget() ?: com.bigmoe.onedge.core.FetchTarget.APP
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
                     modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable,
                     archiveFolder = archiveFolder?.path, archiveReachable = archiveReachable, archiveEntries = archiveEntries,
-                    archiveSuggestions = archiveSuggestions, downloads = downloads
+                    archiveSuggestions = archiveSuggestions, downloads = downloads, archiveFetchTarget = fetchTarget
                 )
             }
         }
@@ -374,9 +377,36 @@ class ModelViewModel(
         }
         importJob = viewModelScope.launch {
             _uiState.update { it.copy(message = null, importProgress = ImportProgress(name, 0, 0)) }
+            // Speed: the current rate over the last second for the progress line, the average for the closing message.
+            // What was already there when the job began (a continued fetch) does not count as copied.
+            val startedAt = System.nanoTime()
+            var first = -1L
+            var last = 0L
+            var sampleAt = startedAt
+            var sampleBytes = 0L
+            var rate = 0L
             try {
-                block { copied, total -> _uiState.update { s -> s.copy(importProgress = ImportProgress(name, copied, total)) } }
-                _uiState.update { it.copy(message = done) }
+                block { copied, total ->
+                    val now = System.nanoTime()
+                    if (first < 0) {
+                        first = copied
+                        sampleAt = now
+                        sampleBytes = copied
+                    } else if (now - sampleAt >= 1_000_000_000L) {
+                        rate = ((copied - sampleBytes).toDouble() * 1e9 / (now - sampleAt)).toLong()
+                        sampleAt = now
+                        sampleBytes = copied
+                    }
+                    last = copied
+                    _uiState.update { s -> s.copy(importProgress = ImportProgress(name, copied, total, rate)) }
+                }
+                val seconds = (System.nanoTime() - startedAt) / 1e9
+                val moved = if (first < 0) 0L else last - first
+                val stats = if (moved > 0 && seconds >= 1.0) {
+                    " ${ModelManager.formatBytes(moved)} in ${(seconds / 60).toInt()}:${(seconds % 60).toInt().toString().padStart(2, '0')} min" +
+                        " (${ModelManager.formatBytes((moved / seconds).toLong())}/s)."
+                } else ""
+                _uiState.update { it.copy(message = done + stats) }
             } catch (e: CancellationException) {
                 _uiState.update { it.copy(message = "Cancelled. What was copied so far is kept and continued the next time.") }
                 throw e
@@ -393,10 +423,28 @@ class ModelViewModel(
         viewModelScope.launch { modelArchive?.setFolder(path); refresh() }
     }
 
-    /** Archive -> cache (the app's own storage), where the model can be loaded. */
+    /** Archive -> a local copy (the app's storage or the model folder, [setFetchTarget]), where the model can be loaded. */
     fun fetchFromArchive(name: String) {
         val archive = modelArchive ?: return
-        archiveJob(com.bigmoe.onedge.core.ModelArchive.displayName(name), "Fetched into the cache.") { onProgress -> archive.fetch(name, onProgress) }
+        archiveJob(com.bigmoe.onedge.core.ModelArchive.displayName(name), "Fetched.") { onProgress -> archive.fetch(name, onProgress) }
+    }
+
+    fun setFetchTarget(target: com.bigmoe.onedge.core.FetchTarget) {
+        viewModelScope.launch { modelArchive?.setFetchTarget(target); refresh() }
+    }
+
+    /** Uses an archive model where it lies, without a copy: it becomes a card like any file registered in place. */
+    fun useArchiveModelInPlace(name: String) {
+        val archive = modelArchive ?: return
+        viewModelScope.launch {
+            try {
+                archive.useInPlace(name)
+                _uiState.update { it.copy(message = "Added to the models below; it is read from the archive drive.") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = e.message ?: "Could not use the file in place") }
+            }
+            refresh()
+        }
     }
 
     /** Deletes the cache copy of an archive model; what is set on its card stays. */
@@ -406,9 +454,11 @@ class ModelViewModel(
             _uiState.update { it.copy(pendingClearCache = null) }
             try {
                 val loaded = engineModelPath()
-                if (loaded != null && File(loaded).name == name && File(loaded).parent == modelManager.directoryPath()) engineController.unload()
+                // The loaded model is a local copy of this one (not the archive file used in place): let go of it first.
+                val archiveDir = archive.folder()?.path
+                if (loaded != null && File(loaded).name == name && (archiveDir == null || !loaded.startsWith("$archiveDir/"))) engineController.unload()
                 archive.clearCache(name, force)
-                _uiState.update { it.copy(message = "Removed from the cache. The settings of this model are kept.") }
+                _uiState.update { it.copy(message = "Local copy removed. The settings of this model are kept.") }
             } catch (e: com.bigmoe.onedge.core.ModelArchive.ArchiveNotVerified) {
                 _uiState.update { it.copy(pendingClearCache = name to (e.message ?: "The archive copy could not be checked.")) }
             } catch (e: Exception) {

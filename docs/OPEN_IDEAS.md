@@ -22,5 +22,7 @@ Moved out of CLAUDE.md to save tokens (state 2026-11-11).
 * llama.cpp 0911 (Helldez `bmoe/expert-ready-hook-0911`, ac30987) was tried in v0.6.77/0.6.78 and reverted: with the NPU prefill the load hung (Hexagon host buffer now on by default, `opt_hostbuf`), and with `GGML_HEXAGON_HOSTBUF=0` the replies were garbage. Suspects: 0911's Hexagon `set_tensor_n` / runtime repacking (#31744) against `PrefillDevice`'s binding swap and `set_tensor` writes. Its `htp-kparams` solves matmuls for `ggml_hexagon_tensor_will_tile`, which would make the local htp-kparams fix unnecessary. Upstream engine 0.42.0 (Helldez/BigMoeOnEdge `bb20578`) reviewed: nothing portable.
 * KV snapshots: confirm on the device with MTP (draft context file) and with the NPU prefill (KV in the Hexagon host
   buffer); no setting for the 6 GB budget yet; a deleted chat's snapshot goes only when the budget pushes it out.
-* Model archive: untested on the device (USB volume path on the China ROM, exFAT, copy speed); attachments (drafter,
-  mmproj) are separate archive entries and are fetched one by one.
+* Model archive: the first fetch on the device (v0.6.80) was far too slow, cause open (drive, USB link, FUSE layer or
+  the copy loop: 8 MiB blocks, RandomAccessFile -> FileOutputStream). The progress line shows MB/s since then; compare
+  fetch into app storage vs model folder vs "Use in place" before changing the copy code. Attachments (drafter, mmproj)
+  are separate archive entries and are fetched one by one.

@@ -109,6 +109,10 @@ class ModelManager(
     @Volatile
     var keepLinksFor: (path: String) -> Boolean = { false }
 
+    /** Whether [path] is a file used in place ([registerExistingPath]). */
+    fun isRegisteredPath(path: String): Boolean =
+        runCatching { File(path).canonicalPath }.getOrDefault(path) in registeredPaths()
+
     /** The per-model options of [modelPath] (KV type, guess ahead, memory, ...) by option name, to travel with the file. */
     suspend fun exportOptions(modelPath: String): Map<String, String> = withContext(io) {
         val prefix = encodePath(canonicalPath(modelPath))

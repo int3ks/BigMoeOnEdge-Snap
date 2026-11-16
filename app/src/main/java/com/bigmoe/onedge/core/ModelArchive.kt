@@ -30,14 +30,20 @@ data class ArchiveEntry(
     val shardCount: Int,
     /** The archive folder can be read right now; otherwise the entry comes from the remembered index. */
     val reachable: Boolean,
-    /** All of its files are in the app's cache. */
-    val cached: Boolean,
+    /** Where a complete local copy is: the app's storage, the model folder, or nowhere (null). */
+    val copyIn: FetchTarget?,
+    /** Its file in the archive is registered to be used in place, without a copy. */
+    val inPlace: Boolean,
     /** A fetch was interrupted and can be continued. */
     val partial: Boolean,
     val complete: Boolean
 ) {
     val displayName: String get() = ModelArchive.displayName(name)
+    val cached: Boolean get() = copyIn != null
 }
+
+/** Where "Fetch" puts an archive model. */
+enum class FetchTarget { APP, MODEL_FOLDER }
 
 /**
  * Three places for model files, each with one job:
@@ -50,6 +56,9 @@ data class ArchiveEntry(
  * The archive is the original: fetching copies, clearing the cache deletes only the copy. What is set on a model's
  * card is stored by path, so it survives a clear and a later fetch by itself; a copy of it travels beside the model
  * in the archive (`<first file>.options.properties`) for the way between the three places and for a reinstall.
+ *
+ * Fetching copies into the app's storage or, by choice ([fetchTarget]), into the model folder; an archive model can
+ * also be used where it lies ([useInPlace]) - which of the three is quickest depends on the drive, so all are offered.
  *
  * Everything here uses plain file paths: the app holds the all-files access the model folder already needs.
  */
@@ -72,9 +81,28 @@ class ModelArchive(
         // Attachments of a model that is only in the archive right now stay ([ModelManager.keepLinksFor]).
         modelManager.keepLinksFor = { path ->
             val f = File(path)
-            f.parentFile?.let { runCatching { it.canonicalPath == cacheDir.canonicalPath }.getOrDefault(false) } == true &&
-                firstShardName(f.name) in indexNames
+            firstShardName(f.name) in indexNames && f.parentFile?.let { parent ->
+                runCatching { localDirs().any { it.canonicalPath == parent.canonicalPath } }.getOrDefault(false)
+            } == true
         }
+    }
+
+    /** Where a local copy of an archive model can be: the app's storage first, then the model folder. */
+    private fun localDirs(): List<File> = listOfNotNull(cacheDir, modelManager.modelFolder())
+
+    private fun dirOf(target: FetchTarget): File? = when (target) {
+        FetchTarget.APP -> cacheDir
+        FetchTarget.MODEL_FOLDER -> modelManager.modelFolder()
+    }
+
+    private val targetFile: File get() = File(cacheDir, ".archive-fetch-target")
+
+    fun fetchTarget(): FetchTarget =
+        if (runCatching { targetFile.readText().trim() }.getOrDefault("") == "folder") FetchTarget.MODEL_FOLDER else FetchTarget.APP
+
+    suspend fun setFetchTarget(target: FetchTarget) = withContext(io) {
+        cacheDir.mkdirs()
+        targetFile.writeText(if (target == FetchTarget.MODEL_FOLDER) "folder" else "app")
     }
 
     // ---------------------------------------------------------------------------------- the archive folder
@@ -109,8 +137,11 @@ class ModelArchive(
             sets.map { set ->
                 ArchiveEntry(
                     name = set.name, sizeBytes = set.sizeBytes, shardCount = set.shardCount, reachable = true,
-                    cached = set.complete && set.files.all { File(cacheDir, it.name).let { c -> c.isFile && c.length() == it.length() } },
-                    partial = set.files.any { partFile(File(cacheDir, it.name)).isFile },
+                    copyIn = if (!set.complete) null else FetchTarget.values().firstOrNull { target ->
+                        dirOf(target)?.let { d -> set.files.all { File(d, it.name).let { c -> c.isFile && c.length() == it.length() } } } == true
+                    },
+                    inPlace = set.files.firstOrNull()?.parentFile?.let { modelManager.isRegisteredPath(File(it, set.name).path) } == true,
+                    partial = localDirs().any { d -> set.files.any { partFile(File(d, it.name)).isFile } },
                     complete = set.complete
                 )
             }
@@ -119,8 +150,9 @@ class ModelArchive(
                 val names = shardNames(name, meta.second)
                 ArchiveEntry(
                     name = name, sizeBytes = meta.first, shardCount = meta.second, reachable = false,
-                    cached = names.all { File(cacheDir, it).isFile },
-                    partial = names.any { partFile(File(cacheDir, it)).isFile },
+                    copyIn = FetchTarget.values().firstOrNull { target -> dirOf(target)?.let { d -> names.all { File(d, it).isFile } } == true },
+                    inPlace = false,
+                    partial = localDirs().any { d -> names.any { partFile(File(d, it)).isFile } },
                     complete = true
                 )
             }
@@ -148,28 +180,31 @@ class ModelArchive(
     // ---------------------------------------------------------------------------------- archive -> cache
 
     /**
-     * Copies an archive model into the cache. Files that are already there are skipped and an interrupted copy is
-     * continued, so a cancelled fetch (or a pulled cable) loses nothing. Returns the cached first file.
+     * Copies an archive model to where [fetchTarget] says (the app's storage or the model folder). Files that are
+     * already there are skipped and an interrupted copy is continued, so a cancelled fetch (or a pulled cable) loses
+     * nothing. Returns the local first file.
      */
     suspend fun fetch(name: String, onProgress: (copied: Long, total: Long) -> Unit): File = withContext(io) {
         val dir = folder()?.takeIf { it.isDirectory && it.canRead() } ?: throw IOException("The archive folder is not connected.")
         val set = scan(dir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name } ?: throw IOException("$name is no longer in the archive.")
         if (!set.complete) throw IOException("The archive holds only ${set.files.size} of ${set.shardCount} shards of ${set.displayName}.")
-        cacheDir.mkdirs()
-        val todo = set.files.filterNot { src -> File(cacheDir, src.name).let { it.isFile && it.length() == src.length() } }
+        val target = dirOf(fetchTarget()) ?: throw IOException("The model folder is switched off; fetch into the app storage or turn it on.")
+        if (!target.isDirectory && !target.mkdirs()) throw IOException("Cannot create ${target.path}.")
+        val todo = set.files.filterNot { src -> File(target, src.name).let { it.isFile && it.length() == src.length() } }
         val missing = todo.sumOf { src ->
-            val started = partFile(File(cacheDir, src.name)).let { if (it.isFile) it.length() else 0L }
+            val started = partFile(File(target, src.name)).let { if (it.isFile) it.length() else 0L }
             src.length() - started.coerceAtMost(src.length())
         }
-        if (cacheDir.usableSpace < missing + SPACE_MARGIN) {
-            throw IOException("Not enough free storage: ${ModelManager.formatBytes(missing)} needed, ${ModelManager.formatBytes(cacheDir.usableSpace)} free.")
+        if (target.usableSpace < missing + SPACE_MARGIN) {
+            throw IOException("Not enough free storage: ${ModelManager.formatBytes(missing)} needed, ${ModelManager.formatBytes(target.usableSpace)} free.")
         }
-        var copied = set.sizeBytes - todo.sumOf { it.length() }
+        // Starts at what is there already, whole files and the part of an interrupted one.
+        var copied = set.sizeBytes - missing
         onProgress(copied, set.sizeBytes)
         for (src in todo) {
-            copyFile(src, File(cacheDir, src.name), resume = true) { n -> copied += n; onProgress(copied, set.sizeBytes) }
+            copyFile(src, File(target, src.name), resume = true) { n -> copied += n; onProgress(copied, set.sizeBytes) }
         }
-        val first = File(cacheDir, set.name)
+        val first = File(target, set.name)
         // What was set on the card comes back with the model; what is set here already wins.
         modelManager.importOptions(first.path, readSidecar(dir, set.name), overwrite = false)
         first
@@ -181,21 +216,41 @@ class ModelArchive(
      */
     suspend fun clearCache(name: String, force: Boolean = false) = withContext(io) {
         val count = SHARD.find(name)?.groupValues?.get(2)?.toIntOrNull() ?: 1
-        val cached = shardNames(name, count).map { File(cacheDir, it) }
+        val locals = localDirs()
+        val cached = locals.flatMap { d -> shardNames(name, count).map { File(d, it) } }
         if (!force) {
             val dir = folder()?.takeIf { it.isDirectory && it.canRead() } ?: throw ArchiveNotVerified("The archive is not connected, so the copy there cannot be checked.")
             val set = scan(dir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name }
                 ?: throw ArchiveNotVerified("${displayName(name)} is not in the archive (any more).")
-            val same = set.complete && set.files.all { a -> File(cacheDir, a.name).let { !it.exists() || it.length() == a.length() } }
-            if (!same) throw ArchiveNotVerified("The files in the archive differ from the cached ones.")
+            val same = set.complete && locals.all { d -> set.files.all { a -> File(d, a.name).let { !it.exists() || it.length() == a.length() } } }
+            if (!same) throw ArchiveNotVerified("The files in the archive differ from the local ones.")
         }
         folder()?.takeIf { it.isDirectory && it.canWrite() }?.let { dir ->
-            runCatching { writeSidecar(dir, name, modelManager.exportOptions(File(cacheDir, name).path)) }
+            runCatching {
+                // What is set on the copy that exists (the app's storage first) goes back beside the archive model.
+                val options = locals.filter { File(it, name).isFile }.map { modelManager.exportOptions(File(it, name).path) }
+                    .firstOrNull { it.isNotEmpty() }.orEmpty()
+                writeSidecar(dir, name, options)
+            }
         }
         cached.forEach { f ->
             if (f.exists() && !f.delete()) throw IOException("Could not delete ${f.name}.")
             partFile(f).delete()
         }
+    }
+
+    /**
+     * Uses an archive model where it lies: its first file is registered like any file used in place, no copy. The
+     * card's "delete" then only removes that registration. Slow storage shows in the token rate, not here.
+     */
+    suspend fun useInPlace(name: String): ModelFile = withContext(io) {
+        val dir = folder()?.takeIf { it.isDirectory && it.canRead() } ?: throw IOException("The archive folder is not connected.")
+        val set = scan(dir, ARCHIVE_SCAN_DEPTH).firstOrNull { it.name == name } ?: throw IOException("$name is no longer in the archive.")
+        if (!set.complete) throw IOException("The archive holds only ${set.files.size} of ${set.shardCount} shards of ${set.displayName}.")
+        val first = File(set.files.first().parentFile, set.name)
+        val model = modelManager.registerExistingPath(first.path)
+        modelManager.importOptions(model.path, readSidecar(dir, set.name), overwrite = false)
+        model
     }
 
     // ---------------------------------------------------------------------------------- moving files in
@@ -254,11 +309,11 @@ class ModelArchive(
 
     // ---------------------------------------------------------------------------------- internals
 
+    /** [onBytes] counts what this call copies; the part a resumed copy finds is the caller's to account for. */
     private suspend fun copyFile(src: File, dst: File, resume: Boolean, onBytes: (Long) -> Unit) {
         val part = partFile(dst)
         var done = if (resume && part.isFile && part.length() <= src.length()) part.length() else 0L
         if (done == 0L) part.delete()
-        if (done > 0) onBytes(done)
         val target = dst.parentFile ?: throw IOException("No folder for ${dst.name}.")
         RandomAccessFile(src, "r").use { input ->
             input.seek(done)
