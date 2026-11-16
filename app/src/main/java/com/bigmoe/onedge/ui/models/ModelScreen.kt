@@ -417,6 +417,7 @@ fun ModelScreen(
                 val loadedInfo = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }
                 val addOnsChanged = loadedInfo?.let { info -> addOnsChangedFor(info, ui, settings) } == true
                 ModelRow(
+                    place = modelPlace(model, ui),
                     model = model,
                     isLoaded = loadedInfo != null,
                     busy = engine is EngineState.Loading,
@@ -612,6 +613,19 @@ private fun addOnsChangedFor(info: com.bigmoe.onedge.core.ModelInfo, ui: ModelsU
         (spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[p] != req.draftPath)
 }
 
+/** The place a model's file is in, for its card: one of the three places of the Models page, or another folder. */
+private fun modelPlace(model: ModelFile, ui: ModelsUiState): String {
+    fun under(dir: String?) = dir != null && model.path.startsWith(dir.trimEnd('/') + "/")
+    val copies = ui.models.count { it.name == model.name }
+    val place = when {
+        model.inAppStorage -> "App storage"
+        under(ui.modelFolder) -> "Model folder"
+        under(ui.archiveFolder) -> "Archive, used in place"
+        else -> "Other folder, used in place"
+    }
+    return if (copies > 1) "$place • listed $copies times" else place
+}
+
 /** Which model the engine state is about (loading, loaded or failed), or null. */
 private fun engineModelPath(engine: EngineState): String? = when (engine) {
     is EngineState.Loading -> engine.path
@@ -738,6 +752,8 @@ private fun ModelRow(
     onCancelLoad: () -> Unit = {},
     onLoad: () -> Unit,
     onDelete: () -> Unit,
+    /** Which of the places the file is in (app storage, model folder, archive, another folder). */
+    place: String = if (model.inAppStorage) "App storage" else "Registered path (no copy)",
     drafts: List<ModelFile>,
     attachedDraftPath: String?,
     onAttachDraft: (String?) -> Unit,
@@ -785,7 +801,14 @@ private fun ModelRow(
                         )
                         Text(model.displayName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
                     }
-                    Text("${ModelManager.formatBytes(model.sizeBytes)} • " + if (model.inAppStorage) "App storage" else "Registered path (no copy)", style = MaterialTheme.typography.labelSmall)
+                    Text("${ModelManager.formatBytes(model.sizeBytes)} • $place", style = MaterialTheme.typography.labelSmall)
+                    // Where exactly: the folder, so two cards of the same model (a copy and the archive file, say) can be told apart.
+                    Text(
+                        java.io.File(model.path).parent.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2
+                    )
                     if (!expanded) {
                         // What is attached, in one line, so the collapsed card still says how the model will load.
                         val parts = listOfNotNull(
