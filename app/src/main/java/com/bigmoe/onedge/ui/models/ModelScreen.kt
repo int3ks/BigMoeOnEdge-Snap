@@ -480,9 +480,16 @@ fun ModelScreen(
                         val inModelFolder = !model.inAppStorage && ui.modelFolder?.let { model.path.startsWith("$it/") } == true
                         val place = if (model.inAppStorage) com.bigmoe.onedge.core.FetchTarget.APP
                         else com.bigmoe.onedge.core.FetchTarget.MODEL_FOLDER
-                        val isCopy = (model.inAppStorage || inModelFolder) && ui.archiveEntries.any { it.name == model.name && place in it.copies }
-                        if (isCopy) {
-                            if (inModelFolder) Text("Also in the archive.", style = MaterialTheme.typography.labelSmall)
+                        val entry = ui.archiveEntries.firstOrNull { it.name == model.name && place in it.copies }
+                        val isCopy = (model.inAppStorage || inModelFolder) && entry != null
+                        if (isCopy && entry != null) {
+                            // Only a connected source proves the archive still has it; otherwise it is what the index remembers.
+                            Text(
+                                if (entry.reachable) "Also in the archive (${entry.sources.joinToString()})."
+                                else "Listed in the archive index (${entry.sources.joinToString()}), not verified: the source is not connected.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (entry.reachable) androidx.compose.ui.graphics.Color.Unspecified else MaterialTheme.colorScheme.error
+                            )
                             // Deletes this file only; a copy of the same model elsewhere stays.
                             OutlinedButton(onClick = { viewModel.clearCopy(model.path) }, enabled = ui.importProgress == null) {
                                 Text(if (inModelFolder) "Delete this copy (settings are kept)" else "Clear copy (settings are kept)")
