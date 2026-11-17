@@ -427,18 +427,21 @@ class ModelManager(
         if (missing.isNotEmpty()) return "Split GGUF is incomplete. Missing/empty shards:\n" + missing.joinToString("\n") { it.name }
         val firstSummary = GgufInspector.inspect(first)
         if (firstSummary.kind == ModelKind.UNKNOWN || firstSummary.architecture.isBlank()) return "The first shard's GGUF metadata could not be read: ${first.name}."
-        if (firstSummary.tensorCount <= 0L) return "The first shard has no tensor descriptors in its GGUF header."
+        // The first shard may hold only metadata (gguf-split --no-tensor-first-split, e.g. Unsloth's UD splits);
+        // llama.cpp and the engine read the tensors from all shards. The total is checked below.
         if (firstSummary.splitCount != count.toLong())
             return "The first shard's split.count is ${firstSummary.splitCount ?: "missing"}, but the filename says $count."
         if (count > 65535) return "This llama.cpp build uses a 16-bit shard count and cannot load $count shards."
         val firstSplitNo = firstSummary.splitNo ?: return "The first shard is missing required GGUF metadata split.no."
         if (firstSplitNo != 0L) return "The first shard reports split.no=$firstSplitNo; this llama.cpp build requires zero-based numbering (split.no=0 for -00001)."
+        var tensorsInSet = 0L
         for (n in 1..count) {
             val f = File(first.parentFile, "$prefix-${n.toString().padStart(5, '0')}-of-${count.toString().padStart(5, '0')}.gguf")
             if (!hasGgufMagic(f)) return "Shard ${f.name} has an invalid GGUF magic header."
             val summary = GgufInspector.inspect(f)
             if (summary.kind == ModelKind.UNKNOWN) return "Shard ${f.name} has unreadable GGUF metadata or tensor descriptors."
-            if (summary.tensorCount <= 0L) return "Shard ${f.name} has no tensor descriptors in its GGUF header."
+            if (n > 1 && summary.tensorCount <= 0L) return "Shard ${f.name} has no tensor descriptors in its GGUF header."
+            tensorsInSet += summary.tensorCount
             if (summary.splitTensorCount != null && summary.splitTensorCount < summary.tensorCount)
                 return "Shard ${f.name} reports split.tensors.count=${summary.splitTensorCount}, below its own tensor count ${summary.tensorCount}."
             // Standard llama.cpp shards after index 1 may contain only split metadata and tensor headers.
@@ -453,6 +456,11 @@ class ModelManager(
             identityMismatch(firstSummary, summary)?.let { mismatch ->
                 return "Shard ${f.name} has incompatible model metadata: $mismatch"
             }
+        }
+        if (tensorsInSet <= 0L) return "None of the shards has tensor descriptors in its GGUF header."
+        // The same check llama.cpp makes at load time (split.tensors.count = all tensors of the set).
+        firstSummary.splitTensorCount?.let { expected ->
+            if (expected != tensorsInSet) return "The shards hold $tensorsInSet tensors, but split.tensors.count says $expected."
         }
         return null
     }
@@ -1097,7 +1105,8 @@ class ModelManager(
                 if (summary.kind == ModelKind.UNKNOWN) {
                     throw IOException("${source.name} has an unreadable or unsupported GGUF metadata/tensor header.")
                 }
-                if (summary.tensorCount <= 0L) throw IOException("${source.name} has no tensor descriptors in its GGUF header; refusing to treat it as a complete shard.")
+                // A metadata-only first shard is valid (gguf-split --no-tensor-first-split); the set is checked on load.
+                if (summary.tensorCount <= 0L && parsed.index != 1) throw IOException("${source.name} has no tensor descriptors in its GGUF header; refusing to treat it as a complete shard.")
                 if (parsed.index == 1 && summary.architecture.isBlank()) {
                     throw IOException("The first shard ${source.name} is missing general.architecture metadata.")
                 }
@@ -1615,7 +1624,14 @@ class ModelManager(
             else if (!file.canRead()) errors.add("The model file is not readable: ${file.path}")
             else if (!hasGgufMagic(file)) errors.add("This does not look like a GGUF file (bad header).")
             if (file.isFile) ModelManager(file.parentFile ?: File(".")).splitSetIssue(file)?.let(errors::add)
-            val size = if (file.isFile) file.length() else 0L
+            // A split set counts as a whole: its first shard may be metadata only (a few MB).
+            val size = if (!file.isFile) 0L else SHARD.find(file.name)?.let { m ->
+                val count = m.groupValues[2].toIntOrNull() ?: 1
+                val prefix = file.name.substringBeforeLast(m.value)
+                (1..count).sumOf { n ->
+                    File(file.parentFile, "$prefix-${n.toString().padStart(5, '0')}-of-${count.toString().padStart(5, '0')}.gguf").length()
+                }
+            } ?: file.length()
             val gib = 1024.0 * 1024.0 * 1024.0
             if (totalRamBytes > 0) {
                 val ramGib = totalRamBytes / gib
