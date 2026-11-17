@@ -401,7 +401,6 @@ fun ModelScreen(
                     onRemoveSource = viewModel::removeArchiveSource,
                     onRefresh = viewModel::refresh,
                     onFetch = viewModel::fetchFromArchive,
-                    onFetchTarget = viewModel::setFetchTarget,
                     onUseInPlace = viewModel::useArchiveModelInPlace,
                     onClearCache = { viewModel.clearAppCopy(it) },
                     onCancel = viewModel::cancelImport,
@@ -663,8 +662,8 @@ private fun modelPlace(model: ModelFile, ui: ModelsUiState): String {
     val place = when {
         model.inAppStorage -> "App storage"
         under(ui.modelFolder) -> "Model folder"
-        ui.archiveSources.firstOrNull { under(it.source.path) } != null ->
-            "Archive (${ui.archiveSources.first { under(it.source.path) }.source.name}), used in place"
+        ui.archiveSources.firstOrNull { under(it.source.path) || under(it.canonicalPath) } != null ->
+            "Archive (${ui.archiveSources.first { under(it.source.path) || under(it.canonicalPath) }.source.name}), used in place"
         else -> "Other folder, used in place"
     }
     return if (copies > 1) "$place • listed $copies times" else place

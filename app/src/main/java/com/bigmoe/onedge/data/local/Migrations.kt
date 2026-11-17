@@ -33,3 +33,11 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE chat_messages ADD COLUMN tool_ms INTEGER")
     }
 }
+
+/** Run info per answer (model, settings) and the earlier answers Regenerate keeps per user message. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE chat_messages ADD COLUMN run_info TEXT")
+        db.execSQL("ALTER TABLE chat_messages ADD COLUMN variants_json TEXT")
+    }
+}

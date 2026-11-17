@@ -37,6 +37,9 @@ interface ChatMessageDao {
     @Query("SELECT COUNT(*) FROM chat_messages WHERE session_id = :sessionId")
     suspend fun countForSession(sessionId: String): Int
 
+    @Query("UPDATE chat_messages SET variants_json = :json WHERE id = :messageId")
+    suspend fun updateVariants(messageId: String, json: String?): Int
+
     @Query("UPDATE chat_messages SET content = :content WHERE id = :messageId AND role = 'USER'")
     suspend fun updateUserMessageContent(messageId: String, content: String): Int
 

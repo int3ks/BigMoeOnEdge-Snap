@@ -62,7 +62,8 @@ class AppContainer(private val context: Context) {
             .addMigrations(
                 com.bigmoe.onedge.data.local.MIGRATION_2_3,
                 com.bigmoe.onedge.data.local.MIGRATION_3_4,
-                com.bigmoe.onedge.data.local.MIGRATION_4_5
+                com.bigmoe.onedge.data.local.MIGRATION_4_5,
+                com.bigmoe.onedge.data.local.MIGRATION_5_6
             )
             .fallbackToDestructiveMigration()
             .build()

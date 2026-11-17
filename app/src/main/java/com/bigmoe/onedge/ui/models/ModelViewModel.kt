@@ -82,7 +82,6 @@ data class ModelsUiState(
     /** Free space where model files go (app storage, model folder, archive when connected). */
     val storageSpace: List<com.bigmoe.onedge.core.StorageSpace> = emptyList(),
     /** Where "Fetch" copies to: the app's storage or the model folder. */
-    val archiveFetchTarget: com.bigmoe.onedge.core.FetchTarget = com.bigmoe.onedge.core.FetchTarget.APP,
     /** GGUFs waiting in Downloads. */
     val downloads: List<com.bigmoe.onedge.core.GgufSet> = emptyList(),
     /** Clearing the copy at this path needs a second yes: the archive copy could not be checked ([second] says why). */
@@ -133,7 +132,6 @@ class ModelViewModel(
             val archiveSources = archive?.sourceStatus().orEmpty()
             val archiveSuggestions = archive?.suggestions().orEmpty()
             val downloads = archive?.listDownloads().orEmpty()
-            val fetchTarget = archive?.fetchTarget() ?: com.bigmoe.onedge.core.FetchTarget.APP
             val storageSpace = archive?.storageSpace().orEmpty()
             _uiState.update {
                 it.copy(
@@ -141,7 +139,7 @@ class ModelViewModel(
                     modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable,
                     archiveSources = archiveSources, archiveEntries = archiveEntries,
-                    archiveSuggestions = archiveSuggestions, downloads = downloads, archiveFetchTarget = fetchTarget,
+                    archiveSuggestions = archiveSuggestions, downloads = downloads,
                     storageSpace = storageSpace
                 )
             }
@@ -450,14 +448,11 @@ class ModelViewModel(
         viewModelScope.launch { modelArchive?.removeSource(path); refresh() }
     }
 
-    /** Archive -> a local copy (the app's storage or the model folder, [setFetchTarget]), where the model can be loaded. */
-    fun fetchFromArchive(name: String) {
+    /** Archive -> a local copy in [into] (the app's storage = cache, or the model folder = kept), where it can be loaded. */
+    fun fetchFromArchive(name: String, into: com.bigmoe.onedge.core.FetchTarget) {
         val archive = modelArchive ?: return
-        archiveJob(com.bigmoe.onedge.core.ModelArchive.displayName(name), "Fetched.") { onProgress -> archive.fetch(name, onProgress) }
-    }
-
-    fun setFetchTarget(target: com.bigmoe.onedge.core.FetchTarget) {
-        viewModelScope.launch { modelArchive?.setFetchTarget(target); refresh() }
+        val done = if (into == com.bigmoe.onedge.core.FetchTarget.MODEL_FOLDER) "Copied to the model folder." else "Fetched into the app storage."
+        archiveJob(com.bigmoe.onedge.core.ModelArchive.displayName(name), done) { onProgress -> archive.fetch(name, into, onProgress) }
     }
 
     /** Uses an archive model where it lies, without a copy: it becomes a card like any file registered in place. */

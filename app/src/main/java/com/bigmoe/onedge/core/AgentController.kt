@@ -55,7 +55,9 @@ data class NewMessage(
     /** How long the model spent in its reasoning span. */
     val thinkingMs: Long? = null,
     /** Wall-clock time the tools of this round took (tool-result messages). */
-    val toolMs: Long? = null
+    val toolMs: Long? = null,
+    /** Assistant messages: model and settings of the turn as JSON (see RunInfo). */
+    val runInfo: String? = null
 )
 
 /** Persists a message and returns its id. */

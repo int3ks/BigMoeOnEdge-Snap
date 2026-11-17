@@ -2,13 +2,13 @@ package com.bigmoe.onedge.ui.models
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -26,8 +26,8 @@ import com.bigmoe.onedge.core.GgufSet
 import com.bigmoe.onedge.core.ModelManager
 
 /**
- * The external archive and what waits in Downloads (core/ModelArchive.kt): an archive model is fetched into the app's
- * storage or the model folder (the chips choose) or used where it lies; a fetched copy is cleared again without losing
+ * The external archive and what waits in Downloads (core/ModelArchive.kt): each archive model can be copied into the
+ * model folder (kept), fetched into the app's storage (cache) or used where it lies; a fetched copy is cleared again without losing
  * its settings; downloads go to the model folder or to the archive. A local copy is an ordinary card in the list below,
  * with "Clear copy" on it too.
  */
@@ -41,8 +41,7 @@ internal fun ModelArchiveCard(
     onAddSuggestion: (SourceSuggestion) -> Unit,
     onRemoveSource: (String) -> Unit,
     onRefresh: () -> Unit,
-    onFetch: (String) -> Unit,
-    onFetchTarget: (FetchTarget) -> Unit,
+    onFetch: (String, FetchTarget) -> Unit,
     onUseInPlace: (String) -> Unit,
     onClearCache: (String) -> Unit,
     onCancel: () -> Unit,
@@ -118,21 +117,7 @@ internal fun ModelArchiveCard(
             if (ui.archiveEntries.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Text("In the archive", style = MaterialTheme.typography.titleSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Fetch into", style = MaterialTheme.typography.labelMedium)
-                    FilterChip(
-                        selected = ui.archiveFetchTarget == FetchTarget.APP,
-                        onClick = { onFetchTarget(FetchTarget.APP) },
-                        label = { Text("App storage") }
-                    )
-                    FilterChip(
-                        selected = ui.archiveFetchTarget == FetchTarget.MODEL_FOLDER,
-                        onClick = { onFetchTarget(FetchTarget.MODEL_FOLDER) },
-                        enabled = ui.modelFolder != null,
-                        label = { Text("Model folder") }
-                    )
-                }
-                ui.archiveEntries.forEach { entry -> ArchiveRow(entry, idle, onFetch, onUseInPlace, onClearCache) }
+                ui.archiveEntries.forEach { entry -> ArchiveRow(entry, idle, ui.modelFolder != null, onFetch, onUseInPlace, onClearCache) }
             }
 
             if (ui.downloads.isNotEmpty()) {
@@ -165,43 +150,54 @@ internal fun ModelArchiveCard(
     }
 }
 
+/**
+ * One archive model with its three ways in: Copy to Models (a kept copy in the model folder), Fetch to app (a copy
+ * in the app's storage, cleared again with Clear app copy) and Use in place (read from the archive, no copy).
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ArchiveRow(
     entry: ArchiveEntry,
     idle: Boolean,
-    onFetch: (String) -> Unit,
+    hasModelFolder: Boolean,
+    onFetch: (String, FetchTarget) -> Unit,
     onUseInPlace: (String) -> Unit,
     onClearCache: (String) -> Unit
 ) {
+    val usable = entry.reachable && entry.complete
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(entry.displayName, style = MaterialTheme.typography.bodyMedium)
+        val where = buildList {
+            if (FetchTarget.MODEL_FOLDER in entry.copies) add("in the model folder")
+            if (FetchTarget.APP in entry.copies) add("in the app storage")
+            if (entry.inPlace) add("used in place")
+        }
         val state = when {
-            entry.copies.size == 2 -> "copies in the app storage and the model folder"
-            FetchTarget.APP in entry.copies -> "copy in the app storage"
-            FetchTarget.MODEL_FOLDER in entry.copies -> "kept in the model folder"
+            where.isNotEmpty() -> where.joinToString(" · ")
             !entry.complete -> "incomplete in the archive"
-            entry.partial -> "fetch interrupted, continues where it stopped"
+            entry.partial -> "copy interrupted, continues where it stopped"
             !entry.reachable -> "source not connected"
             else -> "only in the archive"
-        } + if (entry.inPlace) " · used in place" else ""
+        }
         Text(
             "${ModelManager.formatBytes(entry.sizeBytes)} · $state\non ${entry.sources.joinToString()}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // The model folder is where models are kept: its copy is cleared on the model's card, not here.
+            val inFolder = FetchTarget.MODEL_FOLDER in entry.copies
+            TextButton(
+                onClick = { onFetch(entry.name, FetchTarget.MODEL_FOLDER) },
+                enabled = idle && usable && hasModelFolder && !inFolder
+            ) { Text(if (inFolder) "In Models" else "Copy to Models") }
             if (FetchTarget.APP in entry.copies) {
-                // Only the app storage copy: the model folder is where models are kept, its copy is cleared on its card.
                 TextButton(onClick = { onClearCache(entry.name) }, enabled = idle) { Text("Clear app copy") }
-            } else if (entry.cached) {
-                Text("Clear it on its card if needed", style = MaterialTheme.typography.labelSmall)
             } else {
-                Button(onClick = { onFetch(entry.name) }, enabled = idle && entry.reachable && entry.complete) {
-                    Text(if (entry.partial) "Continue" else "Fetch")
-                }
+                TextButton(onClick = { onFetch(entry.name, FetchTarget.APP) }, enabled = idle && usable) { Text("Fetch to app") }
             }
-            if (!entry.inPlace) {
-                TextButton(onClick = { onUseInPlace(entry.name) }, enabled = entry.reachable && entry.complete) { Text("Use in place") }
+            TextButton(onClick = { onUseInPlace(entry.name) }, enabled = usable && !entry.inPlace) {
+                Text(if (entry.inPlace) "Used in place" else "Use in place")
             }
         }
     }

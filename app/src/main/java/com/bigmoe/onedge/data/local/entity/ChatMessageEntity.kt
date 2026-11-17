@@ -81,5 +81,13 @@ data class ChatMessageEntity(
 
     /** How long the tools of this round took, wall clock (tool-result messages). */
     @ColumnInfo(name = "tool_ms")
-    val toolMs: Long? = null
+    val toolMs: Long? = null,
+
+    /** Assistant messages: JSON with the model and the settings the turn ran with (see RunInfo). */
+    @ColumnInfo(name = "run_info")
+    val runInfo: String? = null,
+
+    /** User messages: JSON with the earlier answers to this turn kept by Regenerate (see TurnVariants). */
+    @ColumnInfo(name = "variants_json")
+    val variantsJson: String? = null
 )

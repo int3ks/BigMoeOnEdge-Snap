@@ -14,6 +14,10 @@ import com.bigmoe.onedge.core.GenerationPhase
 import com.bigmoe.onedge.core.HistoryMessage
 import com.bigmoe.onedge.core.MessageSink
 import com.bigmoe.onedge.core.NewMessage
+import com.bigmoe.onedge.core.MemoryWatch
+import com.bigmoe.onedge.core.RunInfo
+import com.bigmoe.onedge.data.repository.TurnVariants
+import kotlinx.coroutines.flow.combine
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import com.bigmoe.onedge.data.local.datastore.EngineSettingsDataStore
 import com.bigmoe.onedge.attachments.AttachmentException
@@ -173,7 +177,23 @@ data class ChatMessageUiModel(
      * The message exactly as stored, for Copy: no tool-call stripping, no telemetry, no UI labels, no renderer
      * fences. (`text` above is what the bubble shows.)
      */
-    val rawContent: String = ""
+    val rawContent: String = "",
+    /** Assistant messages: the model and settings the answer was made with; null for older answers. */
+    val runInfo: RunInfo? = null,
+    /** Set on the last assistant message of each turn: its answers (Regenerate) and which one is shown. */
+    val variant: VariantInfo? = null,
+    /** True when this message belongs to an earlier answer shown for comparison (not part of the live chat). */
+    val archived: Boolean = false
+)
+
+/** The answers of one turn: [shown] is on screen, [active] is the one the chat continues from (slots, 0-based). */
+data class VariantInfo(
+    val userMessageId: String,
+    val shown: Int,
+    val active: Int,
+    val total: Int,
+    /** No user message after this turn: switching makes the shown answer the live one. */
+    val isLast: Boolean
 )
 
 private data class QueuedChatInput(
@@ -196,6 +216,10 @@ class ChatViewModel(
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
+
+    /** Per user message: the answer slot shown instead of the live one (Regenerate variants, view only). */
+    private val _viewedVariants = MutableStateFlow<Map<String, Int>>(emptyMap())
+
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var sessionJobs: List<Job> = emptyList()
@@ -356,9 +380,10 @@ class ChatViewModel(
                 ) }
             }
             .launchIn(viewModelScope)
+        _viewedVariants.value = emptyMap()
         val messagesFlow = repository.observeMessagesForSession(sessionId)
-            // CONTEXT messages (attached file text) are part of the prompt, never a bubble.
-            .onEach { list -> _uiState.update { it.copy(messages = list.filter { m -> m.role != MessageRole.CONTEXT }.map { m -> m.toUiModel() }) } }
+            .combine(_viewedVariants) { list, viewed -> buildMessageList(sessionId, list, viewed) }
+            .onEach { list -> _uiState.update { it.copy(messages = list) } }
             .launchIn(viewModelScope)
         val artifactsFlow = artifactRepository.observe(sessionId)
             .onEach { list -> _uiState.update { it.copy(artifacts = list) } }
@@ -474,7 +499,7 @@ class ChatViewModel(
                     }
                     if (contextText.isNotBlank()) repository.addMessage(sessionId, NewMessage(MessageRole.CONTEXT, contextText))
                 }
-                val sink = MessageSink { repository.addMessage(sessionId, it) }
+                val sink = RunSink(sessionId, settings)
                 // start() sets the engine state synchronously before launching its worker. Keep the preparing
                 // flag until that state is active so the composer cannot accidentally enable a second send.
                 val started = generationManager.start(
@@ -482,6 +507,7 @@ class ChatViewModel(
                     AgentRequest(sessionId, history, userText, settings, contextText, images),
                     sink
                 )
+                if (!started) sink.stop()
                 _uiState.update { it.copy(isPreparingMessage = false, isGenerating = started || it.isGenerating) }
                 if (!started) {
                     _uiState.update { it.copy(notice = "Another generation is already running.", isGenerating = false) }
@@ -975,7 +1001,9 @@ class ChatViewModel(
                     _uiState.update { it.copy(notice = "Could not read an attachment: ${e.message ?: e.javaClass.simpleName}") }
                     return@launch
                 }
-                if (!repository.rewriteUserMessage(session.id, messageId, clean, plan.removeIds)) {
+                // Same text = Regenerate: keep the answer being replaced so it can be compared with the new one.
+                val keepAnswer = clean == plan.previousText.trim()
+                if (!repository.rewriteUserMessage(session.id, messageId, clean, plan.removeIds, keepAnswer)) {
                     _uiState.update { it.copy(notice = "That message can no longer be edited.") }
                     return@launch
                 }
@@ -989,12 +1017,14 @@ class ChatViewModel(
                 if (prepared.contextText.isNotBlank()) {
                     repository.addMessage(session.id, NewMessage(MessageRole.CONTEXT, prepared.contextText))
                 }
-                val sink = MessageSink { repository.addMessage(session.id, it) }
+                _viewedVariants.update { it - messageId }
+                val sink = RunSink(session.id, settings)
                 started = generationManager.start(
                     session,
                     AgentRequest(session.id, plan.history, clean, settings, prepared.contextText, prepared.images),
                     sink
                 )
+                if (!started) sink.stop()
                 if (!started) _uiState.update { it.copy(notice = "Another generation is already running.") }
             } catch (e: CancellationException) {
                 throw e
@@ -1028,6 +1058,93 @@ class ChatViewModel(
         _uiState.update { it.copy(selectedArtifact = null) }
     }
 
+    /**
+     * Shows answer [slot] of the turn [info]. On the last turn of the chat (and with nothing generating) the shown
+     * answer becomes the live one, so the chat continues from it; further up it is only shown, the chat below keeps
+     * building on the active answer.
+     */
+    fun showVariant(info: VariantInfo, slot: Int) {
+        if (slot < 0 || slot >= info.total) return
+        val session = _uiState.value.currentSession ?: return
+        val busy = _uiState.value.isGenerating || generationManager.state.value.active || editInFlight
+        if (info.isLast && !busy && slot != info.active) {
+            viewModelScope.launch {
+                if (repository.activateVariant(session.id, info.userMessageId, slot)) {
+                    _viewedVariants.update { it - info.userMessageId }
+                    // The engine holds the answer that was live before: replay from the stored chat next turn.
+                    engineController.invalidateState()
+                } else {
+                    _viewedVariants.update { it + (info.userMessageId to slot) }
+                }
+            }
+            return
+        }
+        _viewedVariants.update { if (slot == info.active) it - info.userMessageId else it + (info.userMessageId to slot) }
+    }
+
+    /** Stored messages -> bubbles: CONTEXT hidden, a turn shown as the answer picked with the arrows, variant bars set. */
+    private fun buildMessageList(
+        sessionId: String,
+        list: List<ChatMessageDomainModel>,
+        viewed: Map<String, Int>
+    ): List<ChatMessageUiModel> {
+        val out = ArrayList<ChatMessageUiModel>(list.size)
+        var i = 0
+        while (i < list.size) {
+            val m = list[i]
+            if (m.role != MessageRole.USER) {
+                if (m.role != MessageRole.CONTEXT) out += m.toUiModel()
+                i++
+                continue
+            }
+            out += m.toUiModel()
+            var end = i + 1
+            while (end < list.size && list[end].role != MessageRole.USER) end++
+            val live = list.subList(i + 1, end)
+            // No variants yet: one answer (slot 0); the bar still shows which model wrote it.
+            val variants = TurnVariants.decode(m.variantsJson) ?: TurnVariants(active = 0, archived = emptyList())
+            val wanted = viewed[m.id]
+            val archivedTurn = if (wanted != null && wanted != variants.active) repository.archivedTurn(sessionId, m.variantsJson, wanted) else null
+            val shown = if (archivedTurn != null) wanted!! else variants.active
+            val turn = (archivedTurn ?: live).filter { it.role != MessageRole.CONTEXT }
+                .map { it.toUiModel().copy(archived = archivedTurn != null) }
+            val lastAssistant = turn.indexOfLast { it.role == MessageRole.ASSISTANT }
+            val info = VariantInfo(m.id, shown, variants.active, variants.total, isLast = end == list.size)
+            turn.forEachIndexed { k, u -> out += if (k == lastAssistant) u.copy(variant = info) else u }
+            i = end
+        }
+        return out
+    }
+
+    /**
+     * Saves the messages of a turn with the model and settings it ran with ([RunInfo]) and keeps the lowest free
+     * RAM seen while the generation runs (MemoryWatch samples, no extra polling).
+     */
+    private inner class RunSink(private val sessionId: String, settings: EngineSettings) : MessageSink {
+        private val base = (engineController.state.value as? EngineState.Ready)?.info?.let { RunInfo.from(it, settings) }
+        @Volatile private var minFree = Long.MAX_VALUE
+        private val watch: Job = viewModelScope.launch {
+            MemoryWatch.now.collect { n -> if (n != null && n.freeMb < minFree) minFree = n.freeMb }
+        }
+        private val stopper: Job = viewModelScope.launch {
+            generationManager.state.first { it.active }
+            generationManager.state.first { !it.active }
+            watch.cancel()
+        }
+
+        fun stop() {
+            watch.cancel()
+            stopper.cancel()
+        }
+
+        override suspend fun save(message: NewMessage): String {
+            val info = if (message.role == MessageRole.ASSISTANT && base != null) {
+                base.copy(minFreeMb = minFree.takeIf { it != Long.MAX_VALUE }).toJson()
+            } else null
+            return repository.addMessage(sessionId, message.copy(runInfo = info))
+        }
+    }
+
     private fun ChatMessageDomainModel.toUiModel(): ChatMessageUiModel {
         val isAssistant = role == MessageRole.ASSISTANT
         return ChatMessageUiModel(
@@ -1053,7 +1170,8 @@ class ChatViewModel(
             prefillTokens = prefillTokens,
             thinkingMs = thinkingMs,
             toolMs = toolMs,
-            rawContent = content
+            rawContent = content,
+            runInfo = if (isAssistant) RunInfo.parse(runInfo) else null
         )
     }
 

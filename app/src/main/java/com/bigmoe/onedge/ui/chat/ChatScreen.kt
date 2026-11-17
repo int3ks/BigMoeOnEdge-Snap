@@ -342,6 +342,16 @@ fun ChatScreen(
                                 if (message.role == MessageRole.ASSISTANT) {
                                     ArtifactMessageChips(uiState.artifacts.filter { it.messageId == message.id && it.language != FileKinds.FOLDER }, onOpenFile)
                                 }
+                                // Last answer of a turn: page through Regenerate's answers, model and run details.
+                                message.variant?.let { v ->
+                                    TurnVariantBar(
+                                        info = v,
+                                        runInfo = message.runInfo,
+                                        timestamp = message.timestamp,
+                                        enabled = true,
+                                        onShow = { slot -> viewModel.showVariant(v, slot) }
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                         }

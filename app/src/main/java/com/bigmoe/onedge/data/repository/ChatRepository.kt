@@ -47,7 +47,9 @@ data class ChatMessageDomainModel(
     val note: String? = null,
     val prefillTokens: Int? = null,
     val thinkingMs: Long? = null,
-    val toolMs: Long? = null
+    val toolMs: Long? = null,
+    val runInfo: String? = null,
+    val variantsJson: String? = null
 )
 
 data class AttachmentDomainModel(
@@ -144,7 +146,8 @@ class ChatRepository(
                 note = message.note,
                 prefillTokens = message.prefillTokens,
                 thinkingMs = message.thinkingMs,
-                toolMs = message.toolMs
+                toolMs = message.toolMs,
+                runInfo = message.runInfo
             )
         )
         sessionDao.touchSession(sessionId, now)
@@ -170,12 +173,60 @@ class ChatRepository(
      * The dependants are removed first: if the app dies in between, the chat shows the old text without answers
      * (harmless) instead of the new text next to answers that were written for the old one.
      */
-    suspend fun rewriteUserMessage(sessionId: String, messageId: String, content: String, removeIds: List<String>): Boolean {
+    suspend fun rewriteUserMessage(
+        sessionId: String,
+        messageId: String,
+        content: String,
+        removeIds: List<String>,
+        keepAnswer: Boolean = false
+    ): Boolean {
+        // Regenerate keeps the answer being replaced as a variant; a changed prompt makes the old ones meaningless.
+        if (keepAnswer) archiveCurrentTurn(sessionId, messageId) else messageDao.updateVariants(messageId, null)
         for (chunk in removeIds.chunked(REMOVE_CHUNK)) {
             attachmentDao?.deleteForMessages(sessionId, chunk)
             messageDao.deleteMessagesByIds(sessionId, chunk)
         }
         return updateUserMessageContent(sessionId, messageId, content)
+    }
+
+    /** The messages of the turn answering [userId]: everything after it up to the next user message. */
+    private fun turnOf(all: List<ChatMessageEntity>, userId: String): Pair<ChatMessageEntity, List<ChatMessageEntity>>? {
+        val index = all.indexOfFirst { it.id == userId && it.role == MessageRole.USER }
+        if (index < 0) return null
+        val rest = all.subList(index + 1, all.size)
+        val end = rest.indexOfFirst { it.role == MessageRole.USER }.let { if (it < 0) rest.size else it }
+        return all[index] to rest.subList(0, end).toList()
+    }
+
+    /** Stores the current answer of [userId] as a variant before Regenerate removes it. */
+    private suspend fun archiveCurrentTurn(sessionId: String, userId: String) {
+        val (user, turn) = turnOf(messageDao.getMessagesForSession(sessionId), userId) ?: return
+        if (turn.none { it.role == MessageRole.ASSISTANT || it.role == MessageRole.TOOL }) return
+        val variants = TurnVariants.decode(user.variantsJson) ?: TurnVariants(active = 0, archived = emptyList())
+        messageDao.updateVariants(userId, variants.archiveActive(turn).encode())
+    }
+
+    /** The earlier answer [slot] of [userId] as messages for display (not stored as messages); null when unknown. */
+    fun archivedTurn(sessionId: String, variantsJson: String?, slot: Int): List<ChatMessageDomainModel>? =
+        TurnVariants.decode(variantsJson)?.archived?.firstOrNull { it.slot == slot }
+            ?.messages?.map { it.copy(sessionId = sessionId).toDomain() }
+
+    /**
+     * Makes the earlier answer [slot] of [userId] the live one: the current answer becomes a variant and the chosen
+     * one is stored again as messages (same ids, same times). Only for the last turn of the chat; false otherwise.
+     * The new answer is written before the old one is removed, so a crash in between shows both, never neither.
+     */
+    suspend fun activateVariant(sessionId: String, userId: String, slot: Int): Boolean {
+        val all = messageDao.getMessagesForSession(sessionId)
+        val (user, turn) = turnOf(all, userId) ?: return false
+        if (all.last().id != (turn.lastOrNull() ?: user).id) return false
+        val variants = TurnVariants.decode(user.variantsJson) ?: return false
+        val chosen = variants.archived.firstOrNull { it.slot == slot } ?: return false
+        messageDao.updateVariants(userId, variants.swap(turn, chosen).encode())
+        messageDao.insertMessages(chosen.messages.map { it.copy(sessionId = sessionId, variantsJson = null) })
+        if (turn.isNotEmpty()) messageDao.deleteMessagesByIds(sessionId, turn.map { it.id })
+        sessionDao.touchSession(sessionId, System.currentTimeMillis())
+        return true
     }
 
     suspend fun updateGenerationTelemetry(
@@ -236,6 +287,7 @@ class ChatRepository(
         reasoning = reasoning, tokensPerSecond = tokensPerSecond, prefillMs = prefillMs,
         generatedTokens = generatedTokens, cacheHitPct = cacheHitPct,
         generationElapsedMs = generationElapsedMs, contextUsed = contextUsed, contextTotal = contextTotal, note = note,
-        prefillTokens = prefillTokens, thinkingMs = thinkingMs, toolMs = toolMs
+        prefillTokens = prefillTokens, thinkingMs = thinkingMs, toolMs = toolMs,
+        runInfo = runInfo, variantsJson = variantsJson
     )
 }

@@ -48,7 +48,17 @@ data class ArchiveEntry(
 data class ArchiveSource(val name: String, val path: String)
 
 /** A source and how it is right now. */
-data class SourceStatus(val source: ArchiveSource, val reachable: Boolean, val modelCount: Int, val writable: Boolean)
+data class SourceStatus(
+    val source: ArchiveSource,
+    val reachable: Boolean,
+    val modelCount: Int,
+    val writable: Boolean,
+    /**
+     * The source path with links resolved. Models used in place are registered under their canonical path, which on
+     * some devices differs (e.g. /storage/8ACF-22C7 -> /mnt/media_rw/8ACF-22C7).
+     */
+    val canonicalPath: String = source.path
+)
 
 /** A folder the page offers as a new source: `<volume>/models` on an attached removable volume. */
 data class SourceSuggestion(val name: String, val path: String)
@@ -72,7 +82,7 @@ enum class FetchTarget { APP, MODEL_FOLDER }
  * stored by path, so it survives a clear and a later fetch by itself; a copy of it travels beside the model in its
  * source (`<first file>.options.properties`) for the way between the places and for a reinstall.
  *
- * Fetching copies into the app's storage or, by choice ([fetchTarget]), into the model folder; an archive model can
+ * Fetching copies into the app's storage or, per model (the button pressed), into the model folder; an archive model can
  * also be used where it lies ([useInPlace]) - which of the three is quickest depends on the drive, so all are offered.
  *
  * Everything here uses plain file paths: the app holds the all-files access the model folder already needs. A source
@@ -112,15 +122,6 @@ class ModelArchive(
         FetchTarget.MODEL_FOLDER -> modelManager.modelFolder()
     }
 
-    private val targetFile: File get() = File(cacheDir, ".archive-fetch-target")
-
-    fun fetchTarget(): FetchTarget =
-        if (runCatching { targetFile.readText().trim() }.getOrDefault("") == "folder") FetchTarget.MODEL_FOLDER else FetchTarget.APP
-
-    suspend fun setFetchTarget(target: FetchTarget) = withContext(io) {
-        cacheDir.mkdirs()
-        targetFile.writeText(if (target == FetchTarget.MODEL_FOLDER) "folder" else "app")
-    }
 
     // ---------------------------------------------------------------------------------- sources
 
@@ -171,7 +172,8 @@ class ModelArchive(
         sources().map { s ->
             val ok = reachable(s)
             val count = if (ok) scan(File(s.path), ARCHIVE_SCAN_DEPTH).size else readIndex(s).size
-            SourceStatus(s, ok, count, ok && File(s.path).canWrite())
+            val canonical = if (ok) runCatching { File(s.path).canonicalPath }.getOrDefault(s.path) else s.path
+            SourceStatus(s, ok, count, ok && File(s.path).canWrite(), canonical)
         }
     }
 
@@ -315,13 +317,13 @@ class ModelArchive(
     // ---------------------------------------------------------------------------------- archive -> local
 
     /**
-     * Copies an archive model (from the first connected source that holds it) to where [fetchTarget] says. Files that
+     * Copies an archive model (from the first connected source that holds it) into [target]. Files that
      * are already there are skipped and an interrupted copy is continued, so a cancelled fetch (or a pulled cable)
      * loses nothing. Returns the local first file.
      */
-    suspend fun fetch(name: String, onProgress: (copied: Long, total: Long) -> Unit): File = withContext(io) {
+    suspend fun fetch(name: String, into: FetchTarget, onProgress: (copied: Long, total: Long) -> Unit): File = withContext(io) {
         val (src, set) = findComplete(name) ?: throw notFound(name)
-        val target = dirOf(fetchTarget()) ?: throw IOException("The model folder is switched off; fetch into the app storage or turn it on.")
+        val target = dirOf(into) ?: throw IOException("The model folder is switched off; fetch into the app storage or turn it on.")
         if (!target.isDirectory && !target.mkdirs()) throw IOException("Cannot create ${target.path}.")
         val todo = set.files.filterNot { s -> File(target, s.name).let { it.isFile && it.length() == s.length() } }
         val missing = todo.sumOf { s ->
