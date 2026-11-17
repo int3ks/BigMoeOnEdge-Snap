@@ -194,7 +194,9 @@ data class RequestedAddOns(
     val mmprojPath: String? = null,
     val draftPath: String? = null,
     /** The guess-ahead mode set on the model's card that this load used; null = the global setting applied. */
-    val modelSpec: SpecSource? = null
+    val modelSpec: SpecSource? = null,
+    /** NPU and expert cache as set on the model's card for this load (null fields = the global setting applied). */
+    val memory: ModelMemoryOptions = ModelMemoryOptions()
 )
 
 /** The steps of a model load as the engine reports them (core/include/bmoe/load_progress.h, same numbers). */

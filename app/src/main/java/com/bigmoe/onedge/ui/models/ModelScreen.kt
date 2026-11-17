@@ -661,6 +661,8 @@ private fun addOnsChangedFor(info: com.bigmoe.onedge.core.ModelInfo, ui: ModelsU
         ui.modelLoras[p] != req.lora ||
         ui.modelMmprojs[p] != req.mmprojPath ||
         spec != loadedSpec ||
+        // NPU / expert cache set on the card (Memory section) since the load.
+        (ui.modelMemoryOptions[p] ?: com.bigmoe.onedge.core.ModelMemoryOptions()) != req.memory ||
         (spec == com.bigmoe.onedge.core.SpecSource.MTP && ui.modelDrafts[p] != req.draftPath)
 }
 
@@ -777,7 +779,7 @@ private fun ModelStatusSection(
                         Text(
                             listOfNotNull(
                                 if (settingsChanged) "settings (context, sampling, cache, threads, guess ahead tuning)" else null,
-                                if (addOnsChanged) "this model's guess ahead, KV cache, LoRA, projector or drafter" else null
+                                if (addOnsChanged) "this model's NPU, expert cache, guess ahead, KV cache, LoRA, projector or drafter" else null
                             ).joinToString(" and ", prefix = "Changed since this model was loaded: ", postfix = ". They apply after a reload."),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.tertiary

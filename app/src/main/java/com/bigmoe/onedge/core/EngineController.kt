@@ -265,7 +265,7 @@ class EngineController(
                 var activeConfig = config
                 var activeDraftPath: String? = if (wantsSeparateDraft) draftPath else null
                 var activeLora: LoraChoice? = runCatching { loraProvider(modelPath) }.getOrNull()
-                val requestedAddOns = RequestedAddOns(config, requestedConfig, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null, modelSpec)
+                val requestedAddOns = RequestedAddOns(config, requestedConfig, kvType, activeLora, mmprojPath, if (wantsSeparateDraft) draftPath else null, modelSpec, memoryOptions)
                 var warning: String? = null
                 var error = try {
                     backend.load(modelPath, activeConfig, csv, mmprojPath, activeDraftPath, activeLora)
