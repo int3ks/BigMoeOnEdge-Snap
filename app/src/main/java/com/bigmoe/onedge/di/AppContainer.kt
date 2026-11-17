@@ -94,6 +94,7 @@ class AppContainer(private val context: Context) {
             kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) },
             specProvider = { path -> modelManager.specForModel(path) },
             memoryOptionsProvider = { path -> modelManager.memoryOptionsForModel(path) },
+            samplingPresetProvider = { path -> modelManager.samplingPresetForModel(path) },
             kvSnapshotStore = com.bigmoe.onedge.core.KvSnapshotStore(File(context.applicationContext.filesDir, "kv-snapshots")),
             kvSnapshotsEnabled = { settingsDataStore.settingsFlow.first().kvSnapshots }
         )

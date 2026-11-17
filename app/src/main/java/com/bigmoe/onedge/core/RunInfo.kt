@@ -23,6 +23,8 @@ data class RunInfo(
     val topK: Int? = null,
     val minP: Double? = null,
     val repeatPenalty: Double? = null,
+    /** Decoding preset set on the model's card (its label); null = Settings → Decoding. */
+    val preset: String? = null,
     val systemPrompt: String? = null,
     /** Lowest free RAM seen while the turn ran (sampled every 2 s by MemoryWatch); null when no sample. */
     val minFreeMb: Long? = null
@@ -40,6 +42,7 @@ data class RunInfo(
         topK?.let { put("topK", it) }
         minP?.let { put("minP", it) }
         repeatPenalty?.let { put("repeat", it) }
+        preset?.let { put("preset", it) }
         systemPrompt?.let { put("systemPrompt", it) }
         minFreeMb?.let { put("minFreeMb", it) }
     }.toString()
@@ -48,6 +51,12 @@ data class RunInfo(
     val folder: String get() = File(path).parentFile?.name.orEmpty()
 
     companion object {
+        /** [base] with the values of the model's decoding [preset] (they replaced the global ones for the turn). */
+        fun withPreset(base: RunInfo, preset: SamplingPreset?): RunInfo = if (preset == null) base else base.copy(
+            temperature = preset.temperature.toDouble(), topP = preset.topP.toDouble(), topK = preset.topK,
+            minP = preset.minP.toDouble(), repeatPenalty = preset.repeatPenalty.toDouble(), preset = preset.label
+        )
+
         fun from(info: ModelInfo, settings: EngineSettings): RunInfo {
             val c = info.config
             return RunInfo(
@@ -89,6 +98,7 @@ data class RunInfo(
                     topK = i("topK"),
                     minP = d("minP"),
                     repeatPenalty = d("repeat"),
+                    preset = s("preset"),
                     systemPrompt = s("systemPrompt"),
                     minFreeMb = if (o.has("minFreeMb")) o.getLong("minFreeMb") else null
                 )

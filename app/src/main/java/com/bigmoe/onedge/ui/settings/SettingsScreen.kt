@@ -596,6 +596,18 @@ private fun SettingsContent(
             // ------------------------------------------------------------ decoding (sampling)
             PerformanceGroup("Decoding", "Temperature, Top P/K, Min P, penalties and seed") {
             Spacer(Modifier.height(8.dp))
+            Text("Preset")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.bigmoe.onedge.core.SamplingPreset.values().forEach { preset ->
+                    OutlinedButton(onClick = {
+                        temp = preset.temperature; topP = preset.topP; topK = preset.topK.toFloat(); minP = preset.minP
+                        repeatPenalty = preset.repeatPenalty; repeatLastN = preset.repeatLastN.toFloat()
+                        frequencyPenalty = preset.frequencyPenalty; presencePenalty = preset.presencePenalty
+                        viewModel.applySamplingPreset(preset)
+                    }) { Text(preset.label) }
+                }
+            }
+            Hint("Fills the values below with a preset; adjust them afterwards as you like. A model can have its own preset on its card (Models page), which then replaces these values for that model.")
             Text("Temperature: ${"%.2f".format(java.util.Locale.US, temp)}")
             Slider(value = temp, onValueChange = { temp = it }, onValueChangeFinished = { viewModel.updateTemperature(temp) }, valueRange = 0f..2f)
             Hint("How random the choice of the next token is. 0 = always the most likely token (greedy, repeatable, good for code and tool calls). 0.6 to 0.8 = natural chat. Above 1 = more surprising, but more mistakes. Top P, Top K and Min P only matter above 0.")

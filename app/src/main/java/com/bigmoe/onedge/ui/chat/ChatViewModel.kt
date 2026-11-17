@@ -1139,7 +1139,8 @@ class ChatViewModel(
 
         override suspend fun save(message: NewMessage): String {
             val info = if (message.role == MessageRole.ASSISTANT && base != null) {
-                base.copy(minFreeMb = minFree.takeIf { it != Long.MAX_VALUE }).toJson()
+                RunInfo.withPreset(base, engineController.samplingPresetFor(base.path))
+                    .copy(minFreeMb = minFree.takeIf { it != Long.MAX_VALUE }).toJson()
             } else null
             return repository.addMessage(sessionId, message.copy(runInfo = info))
         }

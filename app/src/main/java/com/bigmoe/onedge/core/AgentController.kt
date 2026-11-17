@@ -128,6 +128,9 @@ class AgentController(
     fun runAgentLoop(request: AgentRequest, sink: MessageSink): Flow<AgentEvent> = flow {
         stopRequested = false
         val settings = request.settings
+        // The loaded model's own decoding preset (its card) replaces the global decoding values for the whole answer.
+        val sampling = engineController.loadedModel()?.path?.let { engineController.samplingPresetFor(it) }
+            ?.applyTo(settings.samplingOverride()) ?: settings.samplingOverride()
         // Web search has two modes (docs/tool-calling.md):
         //  AUTO   - the model is told about the tool and decides to emit <tool_call> itself;
         //  ALWAYS - the app searches for every message and hands the results to the model, so it works even
@@ -244,7 +247,7 @@ class AgentController(
                     // Also without the grammar: from this word on the engine writes the call greedily (temperature 0),
                     // whatever the chat's temperature is, so a call's name and JSON are the model's most likely tokens.
                     toolGrammarTrigger = if (toolsEnabled) com.bigmoe.onedge.parser.ToolGrammar.TRIGGER else "",
-                    sampling = settings.samplingOverride()
+                    sampling = sampling
                 )
             ).collect { ev ->
                 when (ev) {

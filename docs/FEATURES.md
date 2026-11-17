@@ -11,7 +11,7 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
   (`.model-options.properties` `<model>.spec`, `EngineController.specProvider`); default mode and tuning in
   Settings → Guess ahead.
 * **Per-model options** in `models/.model-options.properties`: KV cache type (default **Q8_0**, stored explicitly),
-  guess ahead, last use (`.used`), LoRA scale. Model folder `Internal storage/Models` scanned automatically.
+  guess ahead, last use (`.used`), LoRA scale, decoding preset (`.sampling`, `core/SamplingPreset.kt`; applied per chat turn in `AgentController`). Model folder `Internal storage/Models` scanned automatically.
 * **Engine ports from upstream 0.34–0.36**: context checkpoints (recurrent/SWA models restore instead of re-prefill;
   4 copies, 320 MiB), expert tensors read from the file (`expert_layout`, registry kept for known archs), cache brake
   (halves the cache under memory pressure; first 4 tokens of a turn ignored), #348 read-past-end fix.

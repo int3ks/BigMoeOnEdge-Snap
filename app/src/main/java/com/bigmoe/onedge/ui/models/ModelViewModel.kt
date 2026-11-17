@@ -61,6 +61,8 @@ data class ModelsUiState(
     val modelKvTypes: Map<String, com.bigmoe.onedge.core.KvCacheType> = emptyMap(),
     /** Guess ahead set on a model's card; a model without an entry uses the default mode (Settings → Guess ahead). */
     val modelSpecs: Map<String, com.bigmoe.onedge.core.SpecSource> = emptyMap(),
+    /** Decoding preset set on a model's card; a model without an entry uses Settings → Decoding. */
+    val modelSamplingPresets: Map<String, com.bigmoe.onedge.core.SamplingPreset> = emptyMap(),
     val existingPathInput: String = "",
     val importProgress: ImportProgress? = null,
     val pendingLoad: PendingLoad? = null,
@@ -124,6 +126,7 @@ class ModelViewModel(
             val kvTypes = list.associate { model -> model.path to modelManager.kvCacheTypeForModel(model.path) }
             val specs = list.mapNotNull { model -> modelManager.specForModel(model.path)?.let { model.path to it } }.toMap()
             val memoryOptions = list.associate { model -> model.path to modelManager.memoryOptionsForModel(model.path) }
+            val samplingPresets = list.mapNotNull { model -> modelManager.samplingPresetForModel(model.path)?.let { model.path to it } }.toMap()
             val folder = modelManager.modelFolder()
             val folderReadable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { folder?.let { it.isDirectory && it.canRead() } == true }
             val folderFiles = if (folderReadable) modelManager.modelFolderFileCount() else 0
@@ -136,7 +139,7 @@ class ModelViewModel(
             _uiState.update {
                 it.copy(
                     models = list, drafts = drafts, incompleteImports = incomplete, modelDrafts = links, loras = loras,
-                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelMemoryOptions = memoryOptions,
+                    modelLoras = loraLinks, modelMmprojs = mmprojLinks, modelKvTypes = kvTypes, modelSpecs = specs, modelSamplingPresets = samplingPresets, modelMemoryOptions = memoryOptions,
                     modelFolder = folder?.path, modelFolderFiles = folderFiles, modelFolderReadable = folderReadable,
                     archiveSources = archiveSources, archiveEntries = archiveEntries,
                     archiveSuggestions = archiveSuggestions, downloads = downloads,
@@ -270,6 +273,13 @@ class ModelViewModel(
             } catch (e: Exception) {
                 _uiState.update { it.copy(message = e.message ?: "Could not attach the LoRA adapter") }
             }
+        }
+    }
+
+    fun setSamplingPresetForModel(modelPath: String, preset: com.bigmoe.onedge.core.SamplingPreset?) {
+        viewModelScope.launch {
+            modelManager.setSamplingPresetForModel(modelPath, preset)
+            refresh()
         }
     }
 

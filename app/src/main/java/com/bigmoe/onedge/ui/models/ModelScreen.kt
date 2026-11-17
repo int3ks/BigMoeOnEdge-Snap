@@ -454,6 +454,8 @@ fun ModelScreen(
                     spec = ui.modelSpecs[model.path],
                     loadedSpec = loadedInfo?.let { it.requested.config?.spec ?: it.config.spec },
                     onSpec = { viewModel.setSpecForModel(model.path, it) },
+                    samplingPreset = ui.modelSamplingPresets[model.path],
+                    onSamplingPreset = { viewModel.setSamplingPresetForModel(model.path, it) },
                     kvType = ui.modelKvTypes[model.path] ?: ModelManager.DEFAULT_KV_CACHE_TYPE,
                     loadedKvType = (engine as? EngineState.Ready)?.info?.takeIf { it.path == model.path }?.config?.kvCacheType,
                     onKvType = { viewModel.setKvCacheType(model.path, it) },
@@ -821,6 +823,8 @@ private fun ModelRow(
     spec: com.bigmoe.onedge.core.SpecSource?,
     loadedSpec: com.bigmoe.onedge.core.SpecSource?,
     onSpec: (com.bigmoe.onedge.core.SpecSource?) -> Unit,
+    samplingPreset: com.bigmoe.onedge.core.SamplingPreset?,
+    onSamplingPreset: (com.bigmoe.onedge.core.SamplingPreset?) -> Unit,
     kvType: com.bigmoe.onedge.core.KvCacheType,
     loadedKvType: com.bigmoe.onedge.core.KvCacheType?,
     onKvType: (com.bigmoe.onedge.core.KvCacheType) -> Unit,
@@ -896,6 +900,7 @@ private fun ModelRow(
                     ModelStatusSection(engine, settings, addOnsChanged, onUnload, onReload, onCancelLoad)
                     androidx.compose.material3.HorizontalDivider()
                 }
+                DecodingPresetRow(samplingPreset, onSamplingPreset)
                 GuessAheadRow(spec, settings.spec, loadedSpec, attachedName != null, onSpec)
                 DrafterRow(settings.copy(spec = effectiveSpec), drafts, attachedName, onAttachDraft, onPickDraft)
                 MmprojRow(projectors, attachedMmproj, isLoaded, onAttachMmproj, onPickMmproj)

@@ -616,6 +616,19 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateFrequencyPenalty(v: Float) = set(Keys.FREQUENCY_PENALTY, v.coerceIn(-2f, 2f))
     suspend fun updatePresencePenalty(v: Float) = set(Keys.PRESENCE_PENALTY, v.coerceIn(-2f, 2f))
     suspend fun updateSeed(v: Int) = set(Keys.SEED, v.coerceAtLeast(-1))
+    /** Copies [preset] into the global decoding values in one write (the seed stays). */
+    suspend fun applySamplingPreset(preset: com.bigmoe.onedge.core.SamplingPreset) {
+        context.dataStore.edit { p ->
+            p[Keys.TEMPERATURE] = preset.temperature
+            p[Keys.TOP_P] = preset.topP
+            p[Keys.TOP_K] = preset.topK
+            p[Keys.MIN_P] = preset.minP
+            p[Keys.REPEAT_PENALTY] = preset.repeatPenalty
+            p[Keys.REPEAT_LAST_N] = preset.repeatLastN
+            p[Keys.FREQUENCY_PENALTY] = preset.frequencyPenalty
+            p[Keys.PRESENCE_PENALTY] = preset.presencePenalty
+        }
+    }
     suspend fun updateCacheMb(v: Int) = set(Keys.CACHE_MB, v.coerceAtLeast(CACHE_AUTO_MB))
     suspend fun updateCacheCeilMb(v: Int) = set(Keys.CACHE_CEIL_MB, v.coerceAtLeast(0))
     suspend fun updateCacheFloorMb(v: Int) = set(Keys.CACHE_FLOOR_MB, v.coerceAtLeast(0))

@@ -116,6 +116,7 @@ class SettingsViewModel(
     fun updateTemperature(v: Float) = launch { dataStore.updateTemperature(v) }
     fun updateTopP(v: Float) = launch { dataStore.updateTopP(v) }
     fun updateTopK(v: Int) = launch { dataStore.updateTopK(v) }
+    fun applySamplingPreset(p: com.bigmoe.onedge.core.SamplingPreset) = launch { dataStore.applySamplingPreset(p) }
     fun updateMinP(v: Float) = launch { dataStore.updateMinP(v) }
     fun updateRepeatPenalty(v: Float) = launch { dataStore.updateRepeatPenalty(v) }
     fun updateRepeatLastN(v: Int) = launch { dataStore.updateRepeatLastN(v) }

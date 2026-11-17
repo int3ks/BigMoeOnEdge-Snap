@@ -552,6 +552,19 @@ class ModelManager(
         saveModelOptions(props)
     }
 
+    /** Decoding preset chosen for [modelPath] on its card; null = the global decoding settings apply. */
+    suspend fun samplingPresetForModel(modelPath: String): SamplingPreset? = withContext(io) {
+        val v = modelOptions().getProperty(encodePath(canonicalPath(modelPath)) + SAMPLING_SUFFIX)
+        SamplingPreset.values().firstOrNull { it.name == v }
+    }
+
+    suspend fun setSamplingPresetForModel(modelPath: String, preset: SamplingPreset?) = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath)) + SAMPLING_SUFFIX
+        if (preset == null) props.remove(key) else props.setProperty(key, preset.name)
+        saveModelOptions(props)
+    }
+
     private val draftLinksFile: File get() = File(modelsDir, ".draft-links.properties")
     private fun draftLinks(): java.util.Properties = java.util.Properties().also { props ->
         try { draftLinksFile.inputStream().use(props::load) } catch (_: Exception) { }
@@ -1516,6 +1529,7 @@ class ModelManager(
         /** A model without its own choice: Q8_0, about half the memory of F16 and nearly lossless. */
         val DEFAULT_KV_CACHE_TYPE = KvCacheType.Q8_0
         private const val SPEC_SUFFIX = ".spec"
+        private const val SAMPLING_SUFFIX = ".sampling"
         private const val USED_SUFFIX = ".used"
         private val LORA_MARK = "adapter.type".toByteArray(Charsets.US_ASCII)
 

@@ -126,6 +126,7 @@ private fun runDetails(r: RunInfo, timestamp: Long): String = buildList<String> 
     }
     if (engine.isNotEmpty()) add(engine.joinToString(" • "))
     val sampling = buildList<String> {
+        r.preset?.let { add("preset $it") }
         r.temperature?.let { add("temp ${fmt(it)}") }
         r.topP?.let { add("top-p ${fmt(it)}") }
         r.topK?.let { add("top-k $it") }

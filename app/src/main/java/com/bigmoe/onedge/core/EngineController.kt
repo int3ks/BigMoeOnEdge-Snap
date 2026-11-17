@@ -39,6 +39,8 @@ class EngineController(
     private val specProvider: suspend (modelPath: String) -> SpecSource? = { null },
     /** NPU prefill and expert cache chosen on a model's card; null fields = the requested (global) setting applies. */
     private val memoryOptionsProvider: suspend (modelPath: String) -> ModelMemoryOptions = { ModelMemoryOptions() },
+    /** Decoding preset chosen on a model's card; null = Settings → Decoding applies. Used per chat turn, no reload. */
+    private val samplingPresetProvider: suspend (modelPath: String) -> SamplingPreset? = { null },
     /** KV snapshots on disk (chat switch, reload, app restart without a new prefill); null = never. */
     private val kvSnapshotStore: KvSnapshotStore? = null,
     private val kvSnapshotsEnabled: suspend () -> Boolean = { false }
@@ -142,6 +144,9 @@ class EngineController(
 
     /** The loaded model, or null when none is ready. */
     fun loadedModel(): ModelInfo? = (_state.value as? EngineState.Ready)?.info
+
+    /** The decoding preset set on [modelPath]'s card, or null when it follows Settings → Decoding. */
+    suspend fun samplingPresetFor(modelPath: String): SamplingPreset? = samplingPresetProvider(modelPath)
 
     /** Build-time features of the native library; all false if the library cannot be loaded. */
     val capabilities: EngineCaps by lazy {
