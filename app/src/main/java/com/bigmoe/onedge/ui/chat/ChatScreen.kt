@@ -342,6 +342,16 @@ fun ChatScreen(
                                 if (message.role == MessageRole.ASSISTANT) {
                                     ArtifactMessageChips(uiState.artifacts.filter { it.messageId == message.id && it.language != FileKinds.FOLDER }, onOpenFile)
                                 }
+                                // An answer with a bmoe-settings block (settings advice): show the changes, apply on tap.
+                                if (message.role == MessageRole.ASSISTANT && !message.archived &&
+                                    com.bigmoe.onedge.core.SettingsAdvice.hasBlock(message.rawContent)
+                                ) {
+                                    SuggestedSettingsCard(
+                                        text = message.rawContent,
+                                        settings = uiState.settings,
+                                        onApply = { viewModel.applySuggestedSettings(it) }
+                                    )
+                                }
                                 // Last answer of a turn: page through Regenerate's answers, model and run details.
                                 message.variant?.let { v ->
                                     TurnVariantBar(

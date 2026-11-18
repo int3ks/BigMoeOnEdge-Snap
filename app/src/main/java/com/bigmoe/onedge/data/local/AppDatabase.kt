@@ -18,9 +18,10 @@ import com.bigmoe.onedge.data.local.entity.ChatSessionEntity
         ChatSessionEntity::class,
         ChatMessageEntity::class,
         AttachmentEntity::class,
-        ArtifactEntity::class
+        ArtifactEntity::class,
+        com.bigmoe.onedge.data.local.entity.PerfEventEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -29,4 +30,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun attachmentDao(): AttachmentDao
     abstract fun artifactDao(): ArtifactDao
+    abstract fun perfEventDao(): com.bigmoe.onedge.data.local.dao.PerfEventDao
 }

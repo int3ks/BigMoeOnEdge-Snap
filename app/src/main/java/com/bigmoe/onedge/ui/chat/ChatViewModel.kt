@@ -16,6 +16,7 @@ import com.bigmoe.onedge.core.MessageSink
 import com.bigmoe.onedge.core.NewMessage
 import com.bigmoe.onedge.core.MemoryWatch
 import com.bigmoe.onedge.core.RunInfo
+import com.bigmoe.onedge.core.PerfLog
 import com.bigmoe.onedge.data.repository.TurnVariants
 import kotlinx.coroutines.flow.combine
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
@@ -396,6 +397,24 @@ class ChatViewModel(
 
     fun sendMessage(promptText: String) = submitMessage(promptText, null)
 
+    /** A new chat that starts with [prompt] (Performance log -> Ask a model); queued while the model loads. */
+    fun newChatAndSend(prompt: String) {
+        newChat()
+        val opening = composerSwitchJob
+        viewModelScope.launch {
+            opening?.join()
+            sendMessage(prompt)
+        }
+    }
+
+    /** Writes the settings an answer suggested (a `bmoe-settings` block) after the user tapped Apply. */
+    fun applySuggestedSettings(changes: List<com.bigmoe.onedge.core.SettingsAdvice.Change>) {
+        viewModelScope.launch {
+            com.bigmoe.onedge.core.SettingsAdvice.apply(settingsDataStore, changes)
+            _uiState.update { it.copy(notice = "Applied ${changes.size} setting(s). They take effect at the next model load.") }
+        }
+    }
+
     /**
      * Submits a message. A non-null completion is used by the loading queue to serialize queued turns;
      * it completes only after that turn has finished (or has been rejected with a visible notice).
@@ -499,7 +518,7 @@ class ChatViewModel(
                     }
                     if (contextText.isNotBlank()) repository.addMessage(sessionId, NewMessage(MessageRole.CONTEXT, contextText))
                 }
-                val sink = RunSink(sessionId, settings)
+                val sink = RunSink(sessionId, settings, userText.length)
                 // start() sets the engine state synchronously before launching its worker. Keep the preparing
                 // flag until that state is active so the composer cannot accidentally enable a second send.
                 val started = generationManager.start(
@@ -1018,7 +1037,7 @@ class ChatViewModel(
                     repository.addMessage(session.id, NewMessage(MessageRole.CONTEXT, prepared.contextText))
                 }
                 _viewedVariants.update { it - messageId }
-                val sink = RunSink(session.id, settings)
+                val sink = RunSink(session.id, settings, clean.length)
                 started = generationManager.start(
                     session,
                     AgentRequest(session.id, plan.history, clean, settings, prepared.contextText, prepared.images),
@@ -1120,8 +1139,14 @@ class ChatViewModel(
      * Saves the messages of a turn with the model and settings it ran with ([RunInfo]) and keeps the lowest free
      * RAM seen while the generation runs (MemoryWatch samples, no extra polling).
      */
-    private inner class RunSink(private val sessionId: String, settings: EngineSettings) : MessageSink {
-        private val base = (engineController.state.value as? EngineState.Ready)?.info?.let { RunInfo.from(it, settings) }
+    private inner class RunSink(
+        private val sessionId: String,
+        settings: EngineSettings,
+        private val promptChars: Int
+    ) : MessageSink {
+        private val model = (engineController.state.value as? EngineState.Ready)?.info
+        private val base = model?.let { RunInfo.from(it, settings) }
+        private val heatStart = PerfLog.thermalNow()
         @Volatile private var minFree = Long.MAX_VALUE
         private val watch: Job = viewModelScope.launch {
             MemoryWatch.now.collect { n -> if (n != null && n.freeMb < minFree) minFree = n.freeMb }
@@ -1138,10 +1163,33 @@ class ChatViewModel(
         }
 
         override suspend fun save(message: NewMessage): String {
+            val minFreeMb = minFree.takeIf { it != Long.MAX_VALUE }
             val info = if (message.role == MessageRole.ASSISTANT && base != null) {
                 RunInfo.withPreset(base, engineController.samplingPresetFor(base.path))
-                    .copy(minFreeMb = minFree.takeIf { it != Long.MAX_VALUE }).toJson()
+                    .copy(minFreeMb = minFreeMb).toJson()
             } else null
+            val stats = message.stats
+            if (message.role == MessageRole.ASSISTANT && model != null && stats != null && stats.nGenerated > 0) {
+                PerfLog.recordTurn(model.name, org.json.JSONObject().apply {
+                    put("path", model.path)
+                    put("npuReady", model.npuPrefillReady)
+                    put("promptChars", promptChars)
+                    put("prefillTokens", stats.nPrompt)
+                    put("prefillSeconds", stats.prefillSeconds)
+                    put("ctxUsed", stats.nPast)
+                    put("nCtx", model.nCtx)
+                    put("generated", stats.nGenerated)
+                    put("decodeTps", stats.tokensPerSecond)
+                    if (stats.cacheHitPct >= 0) put("cacheHitPct", stats.cacheHitPct)
+                    message.thinkingMs?.let { put("thinkingMs", it) }
+                    message.toolMs?.let { put("toolMs", it) }
+                    minFreeMb?.let { put("minFreeMb", it) }
+                    message.note?.let { put("note", it.take(200)) }
+                    heatStart.put(this, "start")
+                    PerfLog.thermalNow().put(this, "end")
+                    put("cfg", PerfLog.configJson(model.config))
+                })
+            }
             return repository.addMessage(sessionId, message.copy(runInfo = info))
         }
     }

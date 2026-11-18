@@ -36,6 +36,11 @@ class AppContainer(private val context: Context) {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** Performance log: loads, answers and crashes into the database (core/PerfLog.kt). */
+    fun startPerfLog() {
+        com.bigmoe.onedge.core.PerfLog.start(context, database.perfEventDao(), engineController.state, appScope)
+    }
+
     /** True once when an old v1 database is detected before Room's intentional destructive upgrade. */
     private var roomUpgradeNoticePending: Boolean = detectRoomV1Upgrade()
 
@@ -63,7 +68,8 @@ class AppContainer(private val context: Context) {
                 com.bigmoe.onedge.data.local.MIGRATION_2_3,
                 com.bigmoe.onedge.data.local.MIGRATION_3_4,
                 com.bigmoe.onedge.data.local.MIGRATION_4_5,
-                com.bigmoe.onedge.data.local.MIGRATION_5_6
+                com.bigmoe.onedge.data.local.MIGRATION_5_6,
+                com.bigmoe.onedge.data.local.MIGRATION_6_7
             )
             .fallbackToDestructiveMigration()
             .build()

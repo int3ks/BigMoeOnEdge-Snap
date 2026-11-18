@@ -41,3 +41,15 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("ALTER TABLE chat_messages ADD COLUMN variants_json TEXT")
     }
 }
+
+/** Performance log (core/PerfLog.kt): loads, answers and crashes with the settings they ran with. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS perf_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "at INTEGER NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, data TEXT NOT NULL)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_perf_events_at ON perf_events (at)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_perf_events_model ON perf_events (model)")
+    }
+}

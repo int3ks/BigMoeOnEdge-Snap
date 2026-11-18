@@ -34,3 +34,14 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
 * **Settings export/import** (Settings top, `EngineSettingsDataStore.exportJson/importJson`; no paths, no API keys).
 * Right-click menu in text fields (`ui/SecondaryClick.kt`, Compose 1.6 has none), edit message in the input bar,
   per-chat toggles (tools/thinking/web) in `ChatComposerDataStore`.
+* **Regenerate variants and run info** (`data/repository/TurnVariants.kt`, `core/RunInfo.kt`, `ui/chat/TurnVariantBar.kt`):
+  earlier answers kept per user message (`variants_json`), `‹ n/m ›` under the turn's last answer; on the last turn the
+  shown answer becomes live, further up view-only. Each answer stores model + settings + lowest free RAM (`run_info`).
+* **Performance log and settings advice** (`core/PerfLog.kt`, `core/PerfAnalyzer.kt`, `core/SettingsAdvice.kt`,
+  `ui/settings/PerfLogScreen.kt`, table `perf_events`, DB v7): every load (all LoadConfig fields via reflection — the
+  app is not minified), failed load, answer (prompt chars, prefilled tokens, ctx, decode/prefill, cache hits, min free
+  RAM, Android thermal status/headroom, battery °C) and crash (MemoryWatch.onAbortedRun, matched to the newest load).
+  The analyzer groups answers by model + speed/RAM settings, medians over non-throttled answers, ranks crash-free >
+  decode t/s > time to first token, groups under 3 answers unranked. "Export for Claude" shares intro + summary + CSV;
+  "Ask a model" loads the picked model and sends `SettingsAdvice.localPrompt` into a new chat; a `bmoe-settings` JSON
+  block in an answer shows `SuggestedSettingsCard` (whitelist + ranges, Apply writes global settings).

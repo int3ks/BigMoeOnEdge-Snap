@@ -6,6 +6,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import com.bigmoe.onedge.core.EngineState
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -78,6 +80,7 @@ sealed class Screen(val route: String) {
     data object Workspace : Screen("workspace")
     data object AutoSettings : Screen("autosettings")
     data object Log : Screen("log")
+    data object PerfLog : Screen("perflog")
     data object File : Screen("file/{path}") {
         fun createRoute(path: String): String = "file/${Uri.encode(path)}"
     }
@@ -141,6 +144,30 @@ fun AppNavigation(
         }
     }
 
+    // Performance log -> "Ask a model": the model to answer and the prompt, until the model is loading or loaded.
+    var pendingAsk by remember { mutableStateOf<Pair<String, String>?>(null) }
+    LaunchedEffect(pendingAsk) {
+        val (path, prompt) = pendingAsk ?: return@LaunchedEffect
+        var sawDialog = false
+        // Loading or loaded: the prompt goes into a new chat (queued while the model loads). A load that asks first
+        // (warnings) shows its dialog on the Models page; we go there and wait for the user's answer.
+        val started = kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
+            kotlinx.coroutines.flow.combine(chatViewModel.uiState, modelViewModel.uiState) { c, m ->
+                val s = c.engineState
+                when {
+                    (s is EngineState.Ready && s.info.path == path) || (s is EngineState.Loading && s.path == path) -> true
+                    m.pendingLoad != null -> { if (!sawDialog) { sawDialog = true; goTo(TopTab.MODELS) }; null }
+                    else -> null
+                }
+            }.first { it != null }
+        }
+        pendingAsk = null
+        if (started == true) {
+            chatViewModel.newChatAndSend(prompt)
+            navController.navigate(Screen.Chat.createRoute(null)) { launchSingleTop = true }
+        }
+    }
+
     fun openChat(sessionId: String?) {
         if (sessionId == null) chatViewModel.newChat() else chatViewModel.loadSession(sessionId)
         navController.navigate(Screen.Chat.createRoute(sessionId)) { launchSingleTop = true }
@@ -183,11 +210,25 @@ fun AppNavigation(
                     onOpenModels = { goTo(TopTab.MODELS) },
                     onOpenWorkspace = { navController.navigate(Screen.Workspace.route) },
                     onOpenAutoSettings = { navController.navigate(Screen.AutoSettings.route) { launchSingleTop = true } },
+                    onOpenPerfLog = { navController.navigate(Screen.PerfLog.route) { launchSingleTop = true } },
                     onOpenLog = { goTo(TopTab.LOG) }
                 )
             }
             composable(route = Screen.Log.route) {
                 LogScreen(viewModel = settingsViewModel)
+            }
+            composable(route = Screen.PerfLog.route) {
+                val modelsUi by modelViewModel.uiState.collectAsState()
+                com.bigmoe.onedge.ui.settings.PerfLogScreen(
+                    models = modelsUi.models,
+                    onAsk = { path, prompt ->
+                        val s = chatViewModel.uiState.value.engineState
+                        val ready = (s is EngineState.Ready && s.info.path == path) || (s is EngineState.Loading && s.path == path)
+                        if (!ready) modelViewModel.requestLoad(path)
+                        pendingAsk = path to prompt
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             composable(route = Screen.AutoSettings.route) {
                 DeviceTuneScreen(

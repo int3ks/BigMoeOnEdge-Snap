@@ -27,6 +27,7 @@ class OnEdgeApplication : Application() {
                 if (s.logCapture) LogFiles.startRecording(com.bigmoe.onedge.core.EngineNativeBridge(), s.logToFile)
             }
         }.start()
+        container.startPerfLog() // before MemoryWatch: it reports a crashed run once, at start
         MemoryWatch.start(this, container.engineController.state)
         container.followCpuCoreSetting()
         container.trackModelUse()

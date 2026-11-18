@@ -62,6 +62,9 @@ object MemoryWatch {
         var lastPersistAt = 0L
     }
 
+    /** Told once at app start about a run that did not end normally (path, config, lowest free MiB, last seen ms). */
+    @Volatile var onAbortedRun: ((path: String, config: String, minFreeMb: Long, lastSeenMs: Long) -> Unit)? = null
+
     fun start(context: Context, engineState: StateFlow<EngineState>) {
         if (started) return
         started = true
@@ -194,8 +197,12 @@ object MemoryWatch {
             p.getProperty("run.min")?.toLongOrNull()?.let { p.setProperty("$k.aborted", it.toString()) }
             p.setProperty("$k.abortedConfig", p.getProperty("run.config") ?: "")
             p.setProperty("$k.abortedAt", p.getProperty("run.seen") ?: "0")
+            val config = p.getProperty("$k.abortedConfig") ?: ""
+            val min = p.getProperty("run.min")?.toLongOrNull() ?: -1L
+            val seen = p.getProperty("run.seen")?.toLongOrNull() ?: 0L
             listOf("run.path", "run.config", "run.min", "run.seen").forEach { p.remove(it) }
             save(p)
+            runCatching { onAbortedRun?.invoke(path, config, min, seen) }
         } else {
             publish(p)
         }

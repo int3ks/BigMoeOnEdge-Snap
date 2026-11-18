@@ -121,6 +121,7 @@ fun SettingsScreen(
     onOpenModels: () -> Unit,
     onOpenWorkspace: () -> Unit,
     onOpenAutoSettings: () -> Unit,
+    onOpenPerfLog: () -> Unit = {},
     onOpenLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -151,6 +152,7 @@ fun SettingsScreen(
                 onOpenModels = onOpenModels,
                 onOpenWorkspace = onOpenWorkspace,
                 onOpenAutoSettings = onOpenAutoSettings,
+                onOpenPerfLog = onOpenPerfLog,
                 onOpenLog = onOpenLog,
                 modifier = Modifier.fillMaxSize().padding(innerPadding)
             )
@@ -167,6 +169,7 @@ private fun SettingsContent(
     onOpenModels: () -> Unit,
     onOpenWorkspace: () -> Unit,
     onOpenAutoSettings: () -> Unit,
+    onOpenPerfLog: () -> Unit = {},
     onOpenLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -224,6 +227,12 @@ private fun SettingsContent(
 
     Column(modifier = modifier.padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         AutoSettingsEntry(onClick = onOpenAutoSettings)
+        Spacer(Modifier.height(8.dp))
+        AutoSettingsEntry(
+            onClick = onOpenPerfLog,
+            title = "Performance log",
+            text = "Every load, answer and crash with its settings, speed, RAM and heat: summary, export for Claude, and a model's settings advice"
+        )
         Spacer(Modifier.height(10.dp))
         AppUpdateCard()
         Spacer(Modifier.height(10.dp))
@@ -922,7 +931,11 @@ private fun SettingsBackupRow(viewModel: SettingsViewModel) {
 }
 
 @Composable
-private fun AutoSettingsEntry(onClick: () -> Unit) {
+private fun AutoSettingsEntry(
+    onClick: () -> Unit,
+    title: String = "Auto settings",
+    text: String = "Measures the best threads, expert cache, I/O lanes, prompt batch width and NPU settings for this device with a model you pick"
+) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
@@ -934,17 +947,17 @@ private fun AutoSettingsEntry(onClick: () -> Unit) {
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    "Auto settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                    title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    "Measures the best threads, expert cache, I/O lanes, prompt batch width and NPU settings for this device with a model you pick",
+                    text,
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = "Open Auto settings",
+                contentDescription = "Open $title",
                 tint = MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
