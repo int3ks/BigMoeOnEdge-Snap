@@ -110,6 +110,25 @@ object LogFiles {
         return null
     }
 
+    /** Log files (both places) written to since [sinceMs], oldest first: the performance log's export offers them. */
+    fun filesSince(sinceMs: Long): List<File> = listOf(File(workspaceRoot(), ".bigmoe/logs"), File(appContext.filesDir, "logs"))
+        .flatMap { d -> d.listFiles { f -> f.isFile && f.name.startsWith("bigmoe-") && f.name.endsWith(".log") }.orEmpty().toList() }
+        .filter { it.lastModified() >= sinceMs }
+        .sortedBy { it.name }
+
+    /** The last [maxBytes] of [file] from a line start (the whole file when smaller). */
+    fun tail(file: File, maxBytes: Long): String = runCatching {
+        java.io.RandomAccessFile(file, "r").use { raf ->
+            val len = raf.length()
+            val start = (len - maxBytes).coerceAtLeast(0L)
+            raf.seek(start)
+            val bytes = ByteArray((len - start).toInt())
+            raf.readFully(bytes)
+            val text = String(bytes, Charsets.UTF_8)
+            if (start > 0) text.substringAfter('\n') else text
+        }
+    }.getOrDefault("")
+
     private fun prune(dir: File) {
         val files = dir.listFiles { f -> f.isFile && f.name.startsWith("bigmoe-") && f.name.endsWith(".log") } ?: return
         files.sortedByDescending { it.name }.drop(KEEP_FILES).forEach { runCatching { it.delete() } }

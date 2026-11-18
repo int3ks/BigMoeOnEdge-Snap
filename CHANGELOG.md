@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Export with log files:** while Log → "Write to file" is on, "Export for Claude" asks whether to include the log files written during the logged period (the last 300 KB of each; logs can contain prompt text).
 - **Share into BigMoe²** (`ui/share/ShareTarget.kt`, intent filters SEND / SEND_MULTIPLE `*/*`): text, pictures, PDFs and other files from any app. A dialog picks a new or recent chat and, when no model is loaded, the model to load (a load that asks first switches to the Models page). Text is added to the message box, files are attached; pictures and videos wait until a model is loaded (vision check as usual). Nothing is sent automatically.
 - README: sections for the model archive, comparing models and settings (variants, run info, performance log, export, Ask a model) and sharing.
 - **Performance log fixes after the first real export:** the advice listed the old `threadCount`/`batchThreadCount` settings (8/8), which the engine no longer uses — threads are the CPU cores chosen in Settings, so the log's 6/6 was right. The knobs are now `decodeCores`/`prefillCores` (a count = the fastest cores, or a list of core numbers), answers record the live thread counts and cores, and the summary groups by them. `freeBeforeMb` is only recorded when no model was loaded before (a replaced model is still in RAM then; `replaced` names it).

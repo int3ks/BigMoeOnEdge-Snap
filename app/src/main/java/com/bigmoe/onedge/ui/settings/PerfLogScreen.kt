@@ -83,6 +83,8 @@ fun PerfLogScreen(
     var askOpen by remember { mutableStateOf(false) }
     var clearOpen by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableStateOf(0) }
+    // Export: log files of the period waiting for the user's yes/no (only offered while "Write to file" is on).
+    var offerLogs by remember { mutableStateOf<List<File>?>(null) }
     val turnCount = remember { PerfLog.counts("turn") ?: kotlinx.coroutines.flow.flowOf(0) }
     val turns by turnCount.collectAsState(initial = 0)
 
@@ -121,9 +123,11 @@ fun PerfLogScreen(
                 OutlinedButton(onClick = {
                     scope.launch {
                         val settings = container.settingsDataStore.settingsFlow.first()
-                        val text = SettingsAdvice.exportIntro(settings) + "\n\n" + report +
-                            "\n\n## All entries (CSV)\n```csv\n" + PerfAnalyzer.csv(events) + "```\n"
-                        shareText(context, text)
+                        val since = events.firstOrNull()?.at ?: 0L
+                        val logs = if (settings.logToFile) {
+                            withContext(Dispatchers.IO) { com.bigmoe.onedge.core.LogFiles.filesSince(since) }
+                        } else emptyList()
+                        if (logs.isEmpty()) exportReport(context, container, report, events, emptyList()) else offerLogs = logs
                     }
                 }, enabled = events.isNotEmpty()) { Text("Export for Claude") }
                 TextButton(onClick = { clearOpen = true }, enabled = events.isNotEmpty()) { Text("Clear log") }
@@ -145,6 +149,25 @@ fun PerfLogScreen(
                     val settings = container.settingsDataStore.settingsFlow.first()
                     onAsk(model.path, SettingsAdvice.localPrompt(report, settings, about))
                 }
+            }
+        )
+    }
+    offerLogs?.let { logs ->
+        val mb = logs.sumOf { it.length() } / (1024.0 * 1024.0)
+        AlertDialog(
+            onDismissRequest = { offerLogs = null },
+            title = { Text("Include the log file?") },
+            text = {
+                Text(
+                    "${logs.size} log file(s) from this period (${String.format(Locale.US, "%.1f", mb)} MB). The end of each " +
+                        "(up to ${LOG_TAIL_KB} KB) goes into the export. Logs can contain parts of your prompts."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { offerLogs = null; scope.launch { exportReport(context, container, report, events, logs) } }) { Text("Include") }
+            },
+            dismissButton = {
+                TextButton(onClick = { offerLogs = null; scope.launch { exportReport(context, container, report, events, emptyList()) } }) { Text("Without") }
             }
         )
     }
@@ -191,6 +214,31 @@ private fun AskDialog(models: List<ModelFile>, about: String?, onDismiss: () -> 
         confirmButton = { TextButton(onClick = { picked?.let(onAsk) }, enabled = picked != null) { Text("Ask") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+private const val LOG_TAIL_KB = 300L
+
+private suspend fun exportReport(
+    context: Context,
+    container: com.bigmoe.onedge.di.AppContainer,
+    report: String,
+    events: List<PerfEventEntity>,
+    logs: List<File>
+) {
+    val settings = container.settingsDataStore.settingsFlow.first()
+    val text = buildString {
+        append(SettingsAdvice.exportIntro(settings)).append("\n\n").append(report)
+        append("\n\n## All entries (CSV)\n```csv\n").append(PerfAnalyzer.csv(events)).append("```\n")
+        if (logs.isNotEmpty()) {
+            append("\n## Log files (engine and llama.cpp; the end of each file)\n")
+            withContext(Dispatchers.IO) {
+                logs.forEach { f ->
+                    append("\n### ${f.name}\n```\n").append(com.bigmoe.onedge.core.LogFiles.tail(f, LOG_TAIL_KB * 1024)).append("\n```\n")
+                }
+            }
+        }
+    }
+    shareText(context, text)
 }
 
 private fun totalRamMb(context: Context): Long {
