@@ -19,9 +19,9 @@ sealed interface SpeechIssue {
     /** "Online speech" is on, but there is no speech recognition service at all. */
     data object NoRecognizer : SpeechIssue
     /** The recognizer is there, but not its offline language pack. */
-    data class LanguagePackMissing(val language: String, val downloadRequested: Boolean) : SpeechIssue
+    data class LanguagePackMissing(val language: String, val downloadRequested: Boolean, val service: String) : SpeechIssue
     data object MicrophoneDenied : SpeechIssue
-    data class RecognizerError(val code: Int) : SpeechIssue
+    data class RecognizerError(val code: Int, val service: String) : SpeechIssue
     /** No text-to-speech engine at all, or it failed to start. */
     data object NoTtsEngine : SpeechIssue
     /** No installed offline voice for [language]. */
@@ -50,11 +50,10 @@ fun SpeechIssueDialog(issue: SpeechIssue, onDismiss: () -> Unit) {
         }
         is SpeechIssue.LanguagePackMissing -> {
             title = "Offline language missing"
-            body = if (issue.downloadRequested) {
-                "The offline language pack for ${languageName(issue.language)} was requested. Try again once it is installed."
-            } else {
-                "Install the offline language pack for ${languageName(issue.language)} in the speech service's settings."
-            }
+            body = "${issue.service} has no language pack for ${languageName(issue.language)}" +
+                (if (issue.downloadRequested) ", the download was requested. Try again once it is installed."
+                else ". Install it in that service's settings.") +
+                " Every recognition service Android lists was tried."
         }
         SpeechIssue.MicrophoneDenied -> {
             title = "Microphone not allowed"
@@ -71,7 +70,7 @@ fun SpeechIssueDialog(issue: SpeechIssue, onDismiss: () -> Unit) {
         }
         is SpeechIssue.RecognizerError -> {
             title = "Dictation stopped"
-            body = "The speech recognizer reported error ${issue.code}${recognizerErrorName(issue.code)?.let { " ($it)" } ?: ""}."
+            body = "${issue.service} reported error ${issue.code}${recognizerErrorName(issue.code)?.let { " ($it)" } ?: ""}."
         }
         SpeechIssue.NoTtsEngine -> {
             title = "No speech output"

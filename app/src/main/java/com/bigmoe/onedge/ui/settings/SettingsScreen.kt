@@ -339,7 +339,8 @@ private fun SettingsContent(
                 "Off: only offline - dictation needs an on-device recognizer, read aloud uses offline voices. " +
                     "On: when the device has no on-device recognizer, dictation uses the normal one (Google; an installed " +
                     "offline language pack is preferred, otherwise the audio goes to Google), and read aloud prefers a " +
-                    "network voice while the device is online.",
+                    "network voice while the device is online." +
+                    (com.bigmoe.onedge.speech.SpeechPrefs.dictationService.value?.let { " Dictation last used: $it." } ?: ""),
                 com.bigmoe.onedge.speech.SpeechPrefs.allowOnline(context)
             ) { com.bigmoe.onedge.speech.SpeechPrefs.setAllowOnline(context, it) }
             }

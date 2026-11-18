@@ -47,18 +47,24 @@ object SpeechPrefs {
                 .mapNotNull { it.serviceInfo?.let { s -> ComponentName(s.packageName, s.name) } }
         }.getOrDefault(emptyList())
 
-    /** The system's chosen voice input service if it is installed, else Google's app, else Speech Services, else any. */
-    fun onlineRecognizer(context: Context): ComponentName? {
+    /** The system's chosen voice input service first, then Google's app, then Speech Services, then any other. */
+    fun onlineRecognizers(context: Context): List<ComponentName> {
         val services = recognitionServices(context)
-        if (services.isEmpty()) return null
         val chosen = runCatching {
             Settings.Secure.getString(context.contentResolver, "voice_recognition_service")
         }.getOrNull()?.let { ComponentName.unflattenFromString(it) }
-        return services.firstOrNull { it == chosen }
-            ?: services.firstOrNull { it.packageName == GOOGLE_APP }
-            ?: services.firstOrNull { it.packageName == SpeechOutput.GOOGLE_TTS }
-            ?: services.first()
+        return services.sortedBy {
+            when {
+                it == chosen -> 0
+                it.packageName == GOOGLE_APP -> 1
+                it.packageName == SpeechOutput.GOOGLE_TTS -> 2
+                else -> 3
+            }
+        }
     }
+
+    /** What dictation used last (shown in Settings), null before the first use. */
+    val dictationService = mutableStateOf<String?>(null)
 
     fun isOnline(context: Context): Boolean = runCatching {
         val cm = context.getSystemService(ConnectivityManager::class.java)
