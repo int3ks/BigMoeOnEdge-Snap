@@ -22,7 +22,9 @@ object SettingsAdvice {
         val current: (EngineSettings) -> String,
         /** The value from JSON as the setting's type, or null when it is not valid. */
         val parse: (Any) -> Any?,
-        val apply: suspend (EngineSettingsDataStore, Any) -> Unit
+        val apply: suspend (EngineSettingsDataStore, Any) -> Unit,
+        /** How a value (as [current] gives it, or as [parse] returns it) is shown to the user. */
+        val show: (String) -> String = { it }
     )
 
     private fun int(
@@ -51,13 +53,49 @@ object SettingsAdvice {
         )
     }
 
+    /** Core numbers of a mask, e.g. "0,1,6,7". */
+    fun coreList(mask: Long): String = (0 until 64).filter { (mask shr it) and 1L == 1L }.joinToString(",")
+
+    private fun showMask(raw: String): String {
+        val m = raw.toLongOrNull() ?: return raw
+        return "${java.lang.Long.bitCount(m)} threads (cores ${coreList(m)})"
+    }
+
+    /**
+     * The threads are the CPU cores chosen in Settings (one thread per core). A suggestion gives either a count —
+     * the app takes that many of the fastest cores — or a list of core numbers.
+     */
+    private fun cores(
+        key: String, label: String, cfgName: String,
+        get: (EngineSettings) -> Long, set: suspend (EngineSettingsDataStore, Long) -> Unit
+    ) = Knob(
+        key, label, cfgName,
+        "a count 1..${CpuTopology.coreCount} (the fastest cores) or a list of core numbers 0..${CpuTopology.coreCount - 1}",
+        { CpuTopology.effective(get(it)).toString() },
+        { v ->
+            val n = CpuTopology.coreCount
+            val mask = when (v) {
+                is Number -> v.toInt().takeIf { it in 1..n }?.let { c ->
+                    CpuTopology.fastestFirst(0L).take(c).fold(0L) { m, core -> m or (1L shl core) }
+                }
+                is org.json.JSONArray -> (0 until v.length()).map { v.optInt(it, -1) }
+                    .takeIf { l -> l.isNotEmpty() && l.all { it in 0 until n } }
+                    ?.fold(0L) { m, core -> m or (1L shl core) }
+                else -> null
+            }
+            mask
+        },
+        { ds, v -> set(ds, v as Long) },
+        ::showMask
+    )
+
     val KNOBS: List<Knob> = listOf(
         int("cacheMb", "Expert cache (MiB)", "cacheMb/cacheMode", -1, 65536, "; -1 = auto from free RAM, 0 = off",
             { it.cacheMb }, { ds, v -> ds.updateCacheMb(v) }),
         bool("npuPrefill", "NPU prefill", "npuPrefill", { it.npuPrefill }, { ds, v -> ds.updateNpuPrefill(v) }),
         int("batchWidth", "Prompt batch width", "batchWidth", 32, 8192, "", { it.batchWidth }, { ds, v -> ds.updateBatchWidth(v) }),
-        int("threadCount", "Threads (decode)", "nThreads", 1, 32, "", { it.threadCount }, { ds, v -> ds.updateThreadCount(v) }),
-        int("batchThreadCount", "Threads (prefill)", "nThreadsBatch", 1, 32, "", { it.batchThreadCount }, { ds, v -> ds.updateBatchThreadCount(v) }),
+        cores("decodeCores", "CPU cores (decode)", "nThreads / decodeCores", { it.cpuMask }, { ds, m -> ds.updateCpuMask(m) }),
+        cores("prefillCores", "CPU cores (prefill)", "nThreadsBatch / prefillCores", { it.cpuMaskPrefill }, { ds, m -> ds.updateCpuMaskPrefill(m) }),
         int("contextLength", "Context length", "nCtx", 512, 262144, "", { it.contextLength }, { ds, v -> ds.updateContextLength(v) }),
         enumKnob<DenseWeights>("denseWeights", "Dense weights", "denseWeights", { it.denseWeights }, { ds, v -> ds.updateDenseWeights(v) }),
         int("ioThreads", "I/O lanes", "ioThreads", 1, 8, "", { it.ioThreads }, { ds, v -> ds.updateIoThreads(v) }),
@@ -98,7 +136,7 @@ object SettingsAdvice {
     }
 
     private fun knobList(settings: EngineSettings?): String = KNOBS.joinToString("\n") { k ->
-        "- ${k.key} (${k.label}; logged as cfg.${k.cfgName}): ${k.range}" + (settings?.let { " — now ${k.current(it)}" } ?: "")
+        "- ${k.key} (${k.label}; logged as cfg.${k.cfgName}): ${k.range}" + (settings?.let { " — now ${k.show(k.current(it))}" } ?: "")
     }
 
     /** What every setting does and what each logged field means; shared by both prompts. */
@@ -116,7 +154,9 @@ object SettingsAdvice {
           the NPU cannot take as they are. Without it the CPU prefills and the expert cache fills up right away.
         - Prompt batch width (batchWidth): tokens per prefill pass, CPU and NPU. The CPU's compute buffer grows with it
           (measured about 80 MiB at 512, 2.2 GB at 2048 on a 35B-A3B). Decode is not affected.
-        - Threads: decode threads (nThreads) and prefill threads (nThreadsBatch).
+        - Threads: one thread per CPU core chosen in Settings, separately for decode (decodeCores, logged as
+          decodeThreads/decodeCores, live) and prefill (prefillCores). cfg.nThreads/nThreadsBatch are the counts at
+          load time. (The old "threadCount" settings are not used any more.)
         - Dense weights (denseWeights): MMAP (pageable, Android can drop and re-read them), WARMED, ANONYMOUS (copied
           into RAM, the default), PINNED (locked in RAM).
         - Guess ahead (spec): OFF, MTP (the model's own prediction head) or NGRAM (drafts from text already seen).
@@ -130,8 +170,15 @@ object SettingsAdvice {
           ctxUsed of nCtx = context filled after the answer; generated = answer tokens; decodeTps; cacheHitPct = expert
           cache hits; minFreeMb = lowest free RAM during the answer (sampled every 2 s); startThermal/endThermal =
           Android thermal status (0 none, 1 light, 2 moderate, 3 severe, 4 critical); Headroom = how close the device
-          is to throttling (1.0 = throttling now); BatteryC = battery temperature; cfg.* = all load settings.
-        - load: loadSeconds, freeBeforeMb/freeAfterMb, npuReady (the NPU was really set up), cfg.*.
+          is to throttling (1.0 = throttling now); BatteryC = battery temperature; cfg.* = all load settings;
+          engine.* = the engine's own figures for the answer: n_prompt_total/n_reused (prompt tokens, of them reused
+          from the KV cache), cache_resident_mib/cache_budget_mib (expert cache really filled / its budget),
+          cache_evictions, moe_read_mib (read from flash), s_per_token split into compute/io/stall_s_per_token,
+          cores_busy (cpu time / wall time; near the thread count = compute-bound, low = waiting), majflt_per_token,
+          drafted/accepted/verify_decodes (guess ahead: proposed and confirmed tokens), prefill_device_tokens/nodes
+          (> 0 = the prefill really ran on the NPU).
+        - load: loadSeconds, freeBeforeMb (only when no model was loaded before; "replaced" names the model a load
+          replaced), freeAfterMb, npuReady (the NPU was really set up), cfg.*.
         - crash: the app ended while a model was loaded — almost always Android killing it for RAM; minFreeMb is the
           lowest free RAM seen before; it is matched to the newest load of that model before it.
         - load_failed: the error of a load that did not finish.

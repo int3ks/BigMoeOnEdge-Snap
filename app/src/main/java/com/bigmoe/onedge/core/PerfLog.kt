@@ -61,12 +61,18 @@ object PerfLog {
         appScope.launch {
             var loadingPath: String? = null
             var freeBefore = -1L
+            var replacing: String? = null
             var heatBefore: Thermal? = null
+            var previous: EngineState = EngineState.Unloaded
             engineState.collect { s ->
                 when (s) {
                     is EngineState.Loading -> if (loadingPath != s.path) {
                         loadingPath = s.path
-                        freeBefore = freeMbNow()
+                        // Free RAM before the load means something only with nothing loaded: a model being replaced
+                        // is still in RAM at this point and goes during the load.
+                        val prev = previous
+                        replacing = (prev as? EngineState.Ready)?.info?.name
+                        freeBefore = if (replacing == null) freeMbNow() else -1L
                         heatBefore = thermalNow()
                     }
                     is EngineState.Ready -> if (loadingPath == s.info.path) {
@@ -80,6 +86,7 @@ object PerfLog {
                             s.info.draftModelPath?.let { put("draft", File(it).name) }
                             s.info.loadWarning?.let { put("warning", it) }
                             if (freeBefore >= 0) put("freeBeforeMb", freeBefore)
+                            replacing?.let { put("replaced", it) }
                             put("freeAfterMb", freeMbNow())
                             heatBefore?.put(this, "start")
                             thermalNow().put(this, "end")
@@ -97,7 +104,7 @@ object PerfLog {
                     }
                     EngineState.Unloaded -> loadingPath = null
                 }
-                Unit
+                previous = s
             }
         }
     }

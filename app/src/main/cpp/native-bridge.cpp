@@ -24,6 +24,7 @@
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <cmath>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -147,7 +148,53 @@ private:
 // decomposition. cores_busy = cpu_s/token / wall_s/token: close to the thread count means compute-bound;
 // much lower means cores were waiting (flash stall) or throttled/preempted. Read with:
 //   adb logcat -s OnEdge-JNI
+// The last generation's engine figures as JSON, for the app's performance log (nativeLastRunJson). Written by the
+// generating thread, read by the UI thread after the turn: a mutex, no hot path.
+static std::mutex g_last_run_mu;
+static std::string g_last_run_json;
+
+static void remember_run(const bmoe::RunSummary & s) {
+    std::string j = "{";
+    bool first = true;
+    auto num = [&](const char * k, double v) {
+        if (!std::isfinite(v)) return;
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%.4f", v);
+        j += (first ? "\"" : ",\"");
+        j += k;
+        j += "\":";
+        j += buf;
+        first = false;
+    };
+    num("n_prompt_total", s.n_prompt_total);
+    num("n_reused", s.n_reused);
+    num("kv_reuse", s.kv_reuse);
+    num("cache_resident_mib", s.cache_resident_mib);
+    num("cache_budget_mib", s.cache_budget_mib);
+    num("cache_evictions", (double) s.cache_evictions);
+    num("cache_rereads", (double) s.cache_rereads);
+    num("moe_read_mib", s.moe_read_mib);
+    num("s_per_token", s.s_per_token);
+    num("compute_s_per_token", s.moe_compute_s_per_token);
+    num("io_s_per_token", s.moe_io_s_per_token);
+    num("stall_s_per_token", s.moe_stall_s_per_token);
+    num("cpu_s_per_token", s.cpu_s_per_token);
+    num("cores_busy", s.s_per_token > 0.0 ? s.cpu_s_per_token / s.s_per_token : 0.0);
+    num("majflt_per_token", s.majflt_per_token);
+    num("drafted", (double) s.mtp_drafted);
+    num("accepted", (double) s.mtp_accepted);
+    num("verify_decodes", (double) s.mtp_decodes);
+    num("prefill_device_tokens", s.prefill_device_tokens);
+    num("prefill_device_nodes", (double) s.prefill_device_nodes);
+    num("prefill_device_read_mib", s.prefill_device_read_mib);
+    num("prefill_device_stall_s", s.prefill_device_stall_seconds);
+    j += "}";
+    std::lock_guard<std::mutex> lock(g_last_run_mu);
+    g_last_run_json = std::move(j);
+}
+
 static void log_run_stats(const bmoe::RunSummary & s, bool npu_requested) {
+    remember_run(s);
     const double cores_busy = s.s_per_token > 0.0 ? s.cpu_s_per_token / s.s_per_token : 0.0;
     LOGI("Run stats: n_gen=%d tok/s=%.3f s/tok=%.3f compute_s/tok=%.3f io_s/tok=%.3f stall_s/tok=%.3f "
          "mgmt_s/tok=%.3f cpu_s/tok=%.3f cores_busy=%.2f majflt/tok=%.1f loop_overhead_s/tok=%.4f "
@@ -570,6 +617,13 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
     LOGI("CPU features compiled in: neon=%d fp16_va=%d dotprod=%d i8mm=%d", ggml_cpu_has_neon(), ggml_cpu_has_fp16_va(),
          ggml_cpu_has_dotprod(), ggml_cpu_has_matmul_int8());
     return to_bytes(env, std::string());
+}
+
+// The engine figures of the last generation as JSON ("" before the first one): performance log.
+JNIEXPORT jstring JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLastRunJson(JNIEnv * env, jobject) {
+    std::lock_guard<std::mutex> lock(g_last_run_mu);
+    return env->NewStringUTF(g_last_run_json.c_str());
 }
 
 // How far the running nativeLoadModel has got: step * 1000 + permille within the step (bmoe/load_progress.h),

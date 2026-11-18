@@ -188,6 +188,9 @@ class EngineController(
     /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */
     fun allowedCpus(): Long = try { backend.allowedCpus() } catch (_: Throwable) { 0L }
 
+    /** Engine figures of the last generation (cache residency, flash reads, drafts, NPU use) as JSON, or null. */
+    fun lastRunJson(): String? = try { backend.lastRunJson() } catch (_: Throwable) { null }
+
     /**
      * Loads [modelPath]; blocks (on the IO dispatcher) for as long as the engine takes. Any previously
      * loaded model is released first. Returns null on success or the error message.

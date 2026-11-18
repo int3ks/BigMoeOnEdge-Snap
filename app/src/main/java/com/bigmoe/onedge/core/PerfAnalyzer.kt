@@ -36,12 +36,13 @@ object PerfAnalyzer {
         val comparable get() = turns
     }
 
-    fun settingsKey(cfg: JSONObject?, npu: Boolean): String {
+    /** [live]: values that can change after the load (threads follow the CPU cores live) and win over cfg. */
+    fun settingsKey(cfg: JSONObject?, npu: Boolean, live: Map<String, Any> = emptyMap()): String {
         val parts = mutableListOf("npu=${if (npu) "on" else "off"}")
         if (cfg != null) {
             for (k in GROUP_KEYS) {
-                if (!cfg.has(k)) continue
-                val v = cfg.get(k)
+                if (!cfg.has(k) && k !in live) continue
+                val v = live[k] ?: cfg.get(k)
                 // The cache size only means something in FIXED mode.
                 if (k == "cacheMb" && cfg.optString("cacheMode") != "FIXED") {
                     parts += "cache=${cfg.optString("cacheMode").lowercase()}"
@@ -91,7 +92,11 @@ object PerfAnalyzer {
             for ((e, d) in list) {
                 when (e.kind) {
                     "turn" -> {
-                        val key = settingsKey(d.optJSONObject("cfg"), d.optBoolean("npuReady"))
+                        val live = buildMap<String, Any> {
+                            if (d.has("decodeThreads")) put("nThreads", d.getInt("decodeThreads"))
+                            if (d.has("prefillThreads")) put("nThreadsBatch", d.getInt("prefillThreads"))
+                        }
+                        val key = settingsKey(d.optJSONObject("cfg"), d.optBoolean("npuReady"), live)
                         val g = groups.getOrPut(key) { Group(key) }
                         if (d.optInt("startThermal", 0) >= THROTTLED) g.throttled++ else g.turns += Turn(e.at, d, key)
                     }
@@ -150,6 +155,20 @@ object PerfAnalyzer {
         median(hit)?.let { parts += "expert cache hits median ${f1(it)} %" }
         median(ctx)?.let { parts += "context used median ${it.toInt()}" + if (nCtx > 0) " of $nCtx" else "" }
         ram.minOrNull()?.let { parts += "lowest free RAM $it MiB" }
+        // The engine's own figures (answers recorded from v0.6.91 on).
+        val eng = t.mapNotNull { it.d.optJSONObject("engine") }
+        if (eng.isNotEmpty()) {
+            fun med(k: String) = median(eng.filter { it.has(k) }.map { it.optDouble(k) })
+            med("cache_resident_mib")?.let { r ->
+                parts += "cache filled median ${r.toInt()} of ${med("cache_budget_mib")?.toInt() ?: "?"} MiB"
+            }
+            med("stall_s_per_token")?.let { parts += "flash stall median ${f1(it * 1000)} ms/token" }
+            med("cores_busy")?.let { parts += "cores busy median ${f1(it)}" }
+            val drafted = eng.sumOf { it.optDouble("drafted", 0.0) }
+            if (drafted > 0) parts += "guess ahead accepted ${f1(100 * eng.sumOf { it.optDouble("accepted", 0.0) } / drafted)} % of ${drafted.toInt()} drafted"
+            val npuTurns = eng.count { it.optDouble("prefill_device_nodes", 0.0) > 0 }
+            parts += "prefill on NPU in $npuTurns of ${eng.size}"
+        }
         sb.appendLine("   " + parts.joinToString(" | "))
         if (t.size < MIN_ANSWERS) sb.appendLine("   not ranked: fewer than $MIN_ANSWERS comparable answers")
         return sb.toString()

@@ -20,6 +20,9 @@ interface EngineBackend {
     /** CPU cores Android lets the app use (bit i = cpu i), 0 = unknown. */
     fun allowedCpus(): Long = 0L
 
+    /** The engine figures of the last generation as JSON; null when unknown. */
+    fun lastRunJson(): String? = null
+
     /** Live, between generations: compute threads of the loaded session (decode, prompt graphs). */
     fun setThreads(decode: Int, prefill: Int) {}
 
@@ -118,6 +121,8 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun setCpuMasks(decode: Long, prefill: Long) = bridge.nativeSetCpuMasks(decode, prefill)
 
     override fun allowedCpus(): Long = bridge.nativeAllowedCpus()
+
+    override fun lastRunJson(): String? = bridge.nativeLastRunJson().ifBlank { null }
 
     override fun setThreads(decode: Int, prefill: Int) = bridge.nativeSetThreads(decode, prefill)
 

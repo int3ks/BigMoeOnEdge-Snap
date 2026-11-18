@@ -1147,6 +1147,9 @@ class ChatViewModel(
         private val model = (engineController.state.value as? EngineState.Ready)?.info
         private val base = model?.let { RunInfo.from(it, settings) }
         private val heatStart = PerfLog.thermalNow()
+        // Threads follow the CPU cores chosen in Settings, live (not the load-time value in cfg).
+        private val decodeMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMask)
+        private val prefillMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMaskPrefill)
         @Volatile private var minFree = Long.MAX_VALUE
         private val watch: Job = viewModelScope.launch {
             MemoryWatch.now.collect { n -> if (n != null && n.freeMb < minFree) minFree = n.freeMb }
@@ -1187,6 +1190,11 @@ class ChatViewModel(
                     message.note?.let { put("note", it.take(200)) }
                     heatStart.put(this, "start")
                     PerfLog.thermalNow().put(this, "end")
+                    put("decodeThreads", java.lang.Long.bitCount(decodeMask))
+                    put("prefillThreads", java.lang.Long.bitCount(prefillMask))
+                    put("decodeCores", com.bigmoe.onedge.core.SettingsAdvice.coreList(decodeMask))
+                    put("prefillCores", com.bigmoe.onedge.core.SettingsAdvice.coreList(prefillMask))
+                    engineController.lastRunJson()?.let { j -> runCatching { put("engine", org.json.JSONObject(j)) } }
                     put("cfg", PerfLog.configJson(model.config))
                 })
             }

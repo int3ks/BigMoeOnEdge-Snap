@@ -43,7 +43,7 @@ fun SuggestedSettingsCard(
                 )
             }
             suggestion.changes.forEach { c ->
-                Text("${c.knob.label}: ${c.current} → ${c.value}", style = MaterialTheme.typography.bodyMedium)
+                Text("${c.knob.label}: ${c.knob.show(c.current)} → ${c.knob.show(c.value.toString())}", style = MaterialTheme.typography.bodyMedium)
             }
             suggestion.ignored.forEach { Text("Left out: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             if (suggestion.changes.isNotEmpty()) {

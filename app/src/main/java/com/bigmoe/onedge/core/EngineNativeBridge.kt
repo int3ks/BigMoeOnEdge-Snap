@@ -96,6 +96,9 @@ class EngineNativeBridge {
      * The CPU cores (bit i = cpu i) the engine's compute threads run on: [decode] for single-token graphs, [prefill]
      * for batched (prompt) graphs; 0 = Android decides. Applies from the next graph computed.
      */
+    /** The engine figures of the last generation as JSON ("" before the first one), for the performance log. */
+    external fun nativeLastRunJson(): String
+
     external fun nativeSetCpuMasks(decode: Long, prefill: Long)
 
     /** Compute threads of the loaded session (decode, prompt), from the next graph on. Only between generations. */
