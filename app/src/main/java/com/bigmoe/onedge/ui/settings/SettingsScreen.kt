@@ -325,7 +325,7 @@ private fun SettingsContent(
         Spacer(Modifier.height(8.dp))
 
         SettingsFoldout(
-            title = "Chat", subtitle = "System prompts for your chats", expanded = chatExpanded,
+            title = "Chat", subtitle = "System prompts, dictation and read aloud", expanded = chatExpanded,
             onToggle = { chatExpanded = !chatExpanded }
         )
         androidx.compose.animation.AnimatedVisibility(visible = chatExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
@@ -333,6 +333,15 @@ private fun SettingsContent(
             // ------------------------------------------------------------ chat (system prompts)
             SystemPromptsSection(settings = settings, viewModel = viewModel)
             Divider()
+            Section("Dictation and read aloud")
+            SwitchRow(
+                "Online speech (Google)",
+                "Off: only offline - dictation needs an on-device recognizer, read aloud uses offline voices. " +
+                    "On: when the device has no on-device recognizer, dictation uses the normal one (Google; an installed " +
+                    "offline language pack is preferred, otherwise the audio goes to Google), and read aloud prefers a " +
+                    "network voice while the device is online.",
+                com.bigmoe.onedge.speech.SpeechPrefs.allowOnline(context)
+            ) { com.bigmoe.onedge.speech.SpeechPrefs.setAllowOnline(context, it) }
             }
         }
         Spacer(Modifier.height(8.dp))

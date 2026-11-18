@@ -51,4 +51,6 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
   `TextToSpeech`, offline voices only, default engine then Speech Services by Google; `SpeakableText` drops code,
   links, Markdown, splits into ≤400-char sentence chunks, guesses de/en). Both are separate from the chat so a later
   conversation mode can chain them (feed TTS sentence chunks while generating). Problems → `SpeechIssueDialog` with a
-  Play Store / voice-data button.
+  Play Store / voice-data button. `SpeechPrefs` "Online speech" (Settings → Chat, own prefs file): no on-device
+  recognizer → `createSpeechRecognizer(service)` (system voice input service > Google app > Speech Services), TTS
+  prefers network voices while online.

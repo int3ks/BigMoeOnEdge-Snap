@@ -12,8 +12,8 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Reads answers aloud with the device's text-to-speech engine, offline voices only (a voice that needs the network
- * is never chosen). The system default engine is tried first; when it has no offline voice for the language and
+ * Reads answers aloud with the device's text-to-speech engine: offline voices only, unless "Online speech" is on and
+ * the device is online - then a network voice is preferred. The system default engine is tried first; when it has no offline voice for the language and
  * Speech Services by Google is installed, that engine is used instead (and kept for later calls).
  *
  * Built for chunked input so a later conversation mode can feed sentences while the model still generates.
@@ -31,6 +31,8 @@ object SpeechOutput {
     private var tts: TextToSpeech? = null
     private var ttsPackage: String? = null // null = the system default engine
     private var ready = false
+    /** "Online speech" on and the device online: network voices may be used and are preferred. */
+    private var allowNetwork = false
     private val waiting = mutableListOf<(TextToSpeech?) -> Unit>()
 
     /** Starts reading [text] aloud, or stops when [key] is the answer being read. */
@@ -44,6 +46,7 @@ object SpeechOutput {
         if (chunks.isEmpty()) return
         val device = Locale.getDefault().language
         val languages = listOfNotNull(SpeakableText.guessLanguage(text), device, "de").distinct()
+        allowNetwork = SpeechPrefs.allowOnline(context) && SpeechPrefs.isOnline(context)
         _speakingKey.value = key
         val myRun = run.get()
         resolve(context.applicationContext, languages) { engine, voice, issue ->
@@ -113,13 +116,21 @@ object SpeechOutput {
 
     private fun pickVoice(engine: TextToSpeech, languages: List<String>): Voice? {
         val voices = runCatching { engine.voices }.getOrNull() ?: return null
-        val offline = voices.filter { v ->
-            !v.isNetworkConnectionRequired && v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
+        val usable = voices.filter { v ->
+            (allowNetwork || !v.isNetworkConnectionRequired) &&
+                v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
         }
         val country = Locale.getDefault().country
         for (language in languages) {
-            offline.filter { it.locale.language == language }
-                .maxWithOrNull(compareBy<Voice>({ it.locale.country == country }, { it.quality }, { -it.latency }))
+            usable.filter { it.locale.language == language }
+                .maxWithOrNull(
+                    compareBy<Voice>(
+                        { it.locale.country == country },
+                        { allowNetwork && it.isNetworkConnectionRequired },
+                        { it.quality },
+                        { -it.latency }
+                    )
+                )
                 ?.let { return it }
         }
         return null

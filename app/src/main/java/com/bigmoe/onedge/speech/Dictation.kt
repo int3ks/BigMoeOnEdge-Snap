@@ -14,8 +14,9 @@ import androidx.compose.runtime.setValue
 import java.util.Locale
 
 /**
- * Offline dictation into the message box with Android's on-device recognizer (no audio leaves the device; there is
- * deliberately no fallback to the online recognizer). Partial results show live; after a pause the recognizer
+ * Dictation into the message box. The on-device recognizer is used when Android offers one (no audio leaves the
+ * device); otherwise only with "Online speech" on, the normal recognizer (Google; offline language packs preferred,
+ * else audio goes to Google). Partial results show live; after a pause the recognizer
  * delivers the sentence and listening continues until the user taps again or stays silent.
  *
  * Kept independent of the chat so a later conversation mode can reuse it. Use from the main thread.
@@ -31,6 +32,8 @@ class Dictation(private val context: Context) {
     /** The message box text when the current utterance started; partial results are shown after it. */
     private var base = ""
     private var heardSomething = false
+    /** Whether [recognizer] is the normal (possibly online) one rather than the on-device one. */
+    private var recognizerOnline = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     fun toggle(currentText: () -> String, onText: (String) -> Unit) {
@@ -61,22 +64,39 @@ class Dictation(private val context: Context) {
     private fun start(currentText: () -> String, onText: (String) -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
             startOnDevice(currentText, onText)
-        } else {
-            issue = SpeechIssue.NoOfflineRecognizer
+            return
         }
+        if (!SpeechPrefs.allowOnline(context)) {
+            issue = SpeechIssue.NoOfflineRecognizer(SpeechPrefs.recognitionServices(context).map { it.flattenToShortString() })
+            return
+        }
+        val service = SpeechPrefs.onlineRecognizer(context)
+        if (service == null) {
+            issue = SpeechIssue.NoRecognizer
+            return
+        }
+        begin(currentText, onText, online = true) { SpeechRecognizer.createSpeechRecognizer(context, service) }
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
-    private fun startOnDevice(currentText: () -> String, onText: (String) -> Unit) {
+    private fun startOnDevice(currentText: () -> String, onText: (String) -> Unit) =
+        begin(currentText, onText, online = false) { SpeechRecognizer.createOnDeviceSpeechRecognizer(context) }
+
+    private fun begin(currentText: () -> String, onText: (String) -> Unit, online: Boolean, create: () -> SpeechRecognizer) {
         SpeechOutput.stop() // do not dictate the read-aloud voice
         read = currentText
         write = onText
-        if (recognizer == null) {
-            recognizer = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(context) }.getOrNull()
-                ?.also { it.setRecognitionListener(listener) }
+        if (recognizer != null && recognizerOnline != online) {
+            recognizer?.destroy()
+            recognizer = null
         }
         if (recognizer == null) {
-            issue = SpeechIssue.NoOfflineRecognizer
+            recognizer = runCatching { create() }.getOrNull()?.also { it.setRecognitionListener(listener) }
+            recognizerOnline = online
+        }
+        if (recognizer == null) {
+            issue = if (online) SpeechIssue.NoRecognizer
+            else SpeechIssue.NoOfflineRecognizer(SpeechPrefs.recognitionServices(context).map { it.flattenToShortString() })
             return
         }
         listening = true
@@ -134,7 +154,7 @@ class Dictation(private val context: Context) {
                 SpeechRecognizer.ERROR_CLIENT -> Unit
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> issue = SpeechIssue.MicrophoneDenied
                 ERROR_LANGUAGE_NOT_SUPPORTED, ERROR_LANGUAGE_UNAVAILABLE -> {
-                    val requested = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val requested = if (!recognizerOnline && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         runCatching { recognizer?.triggerModelDownload(intent()) }.isSuccess
                     } else {
                         false

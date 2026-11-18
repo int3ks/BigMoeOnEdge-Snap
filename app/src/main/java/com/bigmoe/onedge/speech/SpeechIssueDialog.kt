@@ -14,8 +14,10 @@ import java.util.Locale
 
 /** Why dictation or read-aloud could not start; shown by [SpeechIssueDialog] with the way to fix it. */
 sealed interface SpeechIssue {
-    /** No on-device (offline) speech recognizer on this device. */
-    data object NoOfflineRecognizer : SpeechIssue
+    /** No on-device (offline) speech recognizer on this device; [services] = recognition services Android lists. */
+    data class NoOfflineRecognizer(val services: List<String>) : SpeechIssue
+    /** "Online speech" is on, but there is no speech recognition service at all. */
+    data object NoRecognizer : SpeechIssue
     /** The recognizer is there, but not its offline language pack. */
     data class LanguagePackMissing(val language: String, val downloadRequested: Boolean) : SpeechIssue
     data object MicrophoneDenied : SpeechIssue
@@ -33,11 +35,18 @@ fun SpeechIssueDialog(issue: SpeechIssue, onDismiss: () -> Unit) {
     val body: String
     var action: Pair<String, () -> Unit>? = null
     when (issue) {
-        SpeechIssue.NoOfflineRecognizer -> {
+        is SpeechIssue.NoOfflineRecognizer -> {
             title = "Offline dictation not available"
-            body = "Android reports no on-device speech recognizer on this device. Speech Services by Google can " +
-                "provide one; whether Android then offers it to apps is up to the device."
-            action = "Play Store" to { openPlayStore(context, SpeechOutput.GOOGLE_TTS) }
+            val found = if (issue.services.isEmpty()) "none" else issue.services.joinToString(", ")
+            body = "Android reports no on-device speech recognizer on this device (recognition services found: $found). " +
+                "\"Allow online\" uses the normal recognizer (Google) instead: an installed offline language pack is " +
+                "preferred, otherwise the audio goes to Google. Switch it off again in Settings → Chat → Online speech."
+            action = "Allow online" to { SpeechPrefs.setAllowOnline(context, true) }
+        }
+        SpeechIssue.NoRecognizer -> {
+            title = "No speech recognition"
+            body = "Android lists no speech recognition service on this device. The Google app provides one."
+            action = "Play Store" to { openPlayStore(context, SpeechPrefs.GOOGLE_APP) }
         }
         is SpeechIssue.LanguagePackMissing -> {
             title = "Offline language missing"
