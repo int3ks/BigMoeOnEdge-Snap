@@ -2,6 +2,8 @@
 
 ## Snap fork
 
+- **"Restart app and load again"** under every failed load (`core/AppRestart.kt`): the app restarts itself — a fresh process, like "Force stop", which cleared a one-off NPU `fastrpc_mmap failed` — and loads that model at start (also with autoload off).
+- **Shared text from browsers is tidied:** the "link to highlight" fragment (`#:~:text=…`, the selection again, percent-encoded) is removed and a link at the end goes on its own line as "Source:".
 - **Export with log files:** while Log → "Write to file" is on, "Export for Claude" asks whether to include the log files written during the logged period (the last 300 KB of each; logs can contain prompt text).
 - **Share into BigMoe²** (`ui/share/ShareTarget.kt`, intent filters SEND / SEND_MULTIPLE `*/*`): text, pictures, PDFs and other files from any app. A dialog picks a new or recent chat and, when no model is loaded, the model to load (a load that asks first switches to the Models page). Text is added to the message box, files are attached; pictures and videos wait until a model is loaded (vision check as usual). Nothing is sent automatically.
 - README: sections for the model archive, comparing models and settings (variants, run info, performance log, export, Ask a model) and sharing.

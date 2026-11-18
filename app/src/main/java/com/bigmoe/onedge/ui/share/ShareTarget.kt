@@ -69,7 +69,24 @@ data class SharedContent(val text: String?, val files: List<Pair<Uri, Attachment
                     else -> AttachmentKind.FILE
                 }
             }
-            return SharedContent(text, files).takeIf { !it.isEmpty }
+            return SharedContent(text?.let(::tidy), files).takeIf { !it.isEmpty }
+        }
+
+        private val URL = Regex("https?://\\S+")
+
+        /**
+         * Browsers share a selection as the text plus a "link to highlight": the URL with a `#:~:text=` fragment that
+         * repeats the selection percent-encoded (the "many special characters"). The fragment goes; a link at the
+         * end goes on its own line as the source.
+         */
+        internal fun tidy(raw: String): String {
+            val t = raw.replace(Regex("#:~:text=\\S*"), "").trim()
+            val urls = URL.findAll(t).toList()
+            val last = urls.lastOrNull() ?: return t
+            if (last.range.last != t.lastIndex) return t
+            val before = t.substring(0, last.range.first).trim()
+            if (before.isEmpty()) return last.value
+            return before + "\n\nSource: " + last.value
         }
 
         @Suppress("DEPRECATION")

@@ -742,6 +742,14 @@ private fun ModelStatusSection(
                 is EngineState.Failed -> {
                     Text("Load failed", color = MaterialTheme.colorScheme.error)
                     Text(engine.message, style = MaterialTheme.typography.bodySmall)
+                    // A fresh process clears what a failed or earlier load may have left (NPU mappings, native state),
+                    // like "Force stop"; the model then loads again by itself.
+                    engine.path?.let { failedPath ->
+                        val ctx = androidx.compose.ui.platform.LocalContext.current
+                        OutlinedButton(onClick = { com.bigmoe.onedge.core.AppRestart.restartAndLoad(ctx, failedPath) }) {
+                            Text("Restart app and load again")
+                        }
+                    }
                 }
                 is EngineState.Ready -> {
                     val info = engine.info

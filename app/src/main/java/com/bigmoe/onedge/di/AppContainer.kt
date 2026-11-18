@@ -288,6 +288,17 @@ class AppContainer(private val context: Context) {
     fun autoLoadLastModelIfEnabled() {
         appScope.launch {
             val s = settingsDataStore.settingsFlow.first()
+            // "Restart app and load again" (a failed load): that model, even with autoload off.
+            val afterRestart = com.bigmoe.onedge.core.AppRestart.takePendingLoad(context)?.takeIf { File(it).isFile }
+            if (afterRestart != null) {
+                engineController.setCpuMasks(
+                    com.bigmoe.onedge.core.CpuTopology.effective(s.cpuMask),
+                    com.bigmoe.onedge.core.CpuTopology.effective(s.cpuMaskPrefill)
+                )
+                val projector = modelManager.mmprojForModel(afterRestart)
+                engineController.loadModel(afterRestart, s.toLoadConfig(), projector, modelManager.draftForModel(afterRestart))
+                return@launch
+            }
             if (s.autoLoadLastModel && s.lastModelPath.isNotBlank() && File(s.lastModelPath).isFile) {
                 // Before the load, so its threads start on those cores.
                 engineController.setCpuMasks(
