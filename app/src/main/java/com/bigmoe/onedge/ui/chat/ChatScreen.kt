@@ -106,13 +106,14 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    // Regenerate with no model loaded: ask which model, load it, then answer again (message id, then model path).
+    // Send or Regenerate with no model loaded: ask which model, load it, then send / answer again.
+    // The value is the message to regenerate, or "" for sending the message box.
     var regenAsk by remember { mutableStateOf<String?>(null) }
     var regenPending by remember { mutableStateOf<Pair<String, String>?>(null) }
     regenAsk?.let { messageId ->
         val modelsUi by modelViewModel.uiState.collectAsState()
         com.bigmoe.onedge.ui.share.ModelPickerDialog(
-            title = "No model is loaded — answer with which one?",
+            title = if (messageId.isEmpty()) "No model is loaded — send with which one?" else "No model is loaded — answer with which one?",
             models = modelsUi.models.filter { !com.bigmoe.onedge.core.ModelManager.isProjectorName(it.path) },
             onPick = { path ->
                 regenAsk = null
@@ -130,11 +131,14 @@ fun ChatScreen(
             kotlinx.coroutines.flow.combine(viewModel.uiState, modelViewModel.uiState) { c, m ->
                 val s = c.engineState
                 if (m.pendingLoad != null && !sawDialog) { sawDialog = true; onNavigateToModels() }
-                s is EngineState.Ready && s.info.path == path
+                // Sending only needs the load to have started: a message sent while loading is queued.
+                (s is EngineState.Ready && s.info.path == path) || (messageId.isEmpty() && s is EngineState.Loading && s.path == path)
             }.first { it }
         }
         regenPending = null
-        if (ready == true) viewModel.regenerate(messageId)
+        if (ready == true) {
+            if (messageId.isEmpty()) viewModel.sendMessage(viewModel.uiState.value.inputDraft) else viewModel.regenerate(messageId)
+        }
     }
     val latestUiState = rememberUpdatedState(uiState)
     val context = LocalContext.current
@@ -508,7 +512,9 @@ fun ChatScreen(
                         }
                     } else if ((uiState.inputDraft.isNotBlank() || uiState.pendingAttachments.isNotEmpty() || uiState.pendingLinks.isNotEmpty()) && !uiState.isGenerating) {
                         follow = true
-                        viewModel.sendMessage(uiState.inputDraft)
+                        val e = uiState.engineState
+                        if (e is EngineState.Ready || e is EngineState.Loading) viewModel.sendMessage(uiState.inputDraft)
+                        else regenAsk = ""
                     }
                 },
                 onStopClicked = { viewModel.stopGeneration() },

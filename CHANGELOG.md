@@ -2,7 +2,7 @@
 
 ## Snap fork
 
-- **Regenerate with no model loaded asks which model,** loads it (a load that asks first goes via the Models page) and then answers again; with a model loaded Regenerate works as before.
+- **Send or Regenerate with no model loaded asks which model,** loads it (a load that asks first goes via the Models page) and then sends (queued while it loads) or answers again; with a model loaded both work as before.
 - **Export intro asks for engine optimisations too**, with the repository and where engine, llama.cpp, JNI bridge and app live.
 - **Links as chips:** a link shared with a text (the browser's "source") is no longer pasted into the message box; it shows as a chip above it, shortened like in a browser ("🔗 google.com/search?q=gra…"), a tap or long press shows the whole link, ✕ removes it, and it is appended in full when the message is sent. Bare links in chat bubbles are shown shortened the same way (tap opens; Copy gives the full text).
 - **"Restart app and load again"** under every failed load (`core/AppRestart.kt`): the app restarts itself — a fresh process, like "Force stop", which cleared a one-off NPU `fastrpc_mmap failed` — and loads that model at start (also with autoload off).
