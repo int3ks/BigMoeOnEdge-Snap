@@ -20,7 +20,10 @@ sealed interface SpeechIssue {
     data object NoRecognizer : SpeechIssue
     /** The recognizer is there, but not its offline language pack. */
     data class LanguagePackMissing(val language: String, val downloadRequested: Boolean, val service: String) : SpeechIssue
+    /** This app has no microphone permission. */
     data object MicrophoneDenied : SpeechIssue
+    /** The recognition service reported missing permission: it records in its own app, which needs the microphone too. */
+    data class ServiceMicrophoneDenied(val service: String, val packageName: String?) : SpeechIssue
     data class RecognizerError(val code: Int, val service: String) : SpeechIssue
     /** No text-to-speech engine at all, or it failed to start. */
     data object NoTtsEngine : SpeechIssue
@@ -62,6 +65,21 @@ fun SpeechIssueDialog(issue: SpeechIssue, onDismiss: () -> Unit) {
                 try {
                     context.startActivity(
                         Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (e: ActivityNotFoundException) {
+                }
+            }
+        }
+        is SpeechIssue.ServiceMicrophoneDenied -> {
+            title = "Speech service has no microphone access"
+            body = "${issue.service} reported a missing microphone permission. The recording runs in that app, so it " +
+                "needs the microphone permission too (this app has it). Allow the microphone in its app settings."
+            val pkg = issue.packageName
+            if (pkg != null) action = "Open its settings" to {
+                try {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     )
                 } catch (e: ActivityNotFoundException) {

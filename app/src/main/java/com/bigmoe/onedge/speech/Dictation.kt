@@ -161,14 +161,16 @@ class Dictation(private val context: Context) {
         putExtra("android.speech.extra.MASK_OFFENSIVE_WORDS", false)
     }
 
+    private fun serviceName(): String = when (val pkg = attempt?.service?.packageName) {
+        null -> "The on-device recognizer"
+        SpeechPrefs.GOOGLE_APP -> "Google app"
+        SpeechOutput.GOOGLE_TTS -> "Speech Services by Google"
+        else -> pkg
+    }
+
     private fun serviceLabel(): String {
         val a = attempt ?: return "on-device recognizer (offline)"
-        val name = when (a.service.packageName) {
-            SpeechPrefs.GOOGLE_APP -> "Google app"
-            SpeechOutput.GOOGLE_TTS -> "Speech Services by Google"
-            else -> a.service.packageName
-        }
-        return if (a.preferOffline) "$name (offline preferred)" else "$name (online)"
+        return if (a.preferOffline) "${serviceName()} (offline preferred)" else "${serviceName()} (online)"
     }
 
     private fun show(spoken: String) {
@@ -220,7 +222,9 @@ class Dictation(private val context: Context) {
                 silence -> Unit
                 // Follows a stop or a restart; not an error the user caused.
                 error == SpeechRecognizer.ERROR_CLIENT -> Unit
-                error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> issue = SpeechIssue.MicrophoneDenied
+                // This app's permission is checked before starting, so this is the service's own permission.
+                error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                    issue = SpeechIssue.ServiceMicrophoneDenied(serviceName(), attempt?.service?.packageName)
                 languageError -> issue = packIssue
                 wasListening || heardSomething -> issue = SpeechIssue.RecognizerError(error, serviceLabel())
             }
