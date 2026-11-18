@@ -187,7 +187,7 @@ fun AppNavigation(
             onDismiss = onShareHandled,
             onDone = { sessionId, modelPath ->
                 onShareHandled()
-                chatViewModel.receiveShare(sessionId, shared.text, shared.files, context.contentResolver)
+                chatViewModel.receiveShare(sessionId, shared.text, shared.files, context.contentResolver, shared.links)
                 navController.navigate(Screen.Chat.createRoute(sessionId)) { launchSingleTop = true }
                 if (modelPath != null) {
                     modelViewModel.requestLoad(modelPath)

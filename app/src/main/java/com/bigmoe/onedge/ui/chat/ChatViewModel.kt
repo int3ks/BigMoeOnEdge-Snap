@@ -61,6 +61,8 @@ data class ChatUiState(
     val messages: List<ChatMessageUiModel> = emptyList(),
     val settings: EngineSettings = EngineSettings(),
     val engineState: EngineState = EngineState.Unloaded,
+    /** Links shared into the chat, shown as chips above the message box and appended in full when sent. */
+    val pendingLinks: List<String> = emptyList(),
     /** False when the loaded model always reasons (no way to turn thinking off). */
     val thinkingSwitchable: Boolean = true,
     /**
@@ -334,7 +336,7 @@ class ChatViewModel(
                     currentSession = null, messages = emptyList(), liveText = "", liveReasoning = "",
                     liveStatus = null, notice = null, selectedArtifact = null,
                     inputDraft = "", chooseFromOptions = false, choiceOptions = "",
-                    pendingAttachments = emptyList(), attachments = emptyList(), artifacts = emptyList()
+                    pendingAttachments = emptyList(), pendingLinks = emptyList(), attachments = emptyList(), artifacts = emptyList()
                 )
             }
             loadComposerNow(ChatDraftState.NEW_CHAT_KEY)
@@ -347,7 +349,7 @@ class ChatViewModel(
         _uiState.update {
             // The live reply belongs to the chat it was streaming in: never carry it into the chat being opened.
             it.copy(
-                messages = emptyList(), notice = null, selectedArtifact = null, pendingAttachments = emptyList(),
+                messages = emptyList(), notice = null, selectedArtifact = null, pendingAttachments = emptyList(), pendingLinks = emptyList(),
                 attachments = emptyList(), artifacts = emptyList(), liveText = "", liveReasoning = "", liveStatus = null
             )
         }
@@ -420,7 +422,10 @@ class ChatViewModel(
      * it completes only after that turn has finished (or has been rejected with a visible notice).
      */
     private fun submitMessage(promptText: String, completion: CompletableDeferred<Unit>?) {
-        val text = promptText.trim()
+        // Link chips (shared links) go into the prompt in full, after the typed text.
+        val links = _uiState.value.pendingLinks
+        val text = if (links.isEmpty()) promptText.trim()
+        else (promptText.trim() + "\n\n" + links.joinToString("\n")).trim()
         val state = _uiState.value
         val pending = state.pendingAttachments
         if ((text.isEmpty() && pending.isEmpty()) || (state.isGenerating && completion == null)) {
@@ -445,7 +450,7 @@ class ChatViewModel(
             val composerKey = state.currentSession?.id ?: ChatDraftState.NEW_CHAT_KEY
             _uiState.update {
                 it.copy(
-                    inputDraft = "", pendingAttachments = emptyList(),
+                    inputDraft = "", pendingAttachments = emptyList(), pendingLinks = emptyList(),
                     notice = if (count == 1) "Message queued. It will be sent automatically when the model finishes loading." else "$count messages queued. They will be sent in order when the model finishes loading."
                 )
             }
@@ -500,7 +505,7 @@ class ChatViewModel(
                     composerStore.clearSession(ChatDraftState.NEW_CHAT_KEY)
                     composerStore.moveToggles(composerKey, sessionId)
                 }
-                _uiState.update { it.copy(inputDraft = "", pendingAttachments = emptyList()) }
+                _uiState.update { it.copy(inputDraft = "", pendingAttachments = emptyList(), pendingLinks = emptyList()) }
 
                 var contextText = ""
                 var images: List<ImageData> = emptyList()
@@ -662,7 +667,7 @@ class ChatViewModel(
                     composerStore.clearSession(ChatDraftState.NEW_CHAT_KEY)
                     composerStore.moveToggles(composerKey, session.id)
                 }
-                _uiState.update { it.copy(inputDraft = "", pendingAttachments = emptyList(), isGenerating = false, isPreparingMessage = false) }
+                _uiState.update { it.copy(inputDraft = "", pendingAttachments = emptyList(), pendingLinks = emptyList(), isGenerating = false, isPreparingMessage = false) }
             } catch (e: CancellationException) { throw e }
             catch (t: Throwable) { _uiState.update { it.copy(isGenerating = false, isPreparingMessage = false, notice = "Unexpected error: ${t.message ?: t.javaClass.simpleName}") } }
             finally {
@@ -718,12 +723,14 @@ class ChatViewModel(
         sessionId: String?,
         text: String?,
         files: List<Pair<android.net.Uri, AttachmentKind>>,
-        resolver: android.content.ContentResolver
+        resolver: android.content.ContentResolver,
+        links: List<String> = emptyList()
     ) {
         if (sessionId == null) newChat() else loadSession(sessionId)
         val opening = composerSwitchJob
         viewModelScope.launch {
             opening?.join()
+            if (links.isNotEmpty()) _uiState.update { it.copy(pendingLinks = (it.pendingLinks + links).distinct()) }
             if (!text.isNullOrBlank()) {
                 val draft = _uiState.value.inputDraft
                 setInputDraft(if (draft.isBlank()) text else draft.trimEnd() + "\n\n" + text)
@@ -740,6 +747,10 @@ class ChatViewModel(
                 if (ready != null) media.forEach { (uri, kind) -> addAttachment(resolver, uri, kind) }
             }
         }
+    }
+
+    fun removePendingLink(url: String) {
+        _uiState.update { it.copy(pendingLinks = it.pendingLinks - url) }
     }
 
     fun setInputDraft(text: String) {

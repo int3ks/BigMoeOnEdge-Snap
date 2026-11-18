@@ -336,7 +336,8 @@ private fun inlineText(text: String, color: Color): AnnotatedString {
                     val begin = match.range.first
                     val end = begin + clean.length
                     if (begin > cursor) builder.withStyle(style) { append(span.text.substring(cursor, begin)) }
-                    appendLinked(clean, clean, style)
+                    // Shown as a browser shows a link (tap opens it; "Copy" on the message gives the full text).
+                    appendLinked(shortUrl(clean, 48), clean, style)
                     cursor = end
                 }
                 if (cursor < span.text.length) builder.withStyle(style) { append(span.text.substring(cursor)) }

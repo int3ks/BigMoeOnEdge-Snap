@@ -32,11 +32,17 @@ import com.bigmoe.onedge.data.local.entity.AttachmentKind
 import com.bigmoe.onedge.data.repository.ChatSessionDomainModel
 
 /** What another app shared with BigMoe² (share sheet): text and/or files with their kind. */
-data class SharedContent(val text: String?, val files: List<Pair<Uri, AttachmentKind>>) {
-    val isEmpty: Boolean get() = text.isNullOrBlank() && files.isEmpty()
+data class SharedContent(
+    val text: String?,
+    val files: List<Pair<Uri, AttachmentKind>>,
+    /** A link that came with the text; shown as a chip above the message box, appended in full when sent. */
+    val links: List<String> = emptyList()
+) {
+    val isEmpty: Boolean get() = text.isNullOrBlank() && files.isEmpty() && links.isEmpty()
 
     fun describe(): String = buildList {
         if (!text.isNullOrBlank()) add("text")
+        if (links.isNotEmpty()) add(if (links.size == 1) "a link" else "${links.size} links")
         val pics = files.count { it.second == AttachmentKind.IMAGE }
         val vids = files.count { it.second == AttachmentKind.VIDEO }
         val docs = files.count { it.second == AttachmentKind.FILE }
@@ -69,7 +75,8 @@ data class SharedContent(val text: String?, val files: List<Pair<Uri, Attachment
                     else -> AttachmentKind.FILE
                 }
             }
-            return SharedContent(text?.let(::tidy), files).takeIf { !it.isEmpty }
+            val (clean, link) = text?.let(::tidy) ?: (null to null)
+            return SharedContent(clean, files, listOfNotNull(link)).takeIf { !it.isEmpty }
         }
 
         private val URL = Regex("https?://\\S+")
@@ -79,15 +86,13 @@ data class SharedContent(val text: String?, val files: List<Pair<Uri, Attachment
          * repeats the selection percent-encoded (the "many special characters"). The fragment goes; a link at the
          * end goes on its own line as the source.
          */
-        internal fun tidy(raw: String): String {
+        internal fun tidy(raw: String): Pair<String?, String?> {
             val t = raw.replace(Regex("#:~:text=\\S*"), "").trim()
             val urls = URL.findAll(t).toList()
-            val last = urls.lastOrNull() ?: return t
-            if (last.range.last != t.lastIndex) return t
+            val last = urls.lastOrNull() ?: return t to null
+            if (last.range.last != t.lastIndex) return t to null
             val before = t.substring(0, last.range.first).trim()
-            val link = cleanUrl(last.value)
-            if (before.isEmpty()) return link
-            return before + "\n\nSource: " + link
+            return before.ifEmpty { null } to cleanUrl(last.value)
         }
 
         /** Query parameters that only track the click or the browser (Google search adds a long gs_lcrp blob). */

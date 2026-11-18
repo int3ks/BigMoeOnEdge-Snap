@@ -470,7 +470,7 @@ fun ChatScreen(
                             viewModel.editUserMessage(editing.id, editedText)
                             editingMessage = null
                         }
-                    } else if ((uiState.inputDraft.isNotBlank() || uiState.pendingAttachments.isNotEmpty()) && !uiState.isGenerating) {
+                    } else if ((uiState.inputDraft.isNotBlank() || uiState.pendingAttachments.isNotEmpty() || uiState.pendingLinks.isNotEmpty()) && !uiState.isGenerating) {
                         follow = true
                         viewModel.sendMessage(uiState.inputDraft)
                     }
@@ -487,6 +487,8 @@ fun ChatScreen(
                 onSelectSystemPrompt = viewModel::selectSystemPrompt,
                 visionActive = uiState.visionActive,
                 pendingAttachments = uiState.pendingAttachments,
+                pendingLinks = uiState.pendingLinks,
+                onRemoveLink = viewModel::removePendingLink,
                 onAddAttachment = { uri, kind -> viewModel.addAttachment(context.contentResolver, uri, kind) },
                 onRemoveAttachment = viewModel::removePendingAttachment,
                 toolsFilesEnabled = uiState.settings.toolsFilesEnabled,

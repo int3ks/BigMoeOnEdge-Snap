@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -84,6 +85,8 @@ fun ChatInputBar(
     onToggleThinking: () -> Unit,
     visionActive: Boolean,
     pendingAttachments: List<PendingAttachment>,
+    pendingLinks: List<String> = emptyList(),
+    onRemoveLink: (String) -> Unit = {},
     onAddAttachment: (android.net.Uri, AttachmentKind) -> Unit,
     onRemoveAttachment: (String) -> Unit,
     toolsFilesEnabled: Boolean,
@@ -174,7 +177,7 @@ fun ChatInputBar(
                             when (e.key) {
                                 Key.Enter, Key.NumPadEnter -> {
                                     if (e.isShiftPressed) false else {
-                                        if (!isGenerating && (shown.text.isNotBlank() || pendingAttachments.isNotEmpty())) onSendClicked()
+                                        if (!isGenerating && (shown.text.isNotBlank() || pendingAttachments.isNotEmpty() || pendingLinks.isNotEmpty())) onSendClicked()
                                         true
                                     }
                                 }
@@ -212,6 +215,18 @@ fun ChatInputBar(
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp, max = 110.dp)
                     )
+                }
+            }
+
+            if (pendingLinks.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    pendingLinks.forEach { url -> LinkChip(url, onRemove = { onRemoveLink(url) }) }
                 }
             }
 
@@ -366,7 +381,7 @@ fun ChatInputBar(
                     }
                 }
 
-                val canSend = textValue.isNotBlank() || pendingAttachments.isNotEmpty()
+                val canSend = textValue.isNotBlank() || pendingAttachments.isNotEmpty() || pendingLinks.isNotEmpty()
                 val active = isGenerating || canSend
                 IconButton(
                     onClick = if (isGenerating) onStopClicked else onSendClicked,
@@ -465,4 +480,41 @@ private fun ToggleIcon(
             modifier = Modifier.size(20.dp)
         )
     }
+}
+
+
+/**
+ * A shared link above the message box, shortened as a browser shows it; a long press shows the whole link. It is sent
+ * in full after the typed text.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun LinkChip(url: String, onRemove: () -> Unit) {
+    var full by remember { mutableStateOf(false) }
+    androidx.compose.material3.Surface(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.combinedClickable(onClick = { full = true }, onLongClick = { full = true })
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp)) {
+            Text("🔗 " + shortUrl(url), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Remove link", modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+    if (full) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { full = false },
+            title = { Text("Link") },
+            text = { androidx.compose.foundation.text.selection.SelectionContainer { Text(url, style = MaterialTheme.typography.bodySmall) } },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { full = false }) { Text("OK") } }
+        )
+    }
+}
+
+/** "https://www.google.com/search?q=..." -> "google.com/search?q=gra…": scheme and www dropped, cut at [max]. */
+internal fun shortUrl(url: String, max: Int = 36): String {
+    val s = url.removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/')
+    return if (s.length <= max) s else s.take(max - 1) + "…"
 }

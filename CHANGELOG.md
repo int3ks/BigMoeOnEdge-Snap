@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Links as chips:** a link shared with a text (the browser's "source") is no longer pasted into the message box; it shows as a chip above it, shortened like in a browser ("🔗 google.com/search?q=gra…"), a tap or long press shows the whole link, ✕ removes it, and it is appended in full when the message is sent. Bare links in chat bubbles are shown shortened the same way (tap opens; Copy gives the full text).
 - **"Restart app and load again"** under every failed load (`core/AppRestart.kt`): the app restarts itself — a fresh process, like "Force stop", which cleared a one-off NPU `fastrpc_mmap failed` — and loads that model at start (also with autoload off).
 - **Shared text from browsers is tidied:** the "link to highlight" fragment (`#:~:text=…`, the selection again, percent-encoded) is removed and a link at the end goes on its own line as "Source:" without tracking parameters (Google's `oq`, `gs_lcrp`, `sourceid`, `utm_*` …).
 - **Export with log files:** while Log → "Write to file" is on, "Export for Claude" asks whether to include the log files written during the logged period (the last 300 KB of each; logs can contain prompt text).
