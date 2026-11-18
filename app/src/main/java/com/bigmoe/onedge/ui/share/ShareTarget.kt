@@ -178,3 +178,20 @@ private fun Option(label: String, selected: Boolean, onClick: () -> Unit) {
         Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
+
+/** Pick a model to load (Regenerate with no model loaded). */
+@Composable
+fun ModelPickerDialog(title: String, models: List<ModelFile>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    var model by remember { mutableStateOf(models.firstOrNull()?.path) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                models.forEach { m -> Option(m.displayName, model == m.path) { model = m.path } }
+            }
+        },
+        confirmButton = { TextButton(onClick = { model?.let(onPick) }, enabled = model != null) { Text("Load and answer") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}

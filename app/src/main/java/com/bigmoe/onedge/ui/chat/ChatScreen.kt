@@ -71,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.core.EngineState
+import kotlinx.coroutines.flow.first
 import com.bigmoe.onedge.core.GenerationPhase
 import com.bigmoe.onedge.ui.history.HistoryViewModel
 import com.bigmoe.onedge.ui.home.ChatHistoryPanel
@@ -105,6 +106,36 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    // Regenerate with no model loaded: ask which model, load it, then answer again (message id, then model path).
+    var regenAsk by remember { mutableStateOf<String?>(null) }
+    var regenPending by remember { mutableStateOf<Pair<String, String>?>(null) }
+    regenAsk?.let { messageId ->
+        val modelsUi by modelViewModel.uiState.collectAsState()
+        com.bigmoe.onedge.ui.share.ModelPickerDialog(
+            title = "No model is loaded — answer with which one?",
+            models = modelsUi.models.filter { !com.bigmoe.onedge.core.ModelManager.isProjectorName(it.path) },
+            onPick = { path ->
+                regenAsk = null
+                modelViewModel.requestLoad(path)
+                regenPending = messageId to path
+            },
+            onDismiss = { regenAsk = null }
+        )
+    }
+    LaunchedEffect(regenPending) {
+        val (messageId, path) = regenPending ?: return@LaunchedEffect
+        var sawDialog = false
+        // Wait for the load (a load that asks first shows its dialog on the Models page), then regenerate.
+        val ready = kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
+            kotlinx.coroutines.flow.combine(viewModel.uiState, modelViewModel.uiState) { c, m ->
+                val s = c.engineState
+                if (m.pendingLoad != null && !sawDialog) { sawDialog = true; onNavigateToModels() }
+                s is EngineState.Ready && s.info.path == path
+            }.first { it }
+        }
+        regenPending = null
+        if (ready == true) viewModel.regenerate(messageId)
+    }
     val latestUiState = rememberUpdatedState(uiState)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -329,7 +360,12 @@ fun ChatScreen(
                                     } else null,
                                     // Long-press / right-click: answer this turn again without editing it first.
                                     onRegenerate = if ((message.role == MessageRole.USER || message.role == MessageRole.ASSISTANT) && !uiState.isGenerating) {
-                                        { follow = true; viewModel.regenerate(message.id) }
+                                        {
+                                            follow = true
+                                            val e = uiState.engineState
+                                            if (e is EngineState.Ready || e is EngineState.Loading) viewModel.regenerate(message.id)
+                                            else regenAsk = message.id
+                                        }
                                     } else null,
                                     // The complete message exactly as stored: no telemetry, labels or renderer fences.
                                     onCopy = if (message.rawContent.isNotEmpty()) {
