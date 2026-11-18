@@ -45,3 +45,10 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
   decode t/s > time to first token, groups under 3 answers unranked. "Export for Claude" shares intro + summary + CSV;
   "Ask a model" loads the picked model and sends `SettingsAdvice.localPrompt` into a new chat; a `bmoe-settings` JSON
   block in an answer shows `SuggestedSettingsCard` (whitelist + ranges, Apply writes global settings).
+* **Dictation and read aloud** (`speech/`): mic next to Send → `Dictation` (on-device `SpeechRecognizer` only, API 31+,
+  no online fallback; partial results live in the message box, restarts after each pause, ends on silence or tap;
+  missing language pack → `triggerModelDownload` on API 33+). "Read aloud" under answers → `SpeechOutput` (app-wide
+  `TextToSpeech`, offline voices only, default engine then Speech Services by Google; `SpeakableText` drops code,
+  links, Markdown, splits into ≤400-char sentence chunks, guesses de/en). Both are separate from the chat so a later
+  conversation mode can chain them (feed TTS sentence chunks while generating). Problems → `SpeechIssueDialog` with a
+  Play Store / voice-data button.

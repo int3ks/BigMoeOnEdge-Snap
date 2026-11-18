@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VideoFile
@@ -46,6 +47,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -131,6 +135,31 @@ fun ChatInputBar(
         ActivityResultContracts.GetMultipleContents()
     ) { uris -> uris.forEach { onAddAttachment(it, AttachmentKind.VIDEO) } }
 
+    // Offline dictation into the message box (speech/Dictation.kt); the mic sits next to the send button.
+    val dictation = remember { com.bigmoe.onedge.speech.Dictation(context.applicationContext) }
+    DisposableEffect(dictation) { onDispose { dictation.release() } }
+    val latestText by rememberUpdatedState(textValue)
+    val latestOnText by rememberUpdatedState(onTextChanged)
+    val toggleDictation = { dictation.toggle({ latestText }, { latestOnText(it) }) }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) dictation.issue = com.bigmoe.onedge.speech.SpeechIssue.MicrophoneDenied
+        if (granted) toggleDictation()
+    }
+    // A new answer starts (send, regenerate, queued message): stop dictating and stop reading the previous one aloud.
+    LaunchedEffect(isGenerating) {
+        if (isGenerating) {
+            dictation.cancel()
+            com.bigmoe.onedge.speech.SpeechOutput.stop()
+        }
+    }
+    val send = {
+        dictation.cancel()
+        onSendClicked()
+    }
+    dictation.issue?.let { issue ->
+        com.bigmoe.onedge.speech.SpeechIssueDialog(issue, onDismiss = { dictation.issue = null })
+    }
+
     val inputShape = RoundedCornerShape(24.dp)
     val styledSurface = AppTheme.visualStyle != AppVisualStyle.SOLID
     Surface(
@@ -177,7 +206,7 @@ fun ChatInputBar(
                             when (e.key) {
                                 Key.Enter, Key.NumPadEnter -> {
                                     if (e.isShiftPressed) false else {
-                                        if (!isGenerating && (shown.text.isNotBlank() || pendingAttachments.isNotEmpty() || pendingLinks.isNotEmpty())) onSendClicked()
+                                        if (!isGenerating && (shown.text.isNotBlank() || pendingAttachments.isNotEmpty() || pendingLinks.isNotEmpty())) send()
                                         true
                                     }
                                 }
@@ -383,8 +412,21 @@ fun ChatInputBar(
 
                 val canSend = textValue.isNotBlank() || pendingAttachments.isNotEmpty() || pendingLinks.isNotEmpty()
                 val active = isGenerating || canSend
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ToggleIcon(
+                    icon = Icons.Default.Mic,
+                    on = dictation.listening,
+                    description = if (dictation.listening) "Stop dictation" else "Dictate (offline)",
+                    onClick = {
+                        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.RECORD_AUDIO
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (granted || dictation.listening) toggleDictation()
+                        else micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                )
                 IconButton(
-                    onClick = if (isGenerating) onStopClicked else onSendClicked,
+                    onClick = if (isGenerating) onStopClicked else send,
                     enabled = active,
                     modifier = Modifier
                         .size(36.dp)
@@ -397,6 +439,7 @@ fun ChatInputBar(
                         tint = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(18.dp)
                     )
+                }
                 }
             }
         }

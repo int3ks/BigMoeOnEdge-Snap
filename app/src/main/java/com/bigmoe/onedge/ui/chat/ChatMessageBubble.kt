@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
@@ -47,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -236,7 +239,8 @@ fun ChatMessageBubble(
             )
         }
 
-        if (!isUser && (stats != null || (onCopy != null && !isStreaming) || (sources.isNotEmpty() && !isStreaming))) {
+        val canSpeak = !isUser && !isStreaming && text.isNotBlank()
+        if (!isUser && (stats != null || canSpeak || (onCopy != null && !isStreaming) || (sources.isNotEmpty() && !isStreaming))) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -265,6 +269,7 @@ fun ChatMessageBubble(
                         )
                     }
                 }
+                if (canSpeak) ReadAloudChip(text)
                 if (stats != null) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -553,5 +558,37 @@ private fun ThinkingBlock(
                 }
             }
         }
+    }
+}
+
+/** Reads the answer aloud with the device's offline voice (speech/SpeechOutput.kt); tapped again it stops. */
+@Composable
+private fun ReadAloudChip(text: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val key = remember(text) { text.hashCode().toString() }
+    val speakingKey by com.bigmoe.onedge.speech.SpeechOutput.speakingKey.collectAsState()
+    val speaking = speakingKey == key
+    var issue by remember { mutableStateOf<com.bigmoe.onedge.speech.SpeechIssue?>(null) }
+    issue?.let { com.bigmoe.onedge.speech.SpeechIssueDialog(it, onDismiss = { issue = null }) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
+            .clickable { com.bigmoe.onedge.speech.SpeechOutput.toggle(context, key, text) { issue = it } }
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Icon(
+            imageVector = if (speaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = if (speaking) "Stop reading" else "Read aloud",
+            tint = if (speaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(12.dp)
+        )
+        Text(
+            text = if (speaking) "Stop" else "Read aloud",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (speaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+        )
     }
 }

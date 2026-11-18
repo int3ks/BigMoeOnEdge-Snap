@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Dictation and read aloud, offline only** (`speech/`): a mic button next to Send dictates into the message box with Android's on-device recognizer (nothing is sent automatically; text appears live, listening goes on after a pause and stops on silence or a tap; no fallback to the online recognizer). "Read aloud" under every answer reads it with the device's offline voice (code blocks, links and Markdown are skipped; tap again to stop; a new answer stops it). When something is missing - no on-device recognizer, no offline language pack or voice, no speech engine - a dialog says so and opens the Play Store (Speech Services by Google) or its voice download.
 - **Send or Regenerate with no model loaded asks which model,** loads it (a load that asks first goes via the Models page) and then sends (queued while it loads) or answers again; with a model loaded both work as before.
 - **Export intro asks for engine optimisations too**, with the repository and where engine, llama.cpp, JNI bridge and app live.
 - **Links as chips:** a link shared with a text (the browser's "source") is no longer pasted into the message box; it shows as a chip above it, shortened like in a browser ("🔗 google.com/search?q=gra…"), a tap or long press shows the whole link, ✕ removes it, and it is appended in full when the message is sent. Bare links in chat bubbles are shown shortened the same way (tap opens; Copy gives the full text).
