@@ -29,10 +29,14 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** Content shared from another app, until the user picked where it goes (ShareTargetDialog). */
+    private var shared by mutableStateOf<com.bigmoe.onedge.ui.share.SharedContent?>(null)
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         (application as OnEdgeApplication).container.handleApiServerIntent(intent)
+        com.bigmoe.onedge.ui.share.SharedContent.from(intent, contentResolver)?.let { shared = it }
         if (intent.hasExtra(EXTRA_OPEN_SESSION_ID)) recreate()
     }
 
@@ -48,6 +52,7 @@ class MainActivity : ComponentActivity() {
         val appContainer = (application as OnEdgeApplication).container
         val viewModelFactory = AppViewModelFactory(appContainer)
         if (savedInstanceState == null) appContainer.handleApiServerIntent(intent)
+        if (savedInstanceState == null) shared = com.bigmoe.onedge.ui.share.SharedContent.from(intent, contentResolver)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             // Android 13+: ask only when the user has explicitly opened the app. The foreground
             // service itself is started only for an actual generation.
@@ -84,7 +89,9 @@ class MainActivity : ComponentActivity() {
                         modelViewModel = modelViewModel,
                         autoTuneViewModel = autoTuneViewModel,
                         fileViewModel = fileViewModel,
-                        initialSessionId = intent.getStringExtra(EXTRA_OPEN_SESSION_ID)
+                        initialSessionId = intent.getStringExtra(EXTRA_OPEN_SESSION_ID),
+                        shared = shared,
+                        onShareHandled = { shared = null }
                     )
                 }
 

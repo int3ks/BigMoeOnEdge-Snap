@@ -105,6 +105,8 @@ fun AppNavigation(
     autoTuneViewModel: DeviceTuneViewModel,
     fileViewModel: FileViewModel,
     initialSessionId: String? = null,
+    shared: com.bigmoe.onedge.ui.share.SharedContent? = null,
+    onShareHandled: () -> Unit = {},
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController()
 ) {
@@ -166,6 +168,45 @@ fun AppNavigation(
             chatViewModel.newChatAndSend(prompt)
             navController.navigate(Screen.Chat.createRoute(null)) { launchSingleTop = true }
         }
+    }
+
+    // Shared from another app: pick the chat (and a model when none is loaded), then the content goes into the box.
+    if (shared != null) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val sessions by historyViewModel.sessionsState.collectAsState()
+        val modelsUi by modelViewModel.uiState.collectAsState()
+        val chatUi by chatViewModel.uiState.collectAsState()
+        val engine = chatUi.engineState
+        val noModel = engine !is EngineState.Ready && engine !is EngineState.Loading
+        val shareScope = androidx.compose.runtime.rememberCoroutineScope()
+        com.bigmoe.onedge.ui.share.ShareTargetDialog(
+            shared = shared,
+            sessions = sessions,
+            models = modelsUi.models.filter { !com.bigmoe.onedge.core.ModelManager.isProjectorName(it.path) },
+            askForModel = noModel,
+            onDismiss = onShareHandled,
+            onDone = { sessionId, modelPath ->
+                onShareHandled()
+                chatViewModel.receiveShare(sessionId, shared.text, shared.files, context.contentResolver)
+                navController.navigate(Screen.Chat.createRoute(sessionId)) { launchSingleTop = true }
+                if (modelPath != null) {
+                    modelViewModel.requestLoad(modelPath)
+                    // A load that asks first shows its dialog on the Models page.
+                    shareScope.launch {
+                        val asks = kotlinx.coroutines.withTimeoutOrNull(15_000L) {
+                            kotlinx.coroutines.flow.combine(chatViewModel.uiState, modelViewModel.uiState) { c, m ->
+                                when {
+                                    m.pendingLoad != null -> true
+                                    c.engineState is EngineState.Loading || c.engineState is EngineState.Ready -> false
+                                    else -> null
+                                }
+                            }.first { it != null }
+                        }
+                        if (asks == true) goTo(TopTab.MODELS)
+                    }
+                }
+            }
+        )
     }
 
     fun openChat(sessionId: String?) {

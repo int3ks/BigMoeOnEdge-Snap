@@ -709,6 +709,39 @@ class ChatViewModel(
         viewModelScope.launch { composerStore.savePending(currentComposerKey(), next) }
     }
 
+    /**
+     * Something shared from another app (share sheet): opens [sessionId] (null = a new chat), adds [text] to the
+     * draft and attaches [files]. Nothing is sent. Pictures and videos wait until a model is loaded, because only a
+     * model with a vision projector takes them (the usual notice says so otherwise).
+     */
+    fun receiveShare(
+        sessionId: String?,
+        text: String?,
+        files: List<Pair<android.net.Uri, AttachmentKind>>,
+        resolver: android.content.ContentResolver
+    ) {
+        if (sessionId == null) newChat() else loadSession(sessionId)
+        val opening = composerSwitchJob
+        viewModelScope.launch {
+            opening?.join()
+            if (!text.isNullOrBlank()) {
+                val draft = _uiState.value.inputDraft
+                setInputDraft(if (draft.isBlank()) text else draft.trimEnd() + "\n\n" + text)
+            }
+            files.filter { it.second == AttachmentKind.FILE }.forEach { (uri, kind) -> addAttachment(resolver, uri, kind) }
+            val media = files.filter { it.second != AttachmentKind.FILE }
+            if (media.isNotEmpty()) {
+                if (_uiState.value.engineState !is EngineState.Ready) {
+                    _uiState.update { it.copy(notice = "The shared pictures are attached when the model has loaded.") }
+                }
+                val ready = kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
+                    _uiState.first { it.engineState is EngineState.Ready }
+                }
+                if (ready != null) media.forEach { (uri, kind) -> addAttachment(resolver, uri, kind) }
+            }
+        }
+    }
+
     fun setInputDraft(text: String) {
         val key = currentComposerKey()
         _uiState.update { it.copy(inputDraft = text) }

@@ -81,6 +81,41 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 * **Replay keeps the KV prefix** (edit, regenerate and chat switches no longer clear the cache) and the model card shows
   the **load progress**.
 
+### Model archive on external storage (new)
+* **Archive sources:** USB sticks, SSDs or SD cards are added as archive folders; models are kept there instead of being
+  downloaded again. Several sources at once, each shown with its free space and whether it is connected.
+* **Three ways in per model:** **Copy to Models** (a kept copy in the model folder), **Fetch to app** (a copy in the
+  app's storage, removed again with **Clear app copy**) and **Use in place** (loaded straight from the archive).
+  Membership in the archive is only claimed when the source is connected; otherwise the card says "not verified".
+* **Downloads:** models waiting in the Download folder can be moved to the model folder or the archive; models in the
+  model folder can be moved to the archive. A running load can be cancelled.
+* **Split GGUFs** load also when the first shard holds only metadata (`gguf-split --no-tensor-first-split`, e.g.
+  Unsloth's UD quants); the set is checked against `split.tensors.count`.
+
+### Comparing models and settings (new)
+* **Regenerate keeps the earlier answers:** `‹ 2/3 ›` under a turn's last answer pages through every answer
+  Regenerate made. On the last turn the shown answer becomes the one the chat continues from; further up it is only
+  shown, with a note which answer the chat below builds on. Regenerating an earlier turn still drops what follows.
+* **Each answer records what made it:** the model name stands under each turn; a tap shows NPU, expert cache, threads,
+  context, guess ahead, sampling, system prompt and the lowest free RAM during the answer.
+* **Performance log** (Settings → Performance log): every model load, failed load, answer and crash is recorded with
+  all load settings, speed, prompt and context size, free RAM, the device's heat (Android thermal status, headroom,
+  battery temperature) and the engine's own figures (KV reuse, expert cache filled vs. budget, flash stall per token,
+  cores busy, guess-ahead acceptance, whether the prefill really ran on the NPU). The page shows a summary per model:
+  answers grouped by the settings that change speed or RAM, medians over answers that did not start throttled,
+  crashes matched to their load, ranked crash-free first, then decode speed, then time to first token.
+* **Export for Claude:** one Markdown file with an introduction for a new chat (what the app and every setting do,
+  what each field means), the summary and every entry as CSV.
+* **Ask a model:** a local model of your choice is loaded if needed and gets the summary in a new chat. A
+  `bmoe-settings` block in its answer shows "Suggested settings" (current → suggested, checked against the existing
+  settings and their ranges) with an **Apply** button; nothing changes before the tap.
+* **Reload hint** also when NPU or expert cache change on the loaded model's card.
+
+### Share into BigMoe² (new)
+* BigMoe² is in Android's share sheet for text, pictures, PDFs and other files. Pick a new chat or one of the recent
+  chats, and — when no model is loaded — the model to load. Text goes into the message box, files are attached
+  (pictures once a model with a vision projector is loaded); nothing is sent until you send it.
+
 ### Engine and models
 * **Engine updates from upstream BigMoeOnEdge 0.34-0.36:** context checkpoints (Qwen3.5/3.6, Gemma and other
   hybrid or sliding-window models no longer prefill the whole conversation again when a prompt differs from what the
@@ -120,7 +155,7 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 ### Chat
 * **Live statistics:** tokens/second and context use count up while the answer is written.
 * **Context menus where you click:** right-click (or long-press) opens the menu at the pointer, with a new
-  **Regenerate** entry that answers a turn again without editing it.
+  **Regenerate** entry that answers a turn again without editing it (earlier answers are kept, see above).
 * **One model under the chat title:** the loaded model, else the last one this chat used.
 * **Wider model menu:** the model picker in the chat uses almost the full screen width and shows the complete file
   name, wrapped if needed.
