@@ -204,6 +204,12 @@ object SettingsAdvice {
            and how sure that is (how many answers it rests on).
         2. Where the data is too thin or not comparable: which tests to run next (one change at a time, same prompt).
         3. Anything that looks wrong in the data or in the app.
+        4. Engine optimisations, if the numbers point to one (e.g. flash stall, cache churn, cores waiting, NPU use).
+           The source is public: https://github.com/int3ks/BigMoeOnEdge-Snap — the engine is in
+           app/src/main/cpp/core (BigMoeOnEdge 0.28 baseline with local patches and ported pieces), the vendored
+           llama.cpp in app/src/main/cpp/third_party/llama.cpp, the JNI bridge in app/src/main/cpp/native-bridge.cpp,
+           the app in app/src/main/java/com/bigmoe/onedge; CHANGELOG.md ("Snap fork") is the history. Name the file
+           and what to change, and how a measurement in this log would show it worked.
         Only suggest settings that exist (list below). If you give values, add them as a JSON block marked
         `$BLOCK`, e.g. ```$BLOCK {"cacheMb": 2500} ``` — the app can apply such a block.
 
