@@ -85,8 +85,26 @@ data class SharedContent(val text: String?, val files: List<Pair<Uri, Attachment
             val last = urls.lastOrNull() ?: return t
             if (last.range.last != t.lastIndex) return t
             val before = t.substring(0, last.range.first).trim()
-            if (before.isEmpty()) return last.value
-            return before + "\n\nSource: " + last.value
+            val link = cleanUrl(last.value)
+            if (before.isEmpty()) return link
+            return before + "\n\nSource: " + link
+        }
+
+        /** Query parameters that only track the click or the browser (Google search adds a long gs_lcrp blob). */
+        private val TRACKING = setOf(
+            "oq", "gs_lcrp", "gs_lp", "sourceid", "source", "ie", "ved", "ei", "sca_esv", "sxsrf", "client", "aqs",
+            "uact", "sei", "rlz", "fbclid", "gclid", "mc_cid", "mc_eid"
+        )
+
+        internal fun cleanUrl(u: String): String {
+            val q = u.indexOf('?')
+            if (q < 0) return u
+            val hash = u.indexOf('#', q).let { if (it < 0) u.length else it }
+            val kept = u.substring(q + 1, hash).split('&').filter { p ->
+                val k = p.substringBefore('=')
+                k.isNotEmpty() && k !in TRACKING && !k.startsWith("utm_")
+            }
+            return u.substring(0, q) + (if (kept.isEmpty()) "" else "?" + kept.joinToString("&")) + u.substring(hash)
         }
 
         @Suppress("DEPRECATION")
