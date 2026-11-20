@@ -521,9 +521,28 @@ struct Session::Impl {
     // Keep the first n tokens of the KV and drop the rest. Where the memory refuses the cut, the
     // newest checkpoint at or before n stands in for it; returns how many tokens are still held,
     // 0 with the context cleared when no checkpoint helps. The draft context is the caller's.
+    // A sliding-window memory (Gemma) "accepts" every cut, but the window before the cut may already be
+    // evicted: after rolling back hundreds of tokens (Regenerate, an edited message) the SWA layers then
+    // hold too little or nothing before the cut while the full layers hold it all, and the next decode
+    // reads a broken context (wrong language, nonsense) or fails with inconsistent positions. Same test
+    // as the llama.cpp server: the window must still reach back to n - n_swa and end at n - 1.
+    bool kv_prefix_intact(size_t n) {
+        const int32_t n_swa = llama_model_n_swa(llama_get_model(ctx.get()));
+        if (n_swa <= 0 || n == 0) return true;
+        llama_memory_t mem = llama_get_memory(ctx.get());
+        const llama_pos pmin = llama_memory_seq_pos_min(mem, 0);
+        const llama_pos pmax = llama_memory_seq_pos_max(mem, 0);
+        const llama_pos thold = std::max<llama_pos>(0, (llama_pos) n - n_swa);
+        const bool ok = pmax == (llama_pos) n - 1 && pmin >= 0 && pmin <= thold;
+        if (!ok)
+            std::fprintf(stderr, "bmoe: sliding window cannot keep %zu tokens (holds %d..%d, window %d): using a checkpoint\n",
+                         n, (int) pmin, (int) pmax, (int) n_swa);
+        return ok;
+    }
+
     size_t keep_kv_prefix(size_t n) {
         size_t kept = n;
-        if (!llama_memory_seq_rm(llama_get_memory(ctx.get()), 0, (llama_pos) n, -1)) {
+        if (!llama_memory_seq_rm(llama_get_memory(ctx.get()), 0, (llama_pos) n, -1) || !kv_prefix_intact(n)) {
             kept = (size_t) checkpoints.restore(checkpoint_contexts(), (int64_t) n);
             if (kept == 0) clear_memory(ctx.get());
         }
@@ -1981,7 +2000,7 @@ RunResult Session::generate(const GenerateRequest & req,
             // A recurrent state (Qwen3.5/3.6) or a sliding window (Gemma) can refuse a partial removal.
             // Then the newest context checkpoint before the divergence stands in for the cut, and only a
             // context with none starts again with a full re-prefill.
-            if (llama_memory_seq_rm(llama_get_memory(ctx), 0, (llama_pos) n_common, -1)) {
+            if (llama_memory_seq_rm(llama_get_memory(ctx), 0, (llama_pos) n_common, -1) && im.kv_prefix_intact(n_common)) {
                 im.kv_tokens.resize(n_common);
                 im.checkpoints.drop_after((int64_t) n_common);
                 kv_reuse = KV_REUSE_PARTIAL;

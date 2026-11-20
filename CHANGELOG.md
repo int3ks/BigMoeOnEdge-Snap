@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Fix: Gemma (sliding window) answered in another language / "decode failed" after Regenerate or an edit.** llama.cpp's sliding-window cache accepts any cut, but after rolling back hundreds of tokens the window before the cut was already evicted, so the SWA layers held a broken context (log: "inconsistent sequence positions"). The prefix reuse and `keep_kv_prefix` now check the window like the llama.cpp server (`pos_min <= n - n_swa`, `pos_max == n - 1`) and otherwise restore a context checkpoint or re-prefill.
 - **Chat switches are the chat's own:** the switches under the wrench (thinking, web search, tools, Termux, system prompt) change only that chat and travel in its file (`switches`) to other devices; the switches in Settings are the defaults for new chats and say so (before, a chat's switch also changed the Settings value).
 - **Settings start with every section collapsed** (Engine performance was open).
 - **Version 7.00:** new numbering MAJOR.MM (7.00, 7.01 ... 7.99 → 8.00), versionCode major*1000+minor (`scripts/next-version.sh`, `version-major.txt`).
