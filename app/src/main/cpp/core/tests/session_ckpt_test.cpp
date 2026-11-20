@@ -17,6 +17,7 @@
 #include "bmoe/load_progress.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -40,6 +41,9 @@ static std::unique_ptr<Session> open_session(const char * path, int ckpts, bool 
     cfg.moe.enabled = moe;
     cfg.moe.cache_mb = moe ? 1 : 0;
     cfg.moe.force_cache = true;
+    // BMOE_TEST_DISCARD_DROP=1: every offered cache entry is dropped before a lookup takes it back, so
+    // the re-read path of the discardable cache runs (answers must stay identical).
+    cfg.moe.cache_discard_drop = std::getenv("BMOE_TEST_DISCARD_DROP") != nullptr;
     if (mtp_like_spec) cfg.spec.source = DraftSource::ngram;
     std::string err;
     auto s = Session::open(cfg, err);
@@ -82,9 +86,10 @@ static void scenario(const char * path, bool moe, bool spec) {
     const RunResult a3 = ask(*s, R2);
     check(a3.ok && a3.generated_text == want.generated_text, tag + "regenerate of R2 gives the same answer");
     // A regenerate must decode at least the prompt's last token again, so R2's own prompt-end
-    // checkpoint (at n_prompt) is one past the cut; the one at R1's prompt end serves.
-    check(a3.summary.kv_reuse == KV_REUSE_CHECKPOINT && a3.n_reused == a1.n_prompt_total,
-          tag + "regenerate restores the newest usable checkpoint (R1's prompt end)");
+    // checkpoint (at n_prompt) is one past the cut; the one the prefill took 4 tokens before the
+    // prompt's end serves (upstream #603, as llama.cpp's server places them).
+    check(a3.summary.kv_reuse == KV_REUSE_CHECKPOINT && a3.n_reused == a2.n_prompt_total - 4,
+          tag + "regenerate restores the newest usable checkpoint (4 tokens before R2's prompt end)");
     std::printf("    regenerate reused=%d of %d kv_reuse=%d\n", a3.n_reused, a3.n_prompt_total, a3.summary.kv_reuse);
 
     auto off = open_session(path, 0, moe, spec);

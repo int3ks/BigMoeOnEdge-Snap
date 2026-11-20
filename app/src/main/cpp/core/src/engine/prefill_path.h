@@ -82,6 +82,9 @@ public:
     void clear_state();
 
     uint64_t arena_read_bytes() const { return arena_ ? arena_->read_bytes() : 0; }
+    uint64_t arena_cache_bytes() const { return arena_ ? arena_->cache_bytes() : 0; }
+    // The expert cache the arena may fill from (PrefillDeviceConfig::from_cache). Call before open().
+    void read_experts_from(ExpertStreamSource * cache) { cache_read_ = cache; }
     double arena_stall_seconds() const { return arena_ ? arena_->stall_seconds() : 0.0; }
     uint64_t arena_routed_used() const { return arena_ ? arena_->routed_used() : 0; }
     uint64_t arena_routed_demand() const { return arena_ ? arena_->routed_demand() : 0; }
@@ -98,6 +101,7 @@ private:
 
     ggml_backend_dev_t devs_[2];
     RouterHook * hook_ = nullptr;
+    ExpertStreamSource * cache_read_ = nullptr;
     std::vector<LayerExperts> arena_layers_;
     std::vector<std::string> arena_shards_;
     // Declared before the arena so it is destroyed after it: the arena hands the experts back to the

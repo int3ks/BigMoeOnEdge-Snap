@@ -85,6 +85,20 @@ void pinned_free(PinnedAlloc * a);
 size_t vm_page();
 void * vm_reserve(size_t sz);
 bool vm_commit(void * p, size_t sz);
+// Discardable spans (upstream #528): memory the kernel may take back by DROPPING it, never by writing
+// it anywhere. Linux and Android: MADV_FREE; nothing reports a loss, but a dropped page reads back as
+// zero and a write cancels a pending drop, so vm_reclaim writes every page first and then checks it.
+// vm_offer hands a committed span over (false where the platform cannot). vm_reclaim takes an offered
+// span back before anything reads it: true when every page is still what was offered, false when
+// any was dropped, and then the WHOLE span must be filled again. A page whose words are all zero may
+// be reported dropped although it was not; that costs a read, never a wrong answer. Page-aligned
+// spans that no other owner shares a page with.
+bool vm_discard_supported();
+bool vm_commit_discardable(void * p, size_t sz);
+bool vm_offer(void * p, size_t sz);
+bool vm_reclaim(void * p, size_t sz);
+// Whether an offered span is still held, asked without taking it back: 1 held, 0 dropped, -1 unknown.
+int vm_offered_held(const void * p, size_t sz);
 void vm_evict(void * p, size_t sz);
 void vm_release(void * p, size_t sz);
 

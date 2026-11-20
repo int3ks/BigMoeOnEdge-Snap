@@ -66,6 +66,34 @@ struct MoeStreamConfig {
     // the system thrash. It only shrinks, never under one token's worst-case cycle; a reload of the
     // model starts from the configured size again. A slow token with the pages in place moves nothing.
     bool cache_brake = true;
+
+    // Let the system DROP cached experts under memory pressure instead of writing anything to the
+    // drive (upstream #528). Anonymous memory that pressure reaches is swapped or compressed (zram);
+    // an entry no layer used in the last pass is offered to the kernel (MADV_FREE), which reclaims it
+    // before it compresses or swaps anything; a hit on a dropped entry reads it again from flash.
+    // The budget follows what the kernel lets the cache keep and grows back once it stops dropping.
+    bool cache_discard = true;
+    // Debug: drop an offered entry just before a lookup takes it back, so every such lookup pays the
+    // re-read on zeroed memory.
+    bool cache_discard_drop = false;
+
+    // Which cached expert the budget evicts (upstream #505). 0: the least recently used (LRU). Above
+    // 0: the one with the least decayed frequency, every use counting half as much after this many
+    // tokens (ties go to the least recently used). Below one token's working set LRU is a cyclic scan
+    // that evicts exactly what the next token needs and hits 0%; a short half-life keeps the experts
+    // the recent tokens shared instead. Upstream measured Qwen3.6-35B-A3B with a 440 MiB cache:
+    // 0% -> 27% hit, 6.1 -> 8.5 tok/s; at 1170/2900 MiB 4-5% fewer bytes read. Lossless.
+    static constexpr int cache_freq_half_life_default = 8;
+    int cache_freq_half_life = cache_freq_half_life_default;
+
+    // Admit a prefill's misses at the cold end of the cache instead of the hot one: a wide graph
+    // touches nearly every expert of a layer, so admitting them hot evicts what the next ubatch (and
+    // the decode after the prompt) needs. Entered cold, a miss still serves its own layer but is the
+    // first victim. A graph is wide from `prefill_cold_min_tokens` tokens. Lossless.
+    bool cache_prefill_cold = true;
+    static constexpr int prefill_cold_min_tokens = 32;
+    // TEST ONLY: the width from which a graph's misses are admitted cold (0 keeps the default).
+    int test_prefill_cold_min_tokens = 0;
     int cache_floor_mb = 1536; // RAM to leave free for the rest of the system when auto-sizing
     int cache_ceil_mb = 0;     // upper bound on the auto budget in MiB (0 = cap only at the full
                                // expert-set size); useful to keep the cache from taking all the
@@ -283,6 +311,7 @@ struct MoeStreamConfig {
     static constexpr int cache_min_mb = 1500; // smallest non-pathological cache (see above)
     static constexpr int io_threads_max = 8;
     static constexpr int prefetch_layers_max = 8;
+    static constexpr int cache_freq_half_life_max = 4096; // tokens; far beyond it is plain frequency
     static constexpr int route_ahead_max = 8; // beyond this the staleness has no measured meaning
 };
 
@@ -404,6 +433,12 @@ struct PrefillDeviceConfig {
     // than this fraction of its experts gets the next layer read whole.
     bool routed = true;
     float routed_full_frac = 0.85f;
+
+    // Fill the arena from the expert cache where it can (upstream #505): an expert the decode cache
+    // holds is copied from RAM instead of read from flash. The arena never admits into the cache and
+    // a device graph never evicts from it, so what the cache held before the prompt serves it; on a
+    // follow-up turn that is most of what the prompt routes to. The bytes are the same either way.
+    bool from_cache = true;
     static constexpr float routed_full_frac_min = 0.0f; // exclusive: 0 would read every layer whole
     static constexpr float routed_full_frac_max = 1.0f; // inclusive: 1 never falls back
     // TEST ONLY: in routed mode, skip the reads at the routing node, so the graph computes on whatever

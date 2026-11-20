@@ -28,6 +28,10 @@ public:
     // Returns false on I/O failure (serial) or if a prior async batch already failed.
     virtual bool load_layer(int il, const int32_t * ids, int n_ids) = 0;
 
+    // A read made beside this source failed (a row of a table it lends the hook, IRowSource): end
+    // the run as a failed load_layer does. Default: a source with no such state has nothing to end.
+    virtual void mark_fatal() {}
+
     // Hint that layer `il` is likely to route `ids` (n_ids of them) on a future token, so the
     // implementation may read them ahead on otherwise-idle lanes. Purely advisory: a correct
     // guess makes the later load_layer(il, …) a cache hit, a wrong guess wastes a read — neither
@@ -93,6 +97,12 @@ public:
         // still raise the byte count, and therefore the number to look at when it does.
         long long evictions = 0;
         long long rereads = 0;
+        // Offered entries (MoeStreamConfig::cache_discard) the system dropped under pressure, noticed
+        // when a lookup wanted one or when it reached the LRU tail: memory given back with nothing
+        // written to swap.
+        long long discarded = 0;
+        long long discarded_on_hit = 0; // of those, the ones a lookup found dropped (the re-read path)
+        long long cold_admits = 0; // misses a wide graph admitted at the cold end (cache_prefill_cold)
         // Eval-thread waits that are NOT part of the windows above, split out because each lives
         // inside a different residual and hid there. `drain_wait` is the top of the async load:
         // waiting for the previous layer's batch to finish before its jobs_/flags are reused —

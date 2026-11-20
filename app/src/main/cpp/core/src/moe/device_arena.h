@@ -114,6 +114,11 @@ public:
     // Test hook: routed mode skips its reads at the routing node (PrefillDeviceConfig::test_routed_skip_demand).
     void set_test_skip_demand(bool on) { test_skip_demand_ = on; }
 
+    // Fill from the expert cache where it holds the expert (PrefillDeviceConfig::from_cache, upstream
+    // #505): a copy from RAM instead of a flash read, same bytes. Null turns it off. Between graphs only.
+    void set_cache(const ExpertStreamSource * cache) { cache_ = cache; }
+    uint64_t cache_bytes() const { return cache_bytes_.load(); } // copied from the expert cache
+
     bool failed() const { return failed_.load(); }
     uint64_t read_bytes() const { return read_bytes_.load(); }
     double stall_seconds() const { return stall_ns_.load() * 1e-9; }
@@ -218,6 +223,8 @@ private:
 
     std::atomic<bool> failed_{false};
     std::atomic<uint64_t> read_bytes_{0};
+    std::atomic<uint64_t> cache_bytes_{0};
+    const ExpertStreamSource * cache_ = nullptr;
     std::atomic<uint64_t> stall_ns_{0};
 };
 

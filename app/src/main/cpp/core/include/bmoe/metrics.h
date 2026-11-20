@@ -197,6 +197,9 @@ struct RunSummary {
     // claiming its reads are useful is doing it here.
     long long cache_evictions = 0;
     long long cache_rereads = 0;
+    long long cache_discarded = 0;        // cache entries the kernel dropped (cache_discard), nothing written
+    long long cache_discarded_on_hit = 0; // of those, the ones a lookup had to read again
+    long long cache_cold_admits = 0; // misses a wide graph admitted at the cold end (cache_prefill_cold)
 
     // Row-gathered dense tables served from flash (MoeStreamConfig::row_stream). The pair that says
     // whether the policy paid: row_table_mib is what those tables would have occupied resident,

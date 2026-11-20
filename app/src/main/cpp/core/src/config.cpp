@@ -301,6 +301,10 @@ ValidationResult validate(const RunConfig & cfg) {
         }
         // Measured, not theorised: with a draft source on, a verify decode is several positions wide
         // and route-ahead declines every one of them — a run at draft 3 committed 0 routings and
+        if (m.cache_freq_half_life < 0 || m.cache_freq_half_life > MoeStreamConfig::cache_freq_half_life_max) {
+            return fail("{cache-half-life} must be between 0 and " +
+                        std::to_string(MoeStreamConfig::cache_freq_half_life_max));
+        }
         // passed 249 through. It still pays for itself, though: the prediction GEMVs run, and its
         // early reads become ordinary speculation that can now miss (81% useful against 100% when it
         // commits). Cost with no commitment is worse than either feature alone, so the pair is

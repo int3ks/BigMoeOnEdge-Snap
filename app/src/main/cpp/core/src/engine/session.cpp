@@ -513,6 +513,7 @@ struct Session::Impl {
     // They describe a prefix of kv_tokens, so they go wherever it goes.
     detail::ContextCheckpoints checkpoints;
     bool checkpoint_size_logged = false; // the size is the model's, so said once per session
+    int checkpoint_turn = 0;             // which request took a checkpoint (ContextCheckpoints::create)
     detail::CheckpointContexts checkpoint_contexts() { return {ctx.get(), ctx_dft.get(), mtp.get()}; }
     void forget_kv_tokens() {
         kv_tokens.clear();
@@ -1397,10 +1398,21 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
         }
 
         if (im.prefill) im.prefill->keep_stream_layout(layers, offs.shard_paths);
+        if (im.prefill) im.prefill->read_experts_from(&im.source);
         if (load_cancel_requested()) return fail("");
         load_progress_set(LoadStep::Weights, 0.0f); // the dense weights' reads report by bytes from here
         if (!im.source.init(offs.shard_paths, n_expert, std::move(layers), cfg.moe))
             return fail("expert stream source init failed");
+        {
+            // The effective top-k tells the cache a wide (prefill) graph from a decode (cache_prefill_cold).
+            int top_k = cfg.n_expert_used;
+            if (top_k <= 0) {
+                const GgufModelInfo & mi = gguf();
+                top_k = mi.ok ? mi.n_expert_used : 0;
+            }
+            im.source.set_top_k(top_k);
+            im.source.set_drop_floor(im.source.worst_cycle_bytes(top_k));
+        }
         im.hook->set_source(&im.source);
         // The row policy exists only once dense_.init has taken the tables over; null means nothing
         // qualified or the takeover declined, and the hook then costs exactly nothing per node.
@@ -1790,6 +1802,9 @@ RunResult Session::generate(const GenerateRequest & req,
     bool history_pushed = false;   // did we append this turn's user message to chat_history?
     bool prefilled_answer = false; // closed the reasoning span in the prompt, so skip reasoning parse
     common_chat_parser_params parse_params;
+    // The template's own message delimiters (llama.cpp reads them off the template): where each user
+    // message starts, so the prefill stops there for a checkpoint (upstream #603). Empty without them.
+    common_chat_msg_delimiters message_delimiters;
     const size_t history_base = im.chat_history.size();
     if (stateless) {
         try {
@@ -1809,6 +1824,7 @@ RunResult Session::generate(const GenerateRequest & req,
             common_chat_params cp = common_chat_templates_apply(im.chat_tmpls.get(), inputs);
             prompt = cp.prompt.str();
             parse_params = detail::build_parse_params(cp);
+            message_delimiters = cp.message_delimiters;
         } catch (const std::exception & e) {
             // No raw-prompt fallback here: there is no single "prompt" to fall back to.
             return fail(std::string("chat request could not be rendered with this model's template: ") + e.what());
@@ -1852,6 +1868,7 @@ RunResult Session::generate(const GenerateRequest & req,
             common_chat_params cp = common_chat_templates_apply(im.chat_tmpls.get(), inputs);
             prompt = cp.prompt.str();
             parse_params = detail::build_parse_params(cp);
+            message_delimiters = cp.message_delimiters;
         } catch (const std::exception & e) {
             std::fprintf(stderr, "bmoe: chat template apply failed (%s); using raw prompt\n", e.what());
             im.chat_history.resize(history_base);
@@ -1883,6 +1900,13 @@ RunResult Session::generate(const GenerateRequest & req,
         return fail(std::move(msg));
     };
     if (n_prompt < 1) return fail_undo("empty prompt after tokenization");
+    std::vector<size_t> user_starts; // token indices where a user message starts, ascending
+    if (chat_on && !message_delimiters.delimiters.empty()) {
+        message_delimiters.tokenize(im.vocab);
+        const llama_tokens rendered(tokens.begin(), tokens.begin() + n_prompt);
+        for (const common_chat_msg_span & sp : message_delimiters.split(rendered).spans)
+            if (sp.role == COMMON_CHAT_ROLE_USER) user_starts.push_back(sp.pos);
+    }
     tokens.resize(n_prompt);
 
     int n_prompt_eff = n_prompt;
@@ -2124,7 +2148,7 @@ RunResult Session::generate(const GenerateRequest & req,
                 res.cancelled = true;
                 return res;
             }
-            if (moe.overlap && im.source.fatal()) return fail("expert stream I/O failed during overlap prefill");
+            if (im.source.fatal()) return fail("expert stream I/O failed during prefill");
             return fail("image prefill failed");
         }
         trace_flush();
@@ -2142,11 +2166,19 @@ RunResult Session::generate(const GenerateRequest & req,
     const uint64_t arena_read0 = im.prefill ? im.prefill->arena_read_bytes() : 0;
     const double arena_stall0 = im.prefill ? im.prefill->arena_stall_seconds() : 0.0;
     const long long device_nodes0 = im.hook->device_nodes();
-    for (int i = (int) n_common; i < n_prompt_text_end; i += pf_step) {
-        const int chunk = std::min(pf_step, n_prompt - i);
-        // A long prompt prefilled in pieces leaves checkpoints inside it too, min_step apart.
-        if (chat_on && !image_turn && i > (int) n_common && im.checkpoints.wanted(i, /*prompt_end*/ false))
-            im.checkpoints.create(im.checkpoint_contexts(), i);
+    const int ckpt_turn = ++im.checkpoint_turn;
+    const detail::ContextCheckpoints::Stops ckpt_stops{&user_starts, n_prompt, pf_step, (int) llama_n_ubatch(ctx)};
+    for (int i = (int) n_common, chunk = 0; i < n_prompt_text_end; i += chunk) {
+        chunk = std::min(pf_step, n_prompt - i);
+        // A piece stops where a checkpoint is due (a user message's start, the prompt's last tokens,
+        // as llama.cpp's server places them, upstream #603); the checkpoint is taken at the start of
+        // the piece, before it is decoded.
+        if (chat_on && !image_turn) {
+            chunk = (int) (im.checkpoints.next_stop(ckpt_stops, i, chunk) - i);
+            if (i > (int) n_common && im.checkpoints.wanted_at(ckpt_stops, i, chunk))
+                im.checkpoints.create(im.checkpoint_contexts(), i, ckpt_turn,
+                                      !user_starts.empty() && (size_t) i == user_starts.front());
+        }
         if (im.prefill) {
             const bool on_dev = chunk >= im.cfg.prefill.min_tokens;
             im.place_prefill(on_dev);
@@ -2169,7 +2201,7 @@ RunResult Session::generate(const GenerateRequest & req,
                 res.cancelled = true;
                 return res;
             }
-            if (moe.overlap && im.source.fatal()) return fail("expert stream I/O failed during overlap prefill");
+            if (im.source.fatal()) return fail("expert stream I/O failed during prefill");
             return fail("prefill decode failed");
         }
         trace_flush();
@@ -2195,7 +2227,7 @@ RunResult Session::generate(const GenerateRequest & req,
     // The end of this prompt is where the next request most often diverges: an edit or a regenerate
     // of the answer, a template that renders the answer back without its thinking, an API client
     // that resends the answer as text.
-    if (chat_on && !image_turn && im.checkpoints.create(im.checkpoint_contexts(), n_prompt) &&
+    if (chat_on && !image_turn && im.checkpoints.create(im.checkpoint_contexts(), n_prompt, ckpt_turn) &&
         !im.checkpoint_size_logged) {
         im.checkpoint_size_logged = true;
         std::fprintf(stderr, "bmoe: context checkpoints: %.1f MiB each, up to %d kept\n",
@@ -2317,7 +2349,7 @@ RunResult Session::generate(const GenerateRequest & req,
         const size_t floor = im.source.worst_cycle_bytes(im.n_expert_used);
         const size_t next = CacheBrake::braked(budget, floor);
         if (next >= budget) return;
-        im.source.set_cache_budget(next);
+        im.source.brake_cache_budget(next);
         std::fprintf(stderr,
                      "bmoe: cache brake: a token took %.0f ms of compute against %.0f, and %.0f%% of the cache's "
                      "sampled pages were no longer in RAM; cache %zu -> %zu MiB\n",
@@ -2415,7 +2447,7 @@ RunResult Session::generate(const GenerateRequest & req,
                 res.cancelled = true;
                 break;
             }
-            if (moe.overlap && im.source.fatal()) return fail("expert stream I/O failed during overlap decode");
+            if (im.source.fatal()) return fail("expert stream I/O failed during decode");
             return fail("decode failed during generation");
         }
         trace_flush(); // outside the s0..s1 bracket: the trace's own writes must not bill wall_ms
@@ -2687,6 +2719,9 @@ RunResult Session::generate(const GenerateRequest & req,
         s.cache_resizes = st.cache_resizes;
         s.cache_evictions = st.evictions;
         s.cache_rereads = st.rereads;
+        s.cache_cold_admits = st.cold_admits;
+        s.cache_discarded = st.discarded;
+        s.cache_discarded_on_hit = st.discarded_on_hit;
         const RowSourceStats rs = im.source.row_stats();
         s.row_table_mib = rs.table_bytes / (1024.0 * 1024.0);
         s.row_resident_mib = rs.resident_bytes / (1024.0 * 1024.0);
