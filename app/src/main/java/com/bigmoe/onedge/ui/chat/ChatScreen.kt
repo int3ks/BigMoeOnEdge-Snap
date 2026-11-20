@@ -317,6 +317,15 @@ fun ChatScreen(
                 .imePadding()
         ) {
             EngineBanner(state = uiState.engineState, onOpenModels = onNavigateToModels)
+            val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+            val goneOnOneDrive by remember { (appContext as com.bigmoe.onedge.OnEdgeApplication).container.chatSync.remoteDeleted }.collectAsState()
+            if (uiState.currentSession?.id?.let { it in goneOnOneDrive } == true) {
+                BannerRow(
+                    text = "Deleted on OneDrive (another device or the PC). Writing in this chat uploads it again; to remove it here, delete it in the chat list.",
+                    action = null,
+                    onAction = {}
+                )
+            }
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 if (uiState.messages.isEmpty() && !showLiveBubble) {
                     EmptyChatView(onSuggestionSelected = { prompt -> viewModel.sendMessage(prompt) })

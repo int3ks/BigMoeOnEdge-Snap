@@ -69,6 +69,10 @@ class ChatSync(
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
 
+    /** Ids of chats deleted on OneDrive (other device, PC) but kept here; writing in one uploads it again. */
+    private val _remoteDeleted = MutableStateFlow<Set<String>>(emptySet())
+    val remoteDeleted: StateFlow<Set<String>> = _remoteDeleted.asStateFlow()
+
     /** Signed in or not, for the settings page (it changes when the browser comes back). */
     private val _signedIn = MutableStateFlow(auth.signedIn)
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
@@ -169,6 +173,7 @@ class ChatSync(
             }
             val state = readState()
             val chatState = state.optJSONObject("chats") ?: JSONObject().also { state.put("chats", it) }
+            val goneRemote = state.optJSONObject("remoteDeleted") ?: JSONObject().also { state.put("remoteDeleted", it) }
 
             // 2. Chat files <-> OneDrive.
             val dir = folder.dir.apply { mkdirs() }
@@ -186,10 +191,13 @@ class ChatSync(
                 val path = "$CHATS/$name"
                 if (l != null && r == null) {
                     if (s != null && !localCh) {
-                        l.delete(); deleted++; filesChanged = true
-                        chatState.remove(name)
+                        // Deleted on OneDrive: kept here with a notice until it is written in (upload again) or deleted.
+                        if (!goneRemote.has(name)) {
+                            ChatFile.decode(l.readText())?.session?.id?.let { goneRemote.put(name, it) }
+                        }
                     } else {
                         chatState.put(name, entry(sig!!, client.uploadFile(path, l))); up++
+                        goneRemote.remove(name)
                     }
                 } else if (l == null && r != null) {
                     if (s != null && !remoteCh) {
@@ -221,6 +229,10 @@ class ChatSync(
                 }
             }
             if (filesChanged) folder.reconcile()
+            // Marks of chats that are gone here as well (deleted locally) or back on OneDrive are dropped.
+            val marks = ArrayList<String>().apply { goneRemote.keys().forEach { add(it) } }
+            marks.forEach { n -> if (!File(dir, n).exists() || remote.containsKey(n)) goneRemote.remove(n) }
+            _remoteDeleted.value = HashSet<String>().apply { goneRemote.keys().forEach { k -> add(goneRemote.optString(k)) } }
 
             // 3. Files the chats refer to (attachments, results).
             val (fUp, fDown, pendingBytes) = syncWorkspaceFiles(state)

@@ -388,7 +388,13 @@ private fun PanelSessionRow(
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleSmall
                 )
-                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+                val goneOnOneDrive by remember { (appContext as com.bigmoe.onedge.OnEdgeApplication).container.chatSync.remoteDeleted }.collectAsState()
+                Text(
+                    date + if (session.id in goneOnOneDrive) " \u2022 deleted on OneDrive" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (session.id in goneOnOneDrive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
+                )
             }
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
