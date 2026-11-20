@@ -27,7 +27,9 @@ object ChatFile {
         val messages: List<ChatMessageEntity>,
         val changedAt: Long,
         val attachments: List<AttachmentEntity> = emptyList(),
-        val artifacts: List<ArtifactEntity> = emptyList()
+        val artifacts: List<ArtifactEntity> = emptyList(),
+        /** The chat's own switches (thinking, web search, tools, system prompt) as stored by the app; null = none. */
+        val toggles: String? = null
     )
 
     fun changedAt(session: ChatSessionEntity, messages: List<ChatMessageEntity>): Long =
@@ -37,7 +39,8 @@ object ChatFile {
         session: ChatSessionEntity,
         messages: List<ChatMessageEntity>,
         attachments: List<AttachmentEntity> = emptyList(),
-        artifacts: List<ArtifactEntity> = emptyList()
+        artifacts: List<ArtifactEntity> = emptyList(),
+        toggles: String? = null
     ): String {
         val atts = JSONArray()
         attachments.forEach { a ->
@@ -89,6 +92,7 @@ object ChatFile {
             .put("messages", arr)
             .put("attachments", atts)
             .put("artifacts", arts)
+            .apply { toggles?.let { t -> runCatching { put("switches", JSONObject(t)) } } }
             .toString(1)
     }
 
@@ -147,7 +151,7 @@ object ChatFile {
                 updatedAt = a.optLong("updatedAt")
             )
         }
-        Parsed(session, messages, o.optLong("changedAt", changedAt(session, messages)), attachments, artifacts)
+        Parsed(session, messages, o.optLong("changedAt", changedAt(session, messages)), attachments, artifacts, o.optJSONObject("switches")?.toString())
     }.getOrNull()
 
     /** Stored JSON strings go into the file as real JSON (readable); anything else stays a string. */

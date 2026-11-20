@@ -123,7 +123,8 @@ class AppContainer(private val context: Context) {
             attachmentDao = database.attachmentDao(),
             artifactDao = database.artifactDao(),
             remoteServers = remoteServerStore,
-            workspaceRoot = { workspace.rootDir }
+            workspaceRoot = { workspace.rootDir },
+            composer = chatComposerDataStore
         )
     }
 

@@ -25,7 +25,9 @@ class ChatFolder(
     private val sessionDao: ChatSessionDao,
     private val messageDao: ChatMessageDao,
     private val attachmentDao: AttachmentDao,
-    private val artifactDao: ArtifactDao
+    private val artifactDao: ArtifactDao,
+    /** The chats' own switches (they travel in the chat file); null = not part of the file. */
+    private val composer: com.bigmoe.onedge.data.local.datastore.ChatComposerDataStore? = null
 ) {
     val dir: File get() = File(dirProvider(), FOLDER)
 
@@ -64,7 +66,7 @@ class ChatFolder(
             val db = sessions[id]
             val f = files[id]
             val s = state.optJSONObject(id)
-            val fp = db?.let { fingerprint(it, fps[id]) }
+            val fp = db?.let { fingerprint(it, fps[id], composer?.getTogglesRaw(id)) }
             val dbCh = db != null && (s == null || s.optString("fp") != fp)
             val fileCh = f != null && (s == null || s.optString("sig") != f.sig || s.optString("name") != f.file.name)
             when {
@@ -124,14 +126,15 @@ class ChatFolder(
             session = db.copy(title = title)
         }
         val messages = messageDao.getMessagesForSession(db.id)
-        val text = ChatFile.encode(session, messages, attachmentDao.getForSession(db.id), artifactDao.getForSession(db.id))
+        val toggles = composer?.getTogglesRaw(db.id)
+        val text = ChatFile.encode(session, messages, attachmentDao.getForSession(db.id), artifactDao.getForSession(db.id), toggles)
         val target = File(dir, name)
         val tmp = File(dir, ".$name.tmp")
         tmp.writeText(text)
         if (!tmp.renameTo(target)) { target.delete(); tmp.renameTo(target) }
         if (current != null && current.canonicalPath != target.canonicalPath) current.delete()
         val fps = messageDao.fingerprints().firstOrNull { it.sessionId == db.id }
-        state.put(db.id, JSONObject().put("name", name).put("sig", sig(target)).put("fp", fingerprint(session, fps)))
+        state.put(db.id, JSONObject().put("name", name).put("sig", sig(target)).put("fp", fingerprint(session, fps, toggles)))
     }
 
     /** Reads a chat file into the database; its file name is the title. */
@@ -152,9 +155,10 @@ class ChatFolder(
         }
         parsed.attachments.forEach { attachmentDao.insert(it) }
         parsed.artifacts.forEach { artifactDao.insert(it) }
+        if (parsed.toggles != null) composer?.saveTogglesRaw(id, parsed.toggles)
         val fps = messageDao.fingerprints().firstOrNull { it.sessionId == id }
         val stored = sessionDao.getSessionById(id) ?: session
-        state.put(id, JSONObject().put("name", file.name).put("sig", sig(file)).put("fp", fingerprint(stored, fps)))
+        state.put(id, JSONObject().put("name", file.name).put("sig", sig(file)).put("fp", fingerprint(stored, fps, composer?.getTogglesRaw(id))))
         return true
     }
 
@@ -164,8 +168,8 @@ class ChatFolder(
 
         fun sig(f: File): String = "${f.length()}|${f.lastModified()}"
 
-        fun fingerprint(s: ChatSessionEntity, m: MessageFingerprint?): String =
-            "${s.updatedAt}|${s.title.hashCode()}|${s.modelNamesJson.hashCode()}|${m?.cnt ?: 0}|${m?.len ?: 0}|${m?.maxTs ?: 0}|${m?.varLen ?: 0}"
+        fun fingerprint(s: ChatSessionEntity, m: MessageFingerprint?, toggles: String? = null): String =
+            "${toggles?.hashCode() ?: 0}|${s.updatedAt}|${s.title.hashCode()}|${s.modelNamesJson.hashCode()}|${m?.cnt ?: 0}|${m?.len ?: 0}|${m?.maxTs ?: 0}|${m?.varLen ?: 0}"
 
         /** A title as a file name that Windows and Android accept. */
         fun fileStem(title: String): String {

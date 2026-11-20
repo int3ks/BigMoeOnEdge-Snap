@@ -2,6 +2,8 @@
 
 ## Snap fork
 
+- **Chat switches are the chat's own:** the switches under the wrench (thinking, web search, tools, Termux, system prompt) change only that chat and travel in its file (`switches`) to other devices; the switches in Settings are the defaults for new chats and say so (before, a chat's switch also changed the Settings value).
+- **Settings start with every section collapsed** (Engine performance was open).
 - **Version 7.00:** new numbering MAJOR.MM (7.00, 7.01 ... 7.99 → 8.00), versionCode major*1000+minor (`scripts/next-version.sh`, `version-major.txt`).
 - **Chat deleted on OneDrive (other device, PC) is kept here:** the chat list shows "deleted on OneDrive", the chat a notice; writing in it uploads it again, deleting it in the list removes it here too.
 - **Deleting a chat asks about its files:** the dialog lists the chat's own attachments and results (inside the BigMoe folder, not referenced by another chat) and offers "Chat and files" or "Chat only" (`ui/home/DeleteChatDialog.kt`, `ChatRepository.ownFilesOf`). Files outside the BigMoe folder are never touched. A chat deleted as a file (PC, OneDrive) keeps its files.

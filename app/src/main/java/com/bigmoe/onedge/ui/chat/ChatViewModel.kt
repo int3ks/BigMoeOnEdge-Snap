@@ -246,8 +246,8 @@ class ChatViewModel(
     }
 
     /**
-     * A switch under the input changed: it is saved with this chat (a new chat keeps it once it is sent), and it is
-     * also the starting point of the next new chat. Other chats keep their own switches.
+     * A switch under the input changed: it is saved with this chat only (a new chat keeps it once it is sent). The
+     * switches in Settings are the defaults for new chats and are not changed from here.
      */
     private fun updateToggles(change: (com.bigmoe.onedge.data.local.datastore.ChatToggles) -> com.bigmoe.onedge.data.local.datastore.ChatToggles) {
         val key = currentComposerKey()
@@ -257,12 +257,6 @@ class ChatViewModel(
         publishSettings()
         viewModelScope.launch {
             composerStore.saveToggles(key, next)
-            if (next.thinking != before.thinking) settingsDataStore.updateThinkingEnabled(next.thinking)
-            if (next.webSearch != before.webSearch) settingsDataStore.updateWebSearchEnabled(next.webSearch)
-            if (next.files != before.files) settingsDataStore.updateToolsFilesEnabled(next.files)
-            if (next.code != before.code) settingsDataStore.updateToolsCodeEnabled(next.code)
-            if (next.utilities != before.utilities) settingsDataStore.updateToolsUtilitiesEnabled(next.utilities)
-            if (next.termux != before.termux) settingsDataStore.updateToolsTermuxEnabled(next.termux)
         }
     }
 

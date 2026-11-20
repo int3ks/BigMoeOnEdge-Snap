@@ -194,7 +194,7 @@ private fun SettingsContent(
     var cacheFloorText by remember { mutableStateOf(settings.cacheFloorMb.toString()) }
     var contextText by remember { mutableStateOf(settings.contextLength.toString()) }
     val contextValid = ContextInput.parse(contextText) != null
-    var performanceExpanded by remember { mutableStateOf(true) }
+    var performanceExpanded by remember { mutableStateOf(false) }
     var toolsMediaExpanded by remember { mutableStateOf(false) }
     var appearanceExpanded by remember { mutableStateOf(false) }
     var chatExpanded by remember { mutableStateOf(false) }
@@ -709,7 +709,7 @@ private fun SettingsContent(
         androidx.compose.animation.AnimatedVisibility(visible = toolsExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             // ------------------------------------------------------------ tool access
-            Hint("What the AI may use on its own when it needs it. Anything that changes or deletes a file, and every Termux command, asks you first unless Approval below is set to allow everything. The same switches are in the chat, under the wrench button.")
+            Hint("Defaults for NEW chats. Every chat has its own switches under the wrench button in the chat; changing them there does not change these. What the AI may use on its own when it needs it: anything that changes or deletes a file, and every Termux command, asks you first unless Approval below is set to allow everything.")
             SwitchRow(
                 "Files",
                 "Create folders and files, read, search, edit, rename, delete, zip. Everything stays in this chat's files.",

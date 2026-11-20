@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.bigmoe.onedge.attachments.PendingAttachment
 import com.bigmoe.onedge.data.local.entity.AttachmentKind
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -107,6 +108,25 @@ class ChatComposerDataStore(private val context: Context) {
             if (toggles == null) prefs.remove(key) else prefs[key] = toggles.encode()
         }
     }
+
+    /** The chat's switches as stored (JSON), for the chat file; null = none. */
+    suspend fun getTogglesRaw(sessionKey: String): String? = mutex.withLock {
+        context.chatComposerStore.data.first()[safeKey("toggles", sessionKey)]
+    }
+
+    /** Takes a chat's switches from its file (another device or the PC). */
+    suspend fun saveTogglesRaw(sessionKey: String, raw: String?) = mutex.withLock {
+        context.chatComposerStore.edit { prefs ->
+            val key = safeKey("toggles", sessionKey)
+            if (raw.isNullOrBlank()) prefs.remove(key) else prefs[key] = raw
+        }
+    }
+
+    /** Changes whenever any chat's switches change (the chat files carry them). */
+    val togglesChanges: kotlinx.coroutines.flow.Flow<Int>
+        get() = context.chatComposerStore.data.map { prefs ->
+            prefs.asMap().filterKeys { it.name.startsWith("toggles:") }.values.joinToString().hashCode()
+        }
 
     /** A new chat got its id with the first message: its switches move from the "new chat" slot to it. */
     suspend fun moveToggles(fromKey: String, toKey: String) = mutex.withLock {

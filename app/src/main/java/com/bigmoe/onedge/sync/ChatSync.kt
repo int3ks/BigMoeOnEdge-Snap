@@ -44,7 +44,8 @@ class ChatSync(
     private val attachmentDao: AttachmentDao,
     private val artifactDao: ArtifactDao,
     private val remoteServers: RemoteServerStore,
-    private val workspaceRoot: () -> File
+    private val workspaceRoot: () -> File,
+    private val composer: com.bigmoe.onedge.data.local.datastore.ChatComposerDataStore? = null
 ) {
     data class Status(
         val running: Boolean = false,
@@ -59,7 +60,7 @@ class ChatSync(
     val auth = OneDriveAuth(File(context.filesDir, "onedrive_auth.json"))
     private val client = OneDriveClient(auth)
     private val stateFile = File(context.filesDir, "chat_sync_state.json")
-    val folder = ChatFolder(workspaceRoot, File(context.filesDir, "chat_folder_state.json"), sessionDao, messageDao, attachmentDao, artifactDao)
+    val folder = ChatFolder(workspaceRoot, File(context.filesDir, "chat_folder_state.json"), sessionDao, messageDao, attachmentDao, artifactDao, composer)
     private val mutex = Mutex()
     @Volatile private var pending = false
     @Volatile private var foldersReady = false
@@ -94,6 +95,10 @@ class ChatSync(
         }
         appScope.launch {
             remoteServers.servers.drop(1).debounce(3000).collect { syncNow() }
+        }
+        // A chat's switches changed: its file (and OneDrive) carry them.
+        composer?.let { c ->
+            appScope.launch { c.togglesChanges.distinctUntilChanged().drop(1).debounce(3000).collect { syncNow() } }
         }
     }
 

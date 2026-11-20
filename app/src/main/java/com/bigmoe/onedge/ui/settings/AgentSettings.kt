@@ -95,7 +95,8 @@ internal fun AgentAndTermuxSection(settings: EngineSettings, viewModel: Settings
     SwitchRow(
         "Termux commands (run_shell)",
         "The AI runs bash commands in Termux inside the workspace: Python scripts, pip/pkg installs, ffmpeg and so on. " +
-            "Needs the separately installed Termux app (F-Droid or GitHub) and the shared workspace folder.",
+            "Needs the separately installed Termux app (F-Droid or GitHub) and the shared workspace folder. " +
+            "Default for new chats; each chat has its own switch under the wrench button.",
         settings.toolsTermuxEnabled
     ) { viewModel.updateToolsTermuxEnabled(it) }
 
