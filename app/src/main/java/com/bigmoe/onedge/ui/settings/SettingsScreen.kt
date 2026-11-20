@@ -226,14 +226,6 @@ private fun SettingsContent(
     }
 
     Column(modifier = modifier.padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
-        AutoSettingsEntry(onClick = onOpenAutoSettings)
-        Spacer(Modifier.height(8.dp))
-        AutoSettingsEntry(
-            onClick = onOpenPerfLog,
-            title = "Performance log",
-            text = "Every load, answer and crash with its settings, speed, RAM and heat: summary, export for Claude, and a model's settings advice"
-        )
-        Spacer(Modifier.height(10.dp))
         AppUpdateCard()
         Spacer(Modifier.height(10.dp))
         SettingsBackupRow(viewModel)
@@ -325,12 +317,17 @@ private fun SettingsContent(
         Spacer(Modifier.height(8.dp))
 
         SettingsFoldout(
-            title = "Chat", subtitle = "System prompts, dictation and read aloud", expanded = chatExpanded,
+            title = "Chats & OneDrive sync", subtitle = "OneDrive sync, system prompts, dictation, workspace", expanded = chatExpanded,
             onToggle = { chatExpanded = !chatExpanded }
         )
         androidx.compose.animation.AnimatedVisibility(visible = chatExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // ------------------------------------------------------------ OneDrive chat sync
+            OneDriveSyncSection()
+            Divider()
+
             // ------------------------------------------------------------ chat (system prompts)
+            Section("System prompts")
             SystemPromptsSection(settings = settings, viewModel = viewModel)
             Divider()
             Section("Dictation and read aloud")
@@ -343,6 +340,10 @@ private fun SettingsContent(
                     (com.bigmoe.onedge.speech.SpeechPrefs.dictationService.value?.let { " Dictation last used: $it." } ?: ""),
                 com.bigmoe.onedge.speech.SpeechPrefs.allowOnline(context)
             ) { com.bigmoe.onedge.speech.SpeechPrefs.setAllowOnline(context, it) }
+            Divider()
+
+            // ------------------------------------------------------------ workspace (private or shared folder)
+            WorkspaceLocationSection(viewModel = viewModel, onOpenWorkspace = onOpenWorkspace)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -841,11 +842,21 @@ private fun SettingsContent(
         Spacer(Modifier.height(8.dp))
 
         SettingsFoldout(
-            title = "Diagnostics & workspace", subtitle = "Metrics, workspace files, capabilities and local API server", expanded = workspaceExpanded,
+            title = "Diagnostics", subtitle = "Auto settings, performance log, metrics, log, local API server", expanded = workspaceExpanded,
             onToggle = { workspaceExpanded = !workspaceExpanded }
         )
         androidx.compose.animation.AnimatedVisibility(visible = workspaceExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // ------------------------------------------------------------ auto settings, performance log
+            AutoSettingsEntry(onClick = onOpenAutoSettings)
+            Spacer(Modifier.height(8.dp))
+            AutoSettingsEntry(
+                onClick = onOpenPerfLog,
+                title = "Performance log",
+                text = "Every load, answer and crash with its settings, speed, RAM and heat: summary, export for Claude, and a model's settings advice"
+            )
+            Divider()
+
             // ------------------------------------------------------------ diagnostics
             Section("Diagnostics")
             SwitchRow(
@@ -856,14 +867,6 @@ private fun SettingsContent(
             OutlinedButton(onClick = { shareLatestCsv(context) }) { Text("Share latest metrics CSV") }
             Hint("Log: what llama.cpp and the engine print while loading and generating (timings, cache, I/O, errors). Off until you switch \"Record log\" on there. Filter it, copy it or share it as a file.")
             OutlinedButton(onClick = onOpenLog) { Text("Open log") }
-            Divider()
-
-            // ------------------------------------------------------------ OneDrive chat sync
-            OneDriveSyncSection()
-            Divider()
-
-            // ------------------------------------------------------------ workspace (private or shared folder)
-            WorkspaceLocationSection(viewModel = viewModel, onOpenWorkspace = onOpenWorkspace)
             Divider()
 
             Section("Capabilities")

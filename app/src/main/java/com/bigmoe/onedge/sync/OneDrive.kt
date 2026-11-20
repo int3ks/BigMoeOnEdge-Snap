@@ -8,16 +8,14 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Sign-in with the device code flow (no redirect URI, no signing hash, no MSAL): the app shows a code, the user
- * enters it at microsoft.com/devicelogin. Needs an own Azure app registration with "Personal Microsoft accounts"
- * and "Allow public client flows" = yes. Only the app folder is requested (Files.ReadWrite.AppFolder), so the app
+ * Sign-in in the browser (authorization code + PKCE, no MSAL, no signing hash): the browser returns to the app via
+ * the custom-scheme redirect [REDIRECT_URI]. Needs the app registration with "Personal Microsoft accounts", public
+ * client flows allowed and that redirect URI under "Mobile and desktop applications". Only the app folder is requested (Files.ReadWrite.AppFolder), so the app
  * sees nothing else in the OneDrive; on the PC the folder is OneDrive\Apps\<registration name>.
  *
  * Tokens live in filesDir/onedrive_auth.json (app-private).
  */
 class OneDriveAuth(private val file: File) {
-
-    data class DeviceCode(val userCode: String, val deviceCode: String, val verificationUri: String, val intervalS: Int, val expiresAtMs: Long)
 
     @Volatile private var state: JSONObject = runCatching { JSONObject(file.readText()) }.getOrElse { JSONObject() }
 
@@ -32,33 +30,58 @@ class OneDriveAuth(private val file: File) {
         save()
     }
 
-    fun startDeviceCode(): DeviceCode {
-        val o = post("devicecode", mapOf("client_id" to clientId, "scope" to SCOPE))
-        if (o.has("error")) throw IOException(o.optString("error_description", o.optString("error")))
-        return DeviceCode(
-            userCode = o.getString("user_code"),
-            deviceCode = o.getString("device_code"),
-            verificationUri = o.optString("verification_uri", "https://www.microsoft.com/link"),
-            intervalS = o.optInt("interval", 5).coerceAtLeast(1),
-            expiresAtMs = System.currentTimeMillis() + o.optInt("expires_in", 900) * 1000L
-        )
+    /**
+     * Step 1 of the browser sign-in (authorization code + PKCE): the URL to open. The verifier and state wait in the
+     * auth file until the redirect comes back (the app process may be gone by then).
+     */
+    fun authorizeUrl(): String {
+        val rnd = java.security.SecureRandom()
+        val verifier = b64(ByteArray(48).also { rnd.nextBytes(it) })
+        val st = b64(ByteArray(16).also { rnd.nextBytes(it) })
+        val challenge = b64(java.security.MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
+        state.put("pkceVerifier", verifier).put("pkceState", st)
+        save()
+        val q = mapOf(
+            "client_id" to clientId,
+            "response_type" to "code",
+            "redirect_uri" to REDIRECT_URI,
+            "response_mode" to "query",
+            "scope" to SCOPE,
+            "state" to st,
+            "code_challenge" to challenge,
+            "code_challenge_method" to "S256",
+            "prompt" to "select_account"
+        ).entries.joinToString("&") { (k, v) -> k + "=" + URLEncoder.encode(v, "UTF-8") }
+        return "$AUTHORITY/oauth2/v2.0/authorize?$q"
     }
 
-    /** One poll: true = signed in, false = still waiting; throws when the code expired or was declined. */
-    fun pollDeviceCode(code: DeviceCode): Boolean {
+    /** Step 2: the redirect URI the browser handed back; exchanges the code for tokens. */
+    fun completeAuthorization(redirect: android.net.Uri) {
+        redirect.getQueryParameter("error")?.let { err ->
+            throw IOException(redirect.getQueryParameter("error_description") ?: err)
+        }
+        val code = redirect.getQueryParameter("code") ?: throw IOException("No code in the answer.")
+        val verifier = state.optString("pkceVerifier")
+        if (verifier.isBlank() || redirect.getQueryParameter("state") != state.optString("pkceState")) {
+            throw IOException("Sign-in answer does not match (start the sign-in again).")
+        }
         val o = post(
             "token", mapOf(
-                "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
+                "grant_type" to "authorization_code",
                 "client_id" to clientId,
-                "device_code" to code.deviceCode
+                "code" to code,
+                "redirect_uri" to REDIRECT_URI,
+                "code_verifier" to verifier,
+                "scope" to SCOPE
             )
         )
-        when (o.optString("error")) {
-            "" -> { takeTokens(o); return true }
-            "authorization_pending", "slow_down" -> return false
-            else -> throw IOException(o.optString("error_description", o.optString("error")))
-        }
+        if (o.has("error")) throw IOException(o.optString("error_description", o.optString("error")))
+        state.remove("pkceVerifier"); state.remove("pkceState")
+        takeTokens(o)
     }
+
+    private fun b64(bytes: ByteArray): String =
+        android.util.Base64.encodeToString(bytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP)
 
     /** A valid access token, refreshed when needed. */
     @Synchronized
@@ -115,6 +138,8 @@ class OneDriveAuth(private val file: File) {
 
     companion object {
         const val CLIENT_ID = "3c225cad-e138-4683-9c03-68001d6609c8"
+        /** Registered in Azure under "Mobile and desktop applications"; caught by [AuthRedirectActivity]. */
+        const val REDIRECT_URI = "msal$CLIENT_ID://auth"
         /** Personal Microsoft accounts (the registration must allow them). */
         const val AUTHORITY = "https://login.microsoftonline.com/consumers"
         const val SCOPE = "https://graph.microsoft.com/Files.ReadWrite.AppFolder offline_access"

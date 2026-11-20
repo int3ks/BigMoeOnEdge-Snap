@@ -65,6 +65,21 @@
             android:name="libcdsprpc.so"
             android:required="false" />
 
+        <!-- OneDrive sign-in: the browser returns here (sync/AuthRedirectActivity.kt, OneDriveAuth.REDIRECT_URI). -->
+        <activity
+            android:name=".sync.AuthRedirectActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="msal3c225cad-e138-4683-9c03-68001d6609c8" android:host="auth" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

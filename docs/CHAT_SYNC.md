@@ -4,10 +4,10 @@
 
 1. portal.azure.com → Microsoft Entra ID → App registrations → New registration.
    Name = folder name on OneDrive (`Apps/<name>`). Supported account types: **Personal Microsoft accounts only**.
-   No redirect URI.
-2. Authentication → Advanced settings → **Allow public client flows = Yes** (device code flow).
+2. Authentication → add platform **Mobile and desktop applications** → custom redirect URI
+   `msal3c225cad-e138-4683-9c03-68001d6609c8://auth`; Settings tab → **Allow public client flows = Yes**.
 3. API permissions → Microsoft Graph → Delegated → `Files.ReadWrite.AppFolder` (consent happens at sign-in).
-4. The client ID is built in (`OneDriveAuth.CLIENT_ID`); Settings → OneDrive sync → Sign in. The code is copied to
+4. The client ID is built in (`OneDriveAuth.CLIENT_ID`); Settings → Chats & OneDrive sync → Sign in (browser, authorization code + PKCE, back via `sync/AuthRedirectActivity`). The code is copied to
    the clipboard and the Microsoft page opens.
 
 ## Layout

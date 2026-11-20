@@ -1,5 +1,9 @@
 package com.bigmoe.onedge.ui.models
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -49,9 +53,25 @@ internal fun ModelArchiveCard(
     onDownloadToArchive: (GgufSet) -> Unit
 ) {
     val idle = ui.importProgress == null
+    // Collapsed by default: the list gets long.
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Archive & downloads", style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Archive & downloads", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (!expanded) {
+                    Text(
+                        "${ui.archiveSources.size} source(s)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(if (expanded) "  \u25B4" else "  \u25BE", style = MaterialTheme.typography.titleMedium)
+            }
+            if (expanded) {
             if (ui.archiveSources.isEmpty()) {
                 Text(
                     "Keep big models on USB sticks, SSDs or the SD card so you do not download them again, and fetch one " +
@@ -145,6 +165,7 @@ internal fun ModelArchiveCard(
                         }
                     }
                 }
+            }
             }
         }
     }

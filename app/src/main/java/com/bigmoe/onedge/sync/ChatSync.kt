@@ -81,27 +81,30 @@ class ChatSync(
 
     // ---- sign-in ------------------------------------------------------------------------------------------
 
-    suspend fun startSignIn(): OneDriveAuth.DeviceCode = withContext(Dispatchers.IO) {
-        auth.startDeviceCode()
-    }
+    /** Signed in or not, for the settings page (it changes when the browser comes back). */
+    private val _signedIn = MutableStateFlow(auth.signedIn)
+    val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
-    /** Polls until signed in (true) or the code expired; throws on a refusal. */
-    suspend fun finishSignIn(code: OneDriveAuth.DeviceCode): Boolean = withContext(Dispatchers.IO) {
-        while (System.currentTimeMillis() < code.expiresAtMs) {
-            delay(code.intervalS * 1000L)
-            if (auth.pollDeviceCode(code)) {
-                auth.rememberAccount(client.ownerName())
-                foldersReady = false
-                _status.value = Status(message = "Signed in")
-                requestSync()
-                return@withContext true
-            }
+    /** URL to open in the browser for the sign-in. */
+    fun signInUrl(): String = auth.authorizeUrl()
+
+    /** The browser came back to [AuthRedirectActivity]. */
+    suspend fun completeSignIn(redirect: android.net.Uri) = withContext(Dispatchers.IO) {
+        try {
+            auth.completeAuthorization(redirect)
+            auth.rememberAccount(client.ownerName())
+            foldersReady = false
+            _signedIn.value = true
+            _status.value = Status(message = "Signed in")
+            syncNow()
+        } catch (t: Throwable) {
+            _status.value = Status(message = "Sign-in failed: ${t.message ?: t.javaClass.simpleName}")
         }
-        false
     }
 
     fun signOut() {
         auth.signOut()
+        _signedIn.value = false
         stateFile.delete() // a later sign-in (maybe another account) starts clean: nothing is deleted on either side
         _status.value = Status(message = "Signed out")
     }
