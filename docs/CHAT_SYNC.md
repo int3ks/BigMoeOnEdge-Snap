@@ -7,7 +7,7 @@
    No redirect URI.
 2. Authentication → Advanced settings → **Allow public client flows = Yes** (device code flow).
 3. API permissions → Microsoft Graph → Delegated → `Files.ReadWrite.AppFolder` (consent happens at sign-in).
-4. Copy the **Application (client) ID** into BigMoe² → Settings → OneDrive sync → Sign in. The code is copied to
+4. The client ID is built in (`OneDriveAuth.CLIENT_ID`); Settings → OneDrive sync → Sign in. The code is copied to
    the clipboard and the Microsoft page opens.
 
 ## Layout

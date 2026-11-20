@@ -52,7 +52,7 @@ class ChatSync(
     private val _status = MutableStateFlow(Status(message = if (auth.signedIn) "" else "Not set up"))
     val status: StateFlow<Status> = _status.asStateFlow()
 
-    val configured: Boolean get() = auth.clientId.isNotBlank() && auth.signedIn
+    val configured: Boolean get() = auth.signedIn
 
     @OptIn(FlowPreview::class)
     fun start(appScope: CoroutineScope) {
@@ -81,8 +81,7 @@ class ChatSync(
 
     // ---- sign-in ------------------------------------------------------------------------------------------
 
-    suspend fun startSignIn(clientId: String): OneDriveAuth.DeviceCode = withContext(Dispatchers.IO) {
-        auth.clientId = clientId
+    suspend fun startSignIn(): OneDriveAuth.DeviceCode = withContext(Dispatchers.IO) {
         auth.startDeviceCode()
     }
 

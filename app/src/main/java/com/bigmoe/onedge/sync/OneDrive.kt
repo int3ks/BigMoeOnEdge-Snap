@@ -21,20 +21,14 @@ class OneDriveAuth(private val file: File) {
 
     @Volatile private var state: JSONObject = runCatching { JSONObject(file.readText()) }.getOrElse { JSONObject() }
 
-    var clientId: String
-        get() = state.optString("clientId")
-        set(value) {
-            if (value.trim() != clientId) {
-                state = JSONObject().put("clientId", value.trim()) // a new registration: old tokens are useless
-                save()
-            }
-        }
+    /** The app's own Azure registration "BigMoe²" (public client, not a secret). */
+    val clientId: String get() = CLIENT_ID
 
     val signedIn: Boolean get() = state.optString("refreshToken").isNotBlank()
     val account: String get() = state.optString("account")
 
     fun signOut() {
-        state = JSONObject().put("clientId", clientId)
+        state = JSONObject()
         save()
     }
 
@@ -120,6 +114,7 @@ class OneDriveAuth(private val file: File) {
     }
 
     companion object {
+        const val CLIENT_ID = "3c225cad-e138-4683-9c03-68001d6609c8"
         /** Personal Microsoft accounts (the registration must allow them). */
         const val AUTHORITY = "https://login.microsoftonline.com/consumers"
         const val SCOPE = "https://graph.microsoft.com/Files.ReadWrite.AppFolder offline_access"

@@ -7,12 +7,10 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -21,7 +19,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.bigmoe.onedge.OnEdgeApplication
@@ -37,21 +34,12 @@ fun OneDriveSyncSection() {
     val sync = remember { (context.applicationContext as OnEdgeApplication).container.chatSync }
     val status by sync.status.collectAsState()
     val scope = rememberCoroutineScope()
-    var clientId by remember { mutableStateOf(sync.auth.clientId) }
     var code by remember { mutableStateOf<OneDriveAuth.DeviceCode?>(null) }
     var info by remember { mutableStateOf("") }
     var signedIn by remember { mutableStateOf(sync.auth.signedIn) }
 
     Section("OneDrive sync")
-    Hint("Chats and server models are synced through your OneDrive app folder (Apps\\<registration name> on the PC, one JSON file per chat). The newer copy wins. Needs an own Azure app registration: personal Microsoft accounts, \"Allow public client flows\" = Yes, permission Files.ReadWrite.AppFolder.")
-    OutlinedTextField(
-        value = clientId,
-        onValueChange = { clientId = it.trim() },
-        label = { Text("Application (client) ID") },
-        singleLine = true,
-        enabled = !signedIn,
-        modifier = Modifier.fillMaxWidth()
-    )
+    Hint("Chats and server models are synced through your OneDrive app folder (Apps\\<registration name> on the PC, one JSON file per chat). The newer copy wins. Sign in once on every device with the same Microsoft account.")
     if (signedIn) {
         Text(
             "Signed in" + sync.auth.account.takeIf { it.isNotBlank() }?.let { " as $it" }.orEmpty(),
@@ -67,12 +55,11 @@ fun OneDriveSyncSection() {
         val pending = code
         if (pending == null) {
             Button(
-                enabled = clientId.length >= 30,
                 onClick = {
                     info = ""
                     scope.launch {
                         try {
-                            val c = sync.startSignIn(clientId)
+                            val c = sync.startSignIn()
                             code = c
                             copy(context, c.userCode)
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(c.verificationUri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
