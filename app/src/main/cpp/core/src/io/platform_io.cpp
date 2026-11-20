@@ -55,7 +55,6 @@ fd_t open_read(const char * path, bool direct, bool * effective_direct) {
     DWORD flags = FILE_ATTRIBUTE_NORMAL | (direct ? FILE_FLAG_NO_BUFFERING : 0);
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, flags, nullptr);
     if (effective_direct) *effective_direct = direct && fd_ok((fd_t) h);
-#include <mach/vm_purgable.h> // discardable cache spans; see vm_offer
     return (fd_t) h;
 }
 
@@ -283,6 +282,10 @@ void vm_release(void * p, size_t sz) {
     if (p) munmap(p, sz);
 }
 #if defined(__APPLE__)
+} // namespace bmoe::pio
+#include <mach/mach.h>
+#include <mach/vm_purgable.h> // discardable cache spans; see vm_offer
+namespace bmoe::pio {
 bool vm_discard_supported() {
     return true;
 }
