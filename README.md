@@ -116,6 +116,31 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
   chats, and — when no model is loaded — the model to load. Text goes into the message box, files are attached
   (pictures once a model with a vision projector is loaded); nothing is sent until you send it.
 
+### Server models: OpenAI-compatible API (new)
+* Use a model on another machine when the tablet is not enough, e.g. **llama-server on the PC**: Models page →
+  **Server models** → name, base URL (`http://192.168.x.x:8080/v1`), optional API key, model name and context size.
+  They are also listed in the chat's model picker. llama-server must listen on the network (`--host 0.0.0.0`).
+* "Use" checks the server (`GET /v1/models`) and frees a local model from RAM. Turns stream
+  `/v1/chat/completions` with the history, the thinking switch, sampling and the reasoning; the **agent, its tools and
+  Termux work unchanged**. Not with a server model: the local API server, KV snapshots, live tuning.
+* The API key stays in the app and in your own OneDrive (sync); it is not part of the settings export.
+
+### Chats as files and OneDrive sync (new)
+* **Every chat is a file:** `BigMoe/chats/<title>.json` (in the workspace folder). The files are the source, the app's
+  database is only the index: rename a file on the PC and the chat's title changes, delete it and the chat is gone;
+  changes in the app are written to the file at once. Titles are unique like file names (`Foo (2)`). The format
+  (`bigmoe-chat`, with messages, Regenerate variants, run info, attachments and results) is described in
+  [`docs/CHAT_SYNC.md`](docs/CHAT_SYNC.md).
+* **OneDrive sync** (Settings → Chats & OneDrive sync → Sign in, in the browser): the chats, the files they refer to
+  (attachments, results; agent scripts stay local) and the server models go to the app folder `Apps\BigMoe` and to
+  every other signed-in device. Sync at start, when the app comes to the front and a few seconds after a change; the
+  side that changed wins, both → the newer change. The settings show the folder's size on OneDrive; more than 1 GB of
+  new files waits for **Upload anyway**.
+* **Deleting:** deleting a chat lists its own files (attachments and results in the BigMoe folder no other chat uses)
+  and asks "Chat and files" or "Chat only"; files outside the BigMoe folder are never touched. Deleted files go to the
+  OneDrive recycle bin (30 days). A chat deleted on another device or the PC stays here marked "deleted on OneDrive":
+  writing in it uploads it again, deleting it here removes it for good.
+
 ### Engine and models
 * **Engine updates from upstream BigMoeOnEdge 0.34-0.36:** context checkpoints (Qwen3.5/3.6, Gemma and other
   hybrid or sliding-window models no longer prefill the whole conversation again when a prompt differs from what the
@@ -149,6 +174,7 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
   confidence floor, the n-gram match lengths) are in Settings → Guess ahead. With MTP, a model uses its attached drafter, otherwise its own head.
 * **Clear order:** autoload switch, Guess ahead card, then the MTP drafters, LoRA adapters and vision projectors in
   their own lists, then the models.
+* **Archive & downloads** is collapsible and starts collapsed.
 * **Collapsible model cards:** only the loaded model is open; the others fold into one line with a summary
   (`MTP • Vision • LoRA • KV Q8_0`), so a long list stays short.
 
@@ -160,10 +186,14 @@ It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedg
 * **Wider model menu:** the model picker in the chat uses almost the full screen width and shows the complete file
   name, wrapped if needed.
 * **Settings button** in the chat's top bar, and the Chats tab returns to the chat you came from.
+* **System prompts:** a picker shows one prompt at a time; ★ marks the one new chats start with.
 
 ### App
 * **In-app updates:** Settings → App update checks the newest GitHub release, downloads it and opens the installer.
-* **Every build counts up** (0.6.1, 0.6.2, ...) and is signed with one fixed key, so each APK installs as an update.
+* **Version numbers since 7.00:** MAJOR.MM (7.00, 7.01 ... 7.99 → 8.00); every APK is signed with one fixed key and
+  installs as an update.
+* **Settings order:** Chats & OneDrive sync (sync, system prompts, dictation, workspace) at the top; Auto settings and
+  the Performance log are under Diagnostics.
 * Settings open on Engine performance; the app has a dark blue icon with a red ².
 
 The complete list is in [`CHANGELOG.md`](CHANGELOG.md) under "Snap fork".
@@ -240,6 +270,8 @@ Easiest: put your `.gguf` files into **Internal storage/Models** (or pick anothe
 Everything in it is listed automatically and used in place, nothing is copied. Otherwise open **Models**, import a
 `.gguf` (it is copied into app storage) or register a path, then tap **Load**. Attach an MTP
 drafter, LoRA adapter or vision projector in the model's row; they load together with the model.
+A model on another machine (llama-server on the PC, any OpenAI-compatible API) is added under **Server models** and
+used the same way.
 
 ### Multimodal models
 Vision-capable models need an `mmproj` projector attached to the model. Image and video support depends on the model,
@@ -368,7 +400,8 @@ Common source formats such as Kotlin, Java, Python, C/C++, JavaScript/TypeScript
 
 ### Chat and attachments
 
-Conversations persist through Room. Supported features include:
+Every conversation is a file in `BigMoe/chats/` (see "Chats as files and OneDrive sync"); the app keeps a Room
+index of them. Supported features include:
 
 * Editing and copying messages
 
