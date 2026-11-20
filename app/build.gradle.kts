@@ -66,6 +66,9 @@ if (bmoeRequireStableSigning) {
 }
 
 val bmoeBuildNumber: Int = providers.gradleProperty("bmoeBuildNumber").orNull?.trim()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+// CI: scripts/next-version.sh (7.00, 7.01 ...; versionCode major*1000+minor). Without them the old 0.6.N scheme.
+val bmoeVersionName: String? = providers.gradleProperty("bmoeVersionName").orNull?.trim()?.takeIf { it.isNotEmpty() }
+val bmoeVersionCode: Int? = providers.gradleProperty("bmoeVersionCode").orNull?.trim()?.toIntOrNull()
 
 val bmoeAbis: List<String> = (providers.gradleProperty("bmoeAbis").orNull ?: "arm64-v8a")
     .split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -85,8 +88,8 @@ android {
         // CI passes -PbmoeBuildNumber: one past the newest release tag (v0.6.53 -> 54), so the version moves only
         // with a release and every build until then is the coming release's version. Local builds without it stay
         // 0.6.0 (versionCode 11).
-        versionCode = 11 + bmoeBuildNumber
-        versionName = "0.6.$bmoeBuildNumber"
+        versionCode = bmoeVersionCode ?: (11 + bmoeBuildNumber)
+        versionName = bmoeVersionName ?: "0.6.$bmoeBuildNumber"
         manifestPlaceholders["bmoeAppCategory"] = bmoeAppCategory
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

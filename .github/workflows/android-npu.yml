@@ -150,22 +150,13 @@ jobs:
           fetch-depth: 0
 
       # The version only moves with a release: every build carries the version the NEXT release will have, one past
-      # the newest published release tag (v0.6.53 -> 0.6.54), so all builds between two releases share it (the APK
-      # name still tells them apart by commit) and publishing one of them makes the next builds count on. Android
-      # installs an APK with the same versionCode over the installed one, only a lower one is refused. Tags come with
-      # the full history (fetch-depth: 0); with no release tag yet the commit count since the 0.6.0 baseline is used.
+      # the newest release tag vMAJOR.MM (v7.00 -> 7.01, v7.99 -> 8.00; scripts/next-version.sh, major in
+      # version-major.txt), so all builds between two releases share it (the APK name tells them apart by commit).
+      # versionCode = major * 1000 + minor. Tags come with the full history (fetch-depth: 0).
       - name: Build number
         run: |
-          LAST=$(git tag -l 'v0.6.*' | sed -n 's/^v0\.6\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)
-          if [ -n "$LAST" ]; then
-            N=$(( LAST + 1 ))
-          else
-            N=$(( $(git rev-list --count HEAD) - 471 ))
-          fi
-          [ "$N" -ge 1 ] || N=1
-          echo "BMOE_BUILD_NUMBER=$N" >> "$GITHUB_ENV"
-          echo "Version 0.6.$N (versionCode $((11 + N))), next after release ${LAST:+v0.6.$LAST}"
-          echo "::notice title=Version::0.6.$N (versionCode $((11 + N))), the next release after ${LAST:+v0.6.$LAST}"
+          bash scripts/next-version.sh >> "$GITHUB_ENV"
+          bash scripts/next-version.sh
 
       - uses: actions/setup-java@v4
         with:
@@ -210,7 +201,7 @@ jobs:
           chmod +x gradlew
           set -o pipefail
           # Compiler errors also become annotations, so they show on the run page without opening the log.
-          ./gradlew --no-daemon :app:assembleDebug -PbmoePrebuiltNative=true -PbmoeRequireStableSigning=true -PbmoeBuildNumber="$BMOE_BUILD_NUMBER" 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+          ./gradlew --no-daemon :app:assembleDebug -PbmoePrebuiltNative=true -PbmoeRequireStableSigning=true -PbmoeVersionName="$BMOE_VERSION" -PbmoeVersionCode="$BMOE_VERSION_CODE" 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
             grep -E '^e: |error:|What went wrong' -A2 "$RUNNER_TEMP/gradle.log" | head -40 | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
@@ -232,7 +223,7 @@ jobs:
 
       - name: Rename APK
         run: |
-          VERSION="0.6.$BMOE_BUILD_NUMBER"
+          VERSION="$BMOE_VERSION"
           mkdir -p out
           cp app/build/outputs/apk/debug/app-debug.apk "out/BigMoeOnEdge-Snap-NPU-${VERSION}-${GITHUB_SHA::7}.apk"
           ls -la out

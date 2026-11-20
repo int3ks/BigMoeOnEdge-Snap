@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Version 7.00:** new numbering MAJOR.MM (7.00, 7.01 ... 7.99 → 8.00), versionCode major*1000+minor (`scripts/next-version.sh`, `version-major.txt`).
 - **Chat deleted on OneDrive (other device, PC) is kept here:** the chat list shows "deleted on OneDrive", the chat a notice; writing in it uploads it again, deleting it in the list removes it here too.
 - **Deleting a chat asks about its files:** the dialog lists the chat's own attachments and results (inside the BigMoe folder, not referenced by another chat) and offers "Chat and files" or "Chat only" (`ui/home/DeleteChatDialog.kt`, `ChatRepository.ownFilesOf`). Files outside the BigMoe folder are never touched. A chat deleted as a file (PC, OneDrive) keeps its files.
 - **Chats are files** (`sync/ChatFolder.kt`): every chat is `<workspace>/chats/<title>.json` (format `bigmoe-chat`, now with its attachments and artifacts); the files are the source, the database is the index. Changed in the app → the file is written (a new title renames it); changed or deleted as a file (PC, OneDrive) → read into / removed from the database; both → newer wins. Titles are unique by file name ("Foo (2)" in the folder and the app); "New Chat (n)" still takes its title from the first message. First start writes all existing chats out.

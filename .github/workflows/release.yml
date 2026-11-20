@@ -1,7 +1,7 @@
 name: Publish release
 
 # Run by hand once a build is approved. Takes the APK of the latest successful "Android NPU APK" run (or the run
-# given below) and publishes it as GitHub release v0.6.N. The app's "App update" card installs the newest release,
+# given below) and publishes it as GitHub release vMAJOR.MM (e.g. v7.00). The app's "App update" card installs the newest release,
 # so only approved builds reach it. Release assets download without a GitHub login, unlike Actions artifacts.
 on:
   workflow_dispatch:

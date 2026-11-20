@@ -38,10 +38,10 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
   models; tests file reader, expert layout, cache brake, context checkpoints/replay).
 * CI `.github/workflows/android-npu.yml` on every push to main: `native-hexagon` (Snapdragon toolchain docker, engine
   cached by git tree hash of `app/src/main/cpp` + ccache) then `apk`. A newer push cancels the running one.
-* **Version**: builds carry the NEXT release's version = newest tag `v0.6.N` + 1 (shown as notice "Version" on the run).
+* **Version** (since 7.00): builds carry the NEXT release's version = newest tag `vMAJOR.MM` + 0.01 (7.99 → 8.00), `scripts/next-version.sh`; major in `version-major.txt` (raise it for a big step, Claude may propose one). versionCode = major*1000+minor.
 * **Release**: `release.yml` via REST (GraphQL/`gh workflow run` is blocked in the sandbox):
   `gh api -X POST repos/int3ks/BigMoeOnEdge-Snap/actions/workflows/release.yml/dispatches -f ref=main -f 'inputs[run_id]=<green npu run id>'`
-  → tag `v0.6.N`, asset `BigMoeOnEdge-Snap-NPU-0.6.N-<sha>.apk`. Sandbox cannot edit/delete releases or branches.
+  → tag `v7.NN`, asset `BigMoeOnEdge-Snap-NPU-7.NN-<sha>.apk`. Sandbox cannot edit/delete releases or branches.
 * If the apk job fails with an SDK `InstallFailedException`, it is a runner flake: `gh api -X POST .../runs/<id>/rerun-failed-jobs`.
 * Upstream repos are read via anonymous git clone (into the scratchpad, not the home dir — the stop hook complains
   about uncommitted clones).
