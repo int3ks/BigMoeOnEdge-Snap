@@ -9,6 +9,8 @@
 //   3. that answer is byte-identical to a fresh session's answer to the same request (lossless);
 //   4. with ctx_checkpoints = 0 the same request is a full re-prefill (KV_REUSE_REFUSED), same answer;
 //   5. the app's own chat path (clear_kv=false turns) still reuses the KV and gives the same answers;
+//   7. a sliding-window model (third argument) with the window-only SWA cache stays lossless when a
+//      cut reaches back past the window.
 //   6. a replayed conversation (clear_kv=true: edit, regenerate, chat switch) keeps the shared prefix and
 //      answers exactly as a fresh session.
 #include "bmoe/session.h"
@@ -20,6 +22,8 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace bmoe;
 
@@ -29,12 +33,12 @@ static void check(bool ok, const std::string & what) {
     if (!ok) ++failures;
 }
 
-static std::unique_ptr<Session> open_session(const char * path, int ckpts, bool moe, bool mtp_like_spec) {
+static std::unique_ptr<Session> open_session(const char * path, int ckpts, bool moe, bool mtp_like_spec, int n_batch = 512) {
     SessionConfig cfg;
     cfg.model_path = path;
     cfg.chatml = true;
     cfg.n_ctx = 1024;
-    cfg.n_batch = 512;
+    cfg.n_batch = n_batch;
     cfg.n_threads = 2;
     cfg.n_threads_batch = 2;
     cfg.ctx_checkpoints = ckpts;
@@ -268,6 +272,72 @@ static void cancel_load_path(const char * path) {
     check(b.ok && !b.cancelled && b.generated_text == a.generated_text, "cancel: a request after the load does not stop a reply");
 }
 
+// A sliding-window model (tiny gemma4, window 16, one full-attention layer) with the window-only SWA
+// cache (swa_full off, upstream #580): answers far longer than the window, so every cut back past the
+// window must come from a checkpoint (or a full prefill), never from the window that no longer holds it.
+static void swa_path(const char * path) {
+    const std::string tag = "swa: ";
+    auto turn = [](const std::string & prompt, bool clear, std::vector<std::pair<std::string, std::string>> hist) {
+        GenerateRequest r;
+        r.prompt = prompt;
+        r.n_predict = 120;
+        r.think = false;
+        r.clear_kv = clear;
+        for (auto & h : hist) r.history.push_back({h.first, h.second});
+        return r;
+    };
+    auto fresh_answer = [&](const GenerateRequest & r) {
+        auto f = open_session(path, 4, /*moe*/ true, false, /*n_batch*/ 32);
+        return f ? f->generate(r).generated_text : std::string("<open failed>");
+    };
+    auto s = open_session(path, 4, /*moe*/ true, false, /*n_batch*/ 32);
+    check(s != nullptr, tag + "opens");
+    if (!s) return;
+    const GenerateRequest t1 = turn("Hello there, tell me a long story about a dragon and a knight who meet in a dark forest", true, {});
+    const RunResult a1 = s->generate(t1);
+    const GenerateRequest t2 = turn("And then what happened", false, {});
+    const RunResult a2 = s->generate(t2);
+    check(a1.ok && a2.ok && a1.generated_text.size() > 16, tag + "two long turns");
+    // The same two turns as one replay in a fresh session: the app's chat path must be lossless.
+    const GenerateRequest t2r = turn("And then what happened", true, {{"user", t1.prompt}, {"assistant", a1.generated_text}});
+    check(a2.generated_text == fresh_answer(t2r), tag + "follow-up answers as a fresh session does");
+
+    // Regenerate turn 2: cut back past a 40-token answer, far beyond the 16-token window.
+    const RunResult g = s->generate(t2r);
+    std::printf("    regenerate reused=%d/%d kv_reuse=%d\n", g.summary.n_reused, g.summary.n_prompt_total, g.summary.kv_reuse);
+    check(g.ok && g.generated_text == a2.generated_text, tag + "regenerate past the window gives the same answer");
+    check(g.summary.n_reused > 0, tag + "regenerate keeps the conversation instead of prefilling all of it");
+
+    // Edit turn 2: the cut sits at the edited message's start.
+    const GenerateRequest e = turn("Something else entirely", true, {{"user", t1.prompt}, {"assistant", a1.generated_text}});
+    const RunResult er = s->generate(e);
+    std::printf("    edit reused=%d/%d kv_reuse=%d\n", er.summary.n_reused, er.summary.n_prompt_total, er.summary.kv_reuse);
+    check(er.ok && er.generated_text == fresh_answer(e), tag + "edit answers as a fresh session does");
+
+    // Regenerate turn 1 (the furthest cut back) and then continue: both as fresh.
+    const RunResult g1 = s->generate(t1);
+    check(g1.ok && g1.generated_text == a1.generated_text, tag + "regenerate of the first turn gives the same answer");
+    const RunResult c = s->generate(turn("And then what happened", false, {}));
+    check(c.ok && c.generated_text == a2.generated_text, tag + "continuing after it answers as before");
+
+    // Snapshot round trip on the window-only cache.
+    const std::string snap = "swa-snap";
+    // (the snapshot is taken after continuing turn 2 again above)
+    const auto sv = s->save_kv(snap);
+    auto s2 = open_session(path, 4, /*moe*/ true, false, /*n_batch*/ 32);
+    const auto ld = s2 ? s2->load_kv(snap) : Session::KvSnapshotResult{};
+    check(sv.ok && ld.ok, tag + "a snapshot saves and loads");
+    if (ld.ok) {
+        const GenerateRequest n3 = turn("What is the moral", true,
+                                        {{"user", t1.prompt}, {"assistant", a1.generated_text},
+                                         {"user", t2.prompt}, {"assistant", a2.generated_text}});
+        const RunResult l = s2->generate(n3);
+        std::printf("    snapshot replay reused=%d/%d kv_reuse=%d\n", l.summary.n_reused, l.summary.n_prompt_total, l.summary.kv_reuse);
+        check(l.ok && l.generated_text == fresh_answer(n3), tag + "after the snapshot it answers as a fresh session does");
+        check(l.summary.n_reused > 0, tag + "the replay after the snapshot reuses it");
+    }
+}
+
 int main(int argc, char ** argv) {
     if (argc < 2) {
         std::printf("usage: %s tiny-jamba.gguf [tiny-llama.gguf]\n", argv[0]);
@@ -289,6 +359,7 @@ int main(int argc, char ** argv) {
     snapshot_path(argv[1], 4, true, false);
     snapshot_path(argv[1], 0, true, false);
     cancel_load_path(argv[1]);
+    if (argc > 3) swa_path(argv[3]);
     if (failures) {
         std::printf("\n%d check(s) FAILED\n", failures);
         return 1;

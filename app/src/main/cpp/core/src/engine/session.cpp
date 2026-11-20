@@ -1094,6 +1094,14 @@ std::unique_ptr<Session> Session::open(const SessionConfig & cfg,
     // buffers — the memory this engine is always short of. 0 keeps the historical behaviour
     // (one graph as wide as the batch); a smaller value chunks prefill to buy that memory back.
     cparams.n_ubatch = cfg.n_ubatch > 0 ? (uint32_t) cfg.n_ubatch : (uint32_t) cfg.n_batch;
+    // A sliding-window layer keeps its window (plus one ubatch), not the whole context (upstream #580).
+    // llama.cpp's own default is a full-size cache on those layers too (common/, which its server and
+    // CLI use, turns it off); on a mostly windowed model (Gemma) that is most of the context's memory
+    // spent on cells no token reads: Gemma 4 26B-A4B at 16384 context held ~2 GiB for its context where
+    // the window needs a fraction. A cut further back than the window is served from a context
+    // checkpoint instead (kv_prefix_intact), and the checkpoints copy only the window. The draft
+    // context copies these parameters.
+    cparams.swa_full = false;
     // The streamer needs the callback to see routing; the compute trace needs it to time nodes.
     // Installing it for the trace alone is what lets a NON-streamed run be measured — the dense
     // mmap baseline the streamed numbers are argued against.

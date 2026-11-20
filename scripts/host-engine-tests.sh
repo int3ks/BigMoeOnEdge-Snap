@@ -11,11 +11,13 @@ cmake -S "$TESTS" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release > "$BUILD/cmak
 ninja -C "$BUILD" file_reader_test expert_layout_test cache_brake_test session_ckpt_test
 python3 -I "$TESTS/make_jamba.py" "$BUILD/tiny-jamba.gguf" > /dev/null
 python3 -I "$TESTS/make_jamba.py" "$BUILD/tiny-llama.gguf" --llama > /dev/null
+# A sliding-window MoE (gemma4, window 16) for the window-only SWA cache (upstream make-tiny-moe.py).
+python3 -I "$TESTS/make_tiny_moe.py" --arch gemma4 --out "$BUILD/tiny-gemma4.gguf" > /dev/null
 cd "$BUILD"
 fail=0
 for t in file_reader_test expert_layout_test cache_brake_test; do
     if ./$t > $t.log 2>&1; then echo "ok   $t"; else echo "FAIL $t (see $BUILD/$t.log)"; fail=1; fi
 done
-if ./session_ckpt_test tiny-jamba.gguf tiny-llama.gguf > session_ckpt_test.log 2>&1; then echo "ok   session_ckpt_test"; else
+if ./session_ckpt_test tiny-jamba.gguf tiny-llama.gguf tiny-gemma4.gguf > session_ckpt_test.log 2>&1; then echo "ok   session_ckpt_test"; else
     echo "FAIL session_ckpt_test (see $BUILD/session_ckpt_test.log)"; fail=1; fi
 exit $fail
