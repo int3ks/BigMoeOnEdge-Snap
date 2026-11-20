@@ -12,6 +12,10 @@ interface AttachmentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(attachment: AttachmentEntity)
 
+    /** How many attachments of OTHER chats point at [path] (a file is only deleted with a chat when none does). */
+    @Query("SELECT COUNT(*) FROM attachments WHERE path = :path AND session_id != :sessionId")
+    suspend fun countOtherRefs(path: String, sessionId: String): Int
+
     @Query("SELECT * FROM attachments WHERE session_id = :sessionId ORDER BY created_at ASC, rowid ASC")
     fun observeForSession(sessionId: String): Flow<List<AttachmentEntity>>
 

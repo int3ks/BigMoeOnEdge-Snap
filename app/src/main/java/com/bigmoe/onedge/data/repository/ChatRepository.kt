@@ -66,8 +66,28 @@ data class AttachmentDomainModel(
 class ChatRepository(
     private val sessionDao: ChatSessionDao,
     private val messageDao: ChatMessageDao,
-    private val attachmentDao: AttachmentDao? = null
+    private val attachmentDao: AttachmentDao? = null,
+    private val artifactDao: com.bigmoe.onedge.data.local.dao.ArtifactDao? = null,
+    /** The workspace (BigMoe folder); only files inside it are ever deleted with a chat. */
+    private val workspaceRoot: (() -> java.io.File)? = null
 ) : MessageStore {
+
+    /**
+     * The files that belong only to this chat: its attachments and results (artifacts) that exist inside the
+     * workspace and that no other chat refers to. Relative workspace paths, for the delete question.
+     */
+    suspend fun ownFilesOf(sessionId: String): List<String> {
+        val root = workspaceRoot?.invoke()?.canonicalFile ?: return emptyList()
+        val paths = LinkedHashSet<String>()
+        attachmentDao?.getForSession(sessionId)?.forEach { paths.add(it.path) }
+        artifactDao?.getForSession(sessionId)?.forEach { paths.add(it.path) }
+        return paths.filter { rel ->
+            val f = java.io.File(root, rel.trim('/')).canonicalFile
+            f.isFile && f.path.startsWith(root.path + java.io.File.separator) &&
+                (attachmentDao?.countOtherRefs(rel, sessionId) ?: 0) == 0 &&
+                (artifactDao?.countOtherRefs(rel, sessionId) ?: 0) == 0
+        }
+    }
 
     fun observeAttachments(sessionId: String): Flow<List<AttachmentDomainModel>> =
         (attachmentDao?.observeForSession(sessionId) ?: kotlinx.coroutines.flow.flowOf(emptyList()))
@@ -258,6 +278,16 @@ class ChatRepository(
         sessionDao.finishGeneration(sessionId, elapsedMs, tokens, contextUsed, contextTotal, note, state)
 
     suspend fun clearTransientGenerationStates() = sessionDao.clearTransientGenerationStates()
+
+    /** Deletes the chat and, when given, those of its files ([ownFilesOf]) the user agreed to delete. */
+    suspend fun deleteSession(sessionId: String, files: List<String>) {
+        deleteSession(sessionId)
+        val root = workspaceRoot?.invoke()?.canonicalFile ?: return
+        files.forEach { rel ->
+            val f = java.io.File(root, rel.trim('/')).canonicalFile
+            if (f.isFile && f.path.startsWith(root.path + java.io.File.separator)) f.delete()
+        }
+    }
 
     suspend fun deleteSession(sessionId: String) {
         // chat_messages.session_id has ON DELETE CASCADE; deleting the messages first is harmless.

@@ -12,6 +12,9 @@ interface ArtifactDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(artifact: ArtifactEntity)
 
+    @Query("SELECT COUNT(*) FROM artifacts WHERE path = :path AND session_id != :sessionId")
+    suspend fun countOtherRefs(path: String, sessionId: String): Int
+
     @Query("SELECT * FROM artifacts WHERE session_id = :sessionId ORDER BY created_at ASC")
     suspend fun getForSession(sessionId: String): List<ArtifactEntity>
 

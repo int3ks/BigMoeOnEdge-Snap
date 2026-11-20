@@ -341,18 +341,7 @@ fun ChatHistoryPanel(
         )
     }
     deleting?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("Delete this chat?") },
-            text = { Text("\"${target.title}\" and its messages will be removed.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteSession(target.id)
-                    deleting = null
-                }) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } }
-        )
+        DeleteChatDialog(target = target, viewModel = viewModel, onDone = { deleting = null })
     }
 }
 

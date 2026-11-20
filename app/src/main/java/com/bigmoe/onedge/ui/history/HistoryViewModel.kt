@@ -32,9 +32,12 @@ class HistoryViewModel(
             initialValue = emptyList()
         )
 
-    fun deleteSession(sessionId: String) {
+    /** Attachments and results that would go with the chat (only its own, only inside the BigMoe folder). */
+    suspend fun filesOf(sessionId: String): List<String> = withContext(Dispatchers.IO) { repository.ownFilesOf(sessionId) }
+
+    fun deleteSession(sessionId: String, files: List<String> = emptyList()) {
         viewModelScope.launch {
-            repository.deleteSession(sessionId)
+            repository.deleteSession(sessionId, files)
             composerStore.forgetChat(sessionId)
         }
     }

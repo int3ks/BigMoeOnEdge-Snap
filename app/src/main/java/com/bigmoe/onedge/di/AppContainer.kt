@@ -87,7 +87,9 @@ class AppContainer(private val context: Context) {
         ChatRepository(
             sessionDao = database.chatSessionDao(),
             messageDao = database.chatMessageDao(),
-            attachmentDao = database.attachmentDao()
+            attachmentDao = database.attachmentDao(),
+            artifactDao = database.artifactDao(),
+            workspaceRoot = { workspace.rootDir }
         )
     }
 
