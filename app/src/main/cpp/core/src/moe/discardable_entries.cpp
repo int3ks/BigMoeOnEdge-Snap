@@ -52,7 +52,11 @@ void DiscardableEntries::offer_cold(uint32_t gen, const std::function<bool(int32
     if (!enabled()) return;
     if (restart_) changed_ = gen;
     restart_ = false;
-    const uint32_t cap = std::max(offer_after_, (gen - oldest_use) / 2);
+    const uint32_t span = gen - oldest_use;
+    // Snap: never offer more than the oldest share of the age span; the hot rest stays ordinary memory.
+    const uint32_t floor_win = std::max(offer_after_, (uint32_t) ((double) span * (1.0 - share_)));
+    const uint32_t cap = std::max(floor_win, span / 2);
+    if (after_ < floor_win) after_ = floor_win;
     if (after_ > cap) {
         after_ = cap; // the cache got younger (a resize, a turnover): the older half stays offered
     } else if (after_ < cap && gen - changed_ >= after_) {

@@ -154,6 +154,7 @@ data class EngineSettings(
     val predictSpecMax: Int = 0,
     val predictionProbe: Boolean = false,
     val routeAhead: Int = 0,
+    val cacheDiscardPct: Int = 25,
     val rowStream: Boolean = false,
     val loadAllExpertsForBenchmark: Boolean = false,
     val releaseMmap: Boolean = false,
@@ -302,6 +303,7 @@ data class EngineSettings(
         predictSpecMax = predictSpecMax,
         predictionProbe = predictionProbe,
         routeAhead = routeAhead,
+        cacheDiscardPct = cacheDiscardPct,
         rowStream = rowStream,
         loadAllExpertsForBenchmark = loadAllExpertsForBenchmark,
         releaseMmap = releaseMmap,
@@ -378,6 +380,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val DROP_IN_PREFILL = booleanPreferencesKey("drop_in_prefill")
         val SUBSTITUTE_PCT = intPreferencesKey("substitute_pct")
         val PREFETCH_LAYERS = intPreferencesKey("prefetch_layers")
+        val CACHE_DISCARD_PCT = intPreferencesKey("cache_discard_pct")
         val PREDICT_PREFETCH = booleanPreferencesKey("predict_prefetch")
         val PREDICT_SPEC_MAX = intPreferencesKey("predict_spec_max")
         val PREDICTION_PROBE = booleanPreferencesKey("prediction_probe")
@@ -480,6 +483,7 @@ class EngineSettingsDataStore(private val context: Context) {
             predictSpecMax = p[Keys.PREDICT_SPEC_MAX] ?: d.predictSpecMax,
             predictionProbe = p[Keys.PREDICTION_PROBE] ?: d.predictionProbe,
             routeAhead = p[Keys.ROUTE_AHEAD] ?: d.routeAhead,
+            cacheDiscardPct = p[Keys.CACHE_DISCARD_PCT] ?: d.cacheDiscardPct,
             rowStream = p[Keys.ROW_STREAM] ?: d.rowStream,
             loadAllExpertsForBenchmark = p[Keys.LOAD_ALL_EXPERTS] ?: d.loadAllExpertsForBenchmark,
             releaseMmap = p[Keys.RELEASE_MMAP] ?: d.releaseMmap,
@@ -644,6 +648,7 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateDropInPrefill(v: Boolean) = set(Keys.DROP_IN_PREFILL, v)
     suspend fun updateSubstitutePct(v: Int) = set(Keys.SUBSTITUTE_PCT, v.coerceIn(0, 100))
     suspend fun updatePrefetchLayers(v: Int) = set(Keys.PREFETCH_LAYERS, v.coerceIn(0, 8))
+    suspend fun updateCacheDiscardPct(v: Int) = set(Keys.CACHE_DISCARD_PCT, v.coerceIn(0, 100))
     suspend fun updatePredictPrefetch(v: Boolean) = set(Keys.PREDICT_PREFETCH, v)
     suspend fun updatePredictSpecMax(v: Int) = set(Keys.PREDICT_SPEC_MAX, v.coerceIn(0, 8))
     suspend fun updatePredictionProbe(v: Boolean) = set(Keys.PREDICTION_PROBE, v)

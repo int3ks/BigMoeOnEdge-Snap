@@ -93,6 +93,8 @@ class LoadConfigTest {
         assertEquals(2, c.copy(kvCacheType = KvCacheType.Q4_0).toIntArray()[44])
         assertEquals(64, v[45])               // I_REPEAT_LAST_N (default window)
         assertEquals(-1, c.copy(repeatLastN = -5).toIntArray()[45])
+        assertEquals(25, v[46])               // I_CACHE_DISCARD_PCT (default share)
+        assertEquals(100, c.copy(cacheDiscardPct = 150).toIntArray()[46])
     }
 
     @Test

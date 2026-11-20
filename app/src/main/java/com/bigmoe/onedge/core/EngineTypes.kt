@@ -100,6 +100,8 @@ data class LoadConfig(
     val forceCache: Boolean = true,
     /** Per model (Models page), filled in by EngineController at load; not an app-wide setting. */
     val kvCacheType: KvCacheType = KvCacheType.F16,
+    /** Coldest share (%) of the expert cache Android may drop instead of keeping it; 0 = off. Wire: I_CACHE_DISCARD_PCT. */
+    val cacheDiscardPct: Int = 25,
     // Extra sampler stages (neutral defaults = exactly the old chain). Wire format: F_MIN_P.. / I_REPEAT_LAST_N.
     val minP: Float = 0f,
     val repeatPenalty: Float = 1f,
@@ -138,7 +140,8 @@ data class LoadConfig(
         if (predictionProbe) 1 else 0, if (loadAllExpertsForBenchmark) 1 else 0,
         decisionPrefixCache.code, if (forceCache) 1 else 0,
         kvCacheType.code,
-        repeatLastN.coerceIn(-1, 8192)
+        repeatLastN.coerceIn(-1, 8192),
+        cacheDiscardPct.coerceIn(0, 100)
     )
 
     fun toFloatArray(): FloatArray = floatArrayOf(
@@ -150,7 +153,7 @@ data class LoadConfig(
     companion object {
         const val UBATCH = 512
         /** Length of [toIntArray]; must equal I_COUNT in native-bridge.cpp. */
-        const val INT_COUNT = 46
+        const val INT_COUNT = 47
         const val FLOAT_COUNT = 6
     }
 }

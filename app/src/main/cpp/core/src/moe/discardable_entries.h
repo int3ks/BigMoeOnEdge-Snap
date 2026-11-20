@@ -64,6 +64,8 @@ public:
     // `drop_before_reclaim` (debug): drop an offered entry just before a lookup takes it back, so
     // every such lookup finds it gone and the owner's re-read path runs on zeroed memory.
     void init(size_t n_entry, uint32_t offer_after, bool drop_before_reclaim, SpanOps * ops, SpansOf spans);
+    // Snap: the share (0..1] of the cache's age span that may be offered, the oldest part. 1 = upstream.
+    void set_share(double share) { share_ = share > 0.0 && share < 1.0 ? share : 1.0; }
     bool enabled() const { return ops_ != nullptr; }
 
     bool prepare(Span s) { return !ops_ || ops_->prepare(s); }
@@ -108,6 +110,7 @@ private:
     SpanOps * ops_ = nullptr;
     SpansOf spans_;
     uint32_t offer_after_ = 0;
+    double share_ = 1.0;   // set_share
     uint32_t after_ = 0;   // the window in force: offer_after_ up to half the cache's age span
     uint32_t changed_ = 0; // the generation the window last moved, or the kernel last dropped
     bool restart_ = true;  // a drop (or init) since the last offer_cold: changed_ restarts there

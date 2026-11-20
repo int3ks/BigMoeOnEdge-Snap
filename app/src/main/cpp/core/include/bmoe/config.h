@@ -72,11 +72,14 @@ struct MoeStreamConfig {
     // an entry no layer used in the last pass is offered to the kernel (MADV_FREE), which reclaims it
     // before it compresses or swaps anything; a hit on a dropped entry reads it again from flash.
     // The budget follows what the kernel lets the cache keep and grows back once it stops dropping.
-    // OFF on this fork: on Android kswapd keeps reclaiming all the time, offered (lazy-free) pages are
-    // the cheapest it can take, and MemAvailable counts them as free. Tested on the MagicPad (7.03):
-    // with an 8500 MiB cache on Qwen3.6-35B the cache stayed small (the budget follows every drop),
-    // 6.5 GB showed as free, hit rate and decode speed fell. Kept for later tests.
-    bool cache_discard = false;
+    bool cache_discard = true;
+    // Snap: the share of the cache (by age of last use, the coldest) that may be offered at all, in
+    // percent; 100 is upstream's rule (everything but the last pass, narrowing to one token at every
+    // drop). On Android without swap kswapd takes offered pages first and constantly, so with 100 the
+    // budget followed every drop down to one token's cycle (MagicPad, 7.03: Qwen3.6-35B, 8500 MiB set,
+    // low hit rate, slow decode). A share keeps the hot rest ordinary memory, and the budget never
+    // drops below it. 0 turns the discardable cache off.
+    int cache_discard_pct = 25;
     // Debug: drop an offered entry just before a lookup takes it back, so every such lookup pays the
     // re-read on zeroed memory.
     bool cache_discard_drop = false;

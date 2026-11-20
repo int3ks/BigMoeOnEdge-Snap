@@ -234,6 +234,7 @@ enum IntIdx {
     I_DECIDE_PREFIX_CACHE, I_FORCE_CACHE,
     I_KV_CACHE_TYPE,   // 0 f16, 1 q8_0, 2 q4_0 (per model)
     I_REPEAT_LAST_N,   // repetition-penalty window: 0 off, < 0 whole context
+    I_CACHE_DISCARD_PCT, // coldest share of the expert cache the kernel may drop (0 = off)
     I_COUNT
 };
 enum FloatIdx { F_TEMPERATURE = 0, F_TOP_P, F_MIN_P, F_REPEAT_PENALTY, F_FREQ_PENALTY, F_PRESENCE_PENALTY, F_COUNT };
@@ -531,6 +532,8 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
             m.drop_cold_frac = std::clamp<float>(static_cast<float>(iv[I_DROP_COLD_PCT]) / 100.0f, 0.0f, 1.0f);
         }
         m.row_stream = iv[I_ROW_STREAM] != 0;
+        m.cache_discard_pct = std::clamp<int>(iv[I_CACHE_DISCARD_PCT], 0, 100);
+        m.cache_discard = cache_on && m.cache_discard_pct > 0;
         if (iv[I_RELEASE_MMAP] != 0 && (m.dense_weights == bmoe::DenseWeightsMode::Anonymous ||
                                         m.dense_weights == bmoe::DenseWeightsMode::Pinned)) {
             m.release_mmap = true;

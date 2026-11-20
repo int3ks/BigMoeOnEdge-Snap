@@ -89,6 +89,7 @@ private object Choices {
     val IO = com.bigmoe.onedge.core.SettingChoices.IO_LANES
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)
+    val DISCARD = listOf(0, 10, 25, 50, 100)
     val PREDICT_SPEC = listOf(0, 1, 2, 4)
     val ROUTE_AHEAD = listOf(0, 1, 2, 4)
     val DROP_COLD = listOf(0, 50, 75, 100)
@@ -468,6 +469,12 @@ private fun SettingsContent(
                     enabled = stream
                 ) { viewModel.updateForceCache(it) }
             }
+            ChoiceSetting(
+                "Droppable cache share (experimental)",
+                Choices.DISCARD.map { it to if (it == 0) "off" else "coldest $it%" },
+                selected = settings.cacheDiscardPct, enabled = cacheOn
+            ) { viewModel.updateCacheDiscardPct(it) }
+            Hint("The coldest part of the expert cache is handed to Android to drop when memory runs short, instead of Android killing other apps (or swapping, where swap is on). A dropped expert is read again from flash. The rest of the cache is never offered, and the cache never shrinks below it. 100% is upstream's rule and was far too eager on the MagicPad without swap (the cache shrank, low hit rate). Offered memory counts as free in Android's numbers. Off = ordinary memory, as before 7.03.")
             ChoiceSetting(
                 "Auto cache ceiling (MiB)",
                 Choices.CACHE_CEIL.map { it to if (it == 0) "no cap" else "$it MiB" },

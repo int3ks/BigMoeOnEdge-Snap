@@ -127,7 +127,7 @@ public:
     // which only the caller knows because the routing width is its to resolve.
     void set_drop_floor(size_t bytes) {
         drop_floor_ = bytes;
-        follow_.set_floor(bytes);
+        follow_.set_floor(floor_for(follow_.ceiling()));
     }
     size_t cache_budget() const { return cache_max_; }
     // The run's effective top-k: a batch of ids is that many per token, which is how load_layer tells
@@ -377,6 +377,11 @@ private:
     long long swept_ = 0;        // dropped offers retired from the LRU tail
     uint32_t offer_window_ = 0;  // generations an entry stays ordinary after its last use
     size_t drop_floor_ = 1;      // set_drop_floor
+    double discard_share_ = 1.0; // MoeStreamConfig::cache_discard_pct / 100
+    // A drop never takes the budget under the share that is never offered (nor under one token's cycle).
+    size_t floor_for(size_t budget) const {
+        return std::max(drop_floor_, (size_t) ((double) budget * (1.0 - discard_share_)));
+    }
     DropFollowingBudget follow_; // the live budget while the kernel may drop from the cache
     void move_budget(size_t bytes);
     void settle_offers();

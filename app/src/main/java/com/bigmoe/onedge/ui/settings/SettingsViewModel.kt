@@ -138,6 +138,7 @@ class SettingsViewModel(
     fun updateDropInPrefill(v: Boolean) = launch { dataStore.updateDropInPrefill(v) }
     fun updateSubstitutePct(v: Int) = launch { dataStore.updateSubstitutePct(v) }
     fun updatePrefetchLayers(v: Int) = launch { dataStore.updatePrefetchLayers(v) }
+    fun updateCacheDiscardPct(v: Int) = launch { dataStore.updateCacheDiscardPct(v) }
     fun updatePredictPrefetch(v: Boolean) = launch { dataStore.updatePredictPrefetch(v) }
     fun updatePredictSpecMax(v: Int) = launch { dataStore.updatePredictSpecMax(v) }
     fun updatePredictionProbe(v: Boolean) = launch { dataStore.updatePredictionProbe(v) }

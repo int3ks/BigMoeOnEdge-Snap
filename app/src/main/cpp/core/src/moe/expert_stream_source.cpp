@@ -49,7 +49,8 @@ bool ExpertStreamSource::init(const std::vector<std::string> & shard_paths,
     // Offered entries are dropped by the kernel under pressure, never written to swap (upstream
     // #528/#530/#554). One pass of the stack, plus the layers route-ahead stages before their
     // compute, is the newest an entry can be and still be in a kernel's or an I/O lane's hands.
-    discard_wanted_ = cfg.cache_discard;
+    discard_wanted_ = cfg.cache_discard && cfg.cache_discard_pct > 0;
+    discard_share_ = std::clamp(cfg.cache_discard_pct, 1, 100) / 100.0;
     discard_drop_ = cfg.cache_discard_drop;
     discard_after_ = (uint32_t) std::max(0, cfg.route_ahead);
     overlap_ = cfg.overlap;
@@ -196,7 +197,8 @@ bool ExpertStreamSource::init(const std::vector<std::string> & shard_paths,
         cvalid_.assign(n_entry, 0);
         cstamp_.assign(n_entry, 0);
         offer_window_ = (uint32_t) n_layer_ + discard_after_ + 1;
-        follow_.reset(cache_max_, drop_floor_, offer_window_);
+        follow_.reset(cache_max_, floor_for(cache_max_), offer_window_);
+        disc_.set_share(discard_share_);
         disc_.init(n_entry, offer_window_, discard_drop_, discard_wanted_ ? &platform_span_ops() : nullptr,
                    [this](int32_t id, const std::function<void(Span)> & fn) {
                        for (int p = 0; p < MoeRecipe::max_exps; ++p) {
@@ -205,7 +207,8 @@ bool ExpertStreamSource::init(const std::vector<std::string> & shard_paths,
                        }
                    });
         if (disc_.enabled())
-            std::fprintf(stderr, "bmoe: expert cache is discardable (kernel may drop cold entries, no swap)\n");
+            std::fprintf(stderr, "bmoe: expert cache is discardable: the coldest %d%% may be dropped by the kernel\n",
+                         (int) (discard_share_ * 100.0 + 0.5));
         cprev_.assign(n_entry, -1);
         cnext_.assign(n_entry, -1);
         cspec_.assign(n_entry, 0);
@@ -726,7 +729,7 @@ void ExpertStreamSource::set_cache_budget(size_t bytes) {
         // Growing evicts nothing, so it needs no quiesce — and must not do one: cancelling the
         // speculative reads in flight on every grow would quietly defeat --prefetch.
         cache_max_ = std::min(bytes, total_expert_bytes_);
-        follow_.reset(cache_max_, drop_floor_, offer_window_);
+        follow_.reset(cache_max_, floor_for(cache_max_), offer_window_);
         ++cache_resizes_;
         return;
     }
@@ -736,7 +739,7 @@ void ExpertStreamSource::set_cache_budget(size_t bytes) {
     // chosen at init), and load_layer branches on cache_max_ == 0 to pick shared-slot vs LRU — so a
     // runtime zero would route into buffers that do not exist. This shrinks toward, never to, zero.
     cache_max_ = std::max<size_t>(1, bytes);
-    follow_.reset(cache_max_, drop_floor_, offer_window_); // an owner's explicit resize is the new ceiling
+    follow_.reset(cache_max_, floor_for(cache_max_), offer_window_); // an owner's explicit resize is the new ceiling
     ++cache_resizes_;
     // No cstamp guard: with no decode in flight, nothing is staged for the current generation, so
     // every resident entry (coldest first) is a valid eviction target.
@@ -760,6 +763,8 @@ void ExpertStreamSource::brake_cache_budget(size_t bytes) {
     if (cache_max_ == 0) return;
     if (!disc_.enabled()) return set_cache_budget(bytes);
     disc_.pressure();
+    // Real pressure on what the cache still counts on: the brake may go below the never-offered share.
+    follow_.set_floor(drop_floor_);
     follow_.braked(bytes, cgen_);
     move_budget(follow_.current());
 }
