@@ -1,5 +1,7 @@
 package com.bigmoe.onedge.sync
 
+import com.bigmoe.onedge.data.local.entity.ArtifactEntity
+import com.bigmoe.onedge.data.local.entity.AttachmentEntity
 import com.bigmoe.onedge.data.local.entity.ChatMessageEntity
 import com.bigmoe.onedge.data.local.entity.ChatSessionEntity
 import com.bigmoe.onedge.data.local.entity.MessageRole
@@ -20,12 +22,37 @@ object ChatFile {
     const val FORMAT = "bigmoe-chat"
     const val VERSION = 1
 
-    data class Parsed(val session: ChatSessionEntity, val messages: List<ChatMessageEntity>, val changedAt: Long)
+    data class Parsed(
+        val session: ChatSessionEntity,
+        val messages: List<ChatMessageEntity>,
+        val changedAt: Long,
+        val attachments: List<AttachmentEntity> = emptyList(),
+        val artifacts: List<ArtifactEntity> = emptyList()
+    )
 
     fun changedAt(session: ChatSessionEntity, messages: List<ChatMessageEntity>): Long =
         maxOf(session.updatedAt, messages.maxOfOrNull { it.timestamp } ?: 0L)
 
-    fun encode(session: ChatSessionEntity, messages: List<ChatMessageEntity>): String {
+    fun encode(
+        session: ChatSessionEntity,
+        messages: List<ChatMessageEntity>,
+        attachments: List<AttachmentEntity> = emptyList(),
+        artifacts: List<ArtifactEntity> = emptyList()
+    ): String {
+        val atts = JSONArray()
+        attachments.forEach { a ->
+            atts.put(
+                JSONObject().put("id", a.id).put("messageId", a.messageId).put("kind", a.kind).put("name", a.name)
+                    .put("mime", a.mime).put("path", a.path).put("sizeBytes", a.sizeBytes).put("createdAt", a.createdAt)
+            )
+        }
+        val arts = JSONArray()
+        artifacts.forEach { a ->
+            arts.put(
+                JSONObject().put("id", a.id).put("messageId", a.messageId).put("title", a.title).put("path", a.path)
+                    .put("language", a.language).put("createdAt", a.createdAt).put("updatedAt", a.updatedAt)
+            )
+        }
         val arr = JSONArray()
         messages.forEach { m ->
             val o = JSONObject()
@@ -60,6 +87,8 @@ object ChatFile {
             .put("modelPath", session.modelPath ?: JSONObject.NULL)
             .put("modelNames", runCatching { JSONArray(session.modelNamesJson) }.getOrElse { JSONArray() })
             .put("messages", arr)
+            .put("attachments", atts)
+            .put("artifacts", arts)
             .toString(1)
     }
 
@@ -100,7 +129,25 @@ object ChatFile {
                 variantsJson = m.raw("variants")
             )
         }
-        Parsed(session, messages, o.optLong("changedAt", changedAt(session, messages)))
+        val atts = o.optJSONArray("attachments") ?: JSONArray()
+        val attachments = (0 until atts.length()).map { i ->
+            val a = atts.getJSONObject(i)
+            AttachmentEntity(
+                id = a.getString("id"), sessionId = id, messageId = a.optString("messageId"), kind = a.optString("kind", "FILE"),
+                name = a.optString("name"), mime = a.optString("mime"), path = a.getString("path"),
+                sizeBytes = a.optLong("sizeBytes"), createdAt = a.optLong("createdAt")
+            )
+        }
+        val arts = o.optJSONArray("artifacts") ?: JSONArray()
+        val artifacts = (0 until arts.length()).map { i ->
+            val a = arts.getJSONObject(i)
+            ArtifactEntity(
+                id = a.getString("id"), sessionId = id, messageId = a.optString("messageId"), title = a.optString("title"),
+                path = a.getString("path"), language = a.optString("language"), createdAt = a.optLong("createdAt"),
+                updatedAt = a.optLong("updatedAt")
+            )
+        }
+        Parsed(session, messages, o.optLong("changedAt", changedAt(session, messages)), attachments, artifacts)
     }.getOrNull()
 
     /** Stored JSON strings go into the file as real JSON (readable); anything else stays a string. */

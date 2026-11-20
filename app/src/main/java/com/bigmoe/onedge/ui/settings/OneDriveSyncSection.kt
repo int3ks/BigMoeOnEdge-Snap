@@ -27,7 +27,7 @@ fun OneDriveSyncSection() {
     val signedIn by sync.signedIn.collectAsState()
 
     Section("OneDrive sync")
-    Hint("Chats and server models are synced through your OneDrive app folder (Apps\\BigMoe on the PC, one JSON file per chat). The newer copy wins. Sign in once on every device with the same Microsoft account.")
+    Hint("Every chat is a file in the workspace folder chats/ (<title>.json; that file is the chat, the app keeps an index). Signed in, the chats, the files they refer to (attachments, results) and the server models are synced through your OneDrive app folder (Apps\\BigMoe on the PC). The newer copy wins. Sign in once on every device with the same Microsoft account.")
     if (signedIn) {
         Text(
             "Signed in" + sync.auth.account.takeIf { it.isNotBlank() }?.let { " as $it" }.orEmpty(),
@@ -35,6 +35,15 @@ fun OneDriveSyncSection() {
         )
         val last = if (status.lastSyncAt > 0) DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(status.lastSyncAt)) else "never"
         Hint(if (status.running) "Syncing\u2026" else "Last sync: $last. ${status.message}")
+        if (status.cloudBytes >= 0) Hint("OneDrive app folder: ${gb(status.cloudBytes)}")
+        if (status.pendingUploadBytes > 0) {
+            Text(
+                "${gb(status.pendingUploadBytes)} of files are waiting to be uploaded (more than 1 GB).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+            OutlinedButton(onClick = { sync.confirmLargeUpload() }, enabled = !status.running) { Text("Upload anyway") }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { sync.requestSync() }, enabled = !status.running) { Text("Sync now") }
             OutlinedButton(onClick = { sync.signOut() }) { Text("Sign out") }
@@ -48,3 +57,7 @@ fun OneDriveSyncSection() {
         if (status.message.isNotBlank() && status.message != "Not set up") Hint(status.message)
     }
 }
+
+private fun gb(bytes: Long): String =
+    if (bytes >= 1L shl 30) String.format(java.util.Locale.US, "%.2f GB", bytes / (1L shl 30).toDouble())
+    else String.format(java.util.Locale.US, "%.1f MB", bytes / (1L shl 20).toDouble())

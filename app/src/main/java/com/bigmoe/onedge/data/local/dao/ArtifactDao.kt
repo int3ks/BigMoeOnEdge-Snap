@@ -12,6 +12,9 @@ interface ArtifactDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(artifact: ArtifactEntity)
 
+    @Query("SELECT * FROM artifacts WHERE session_id = :sessionId ORDER BY created_at ASC")
+    suspend fun getForSession(sessionId: String): List<ArtifactEntity>
+
     @Query("SELECT * FROM artifacts WHERE session_id = :sessionId ORDER BY updated_at DESC")
     fun observeForSession(sessionId: String): Flow<List<ArtifactEntity>>
 

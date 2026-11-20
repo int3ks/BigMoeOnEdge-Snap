@@ -271,6 +271,9 @@ class ChatRepository(
 
     companion object {
         const val DEFAULT_TITLE = "New Chat"
+
+        /** "New Chat" or "New Chat (2)" (the chat folder numbers equal titles): the title still comes from the first message. */
+        fun isDefaultTitle(title: String): Boolean = title == DEFAULT_TITLE || Regex("^New Chat \\(\\d+\\)$").matches(title)
         private const val REMOVE_CHUNK = 500
     }
 

@@ -213,6 +213,16 @@ class OneDriveClient(private val auth: OneDriveAuth) {
         }
     }
 
+    /** Opens the app folder once (OneDrive creates Apps/<registration> on the first access) and returns its size in bytes. */
+    fun rootSize(): Long {
+        val conn = open("$ROOT?\$select=size", "GET")
+        try {
+            return JSONObject(readOk(conn)).optLong("size", 0L)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /** Creates approot:/[name] if missing (an existing folder is left alone). */
     fun ensureFolder(name: String) {
         val conn = open("$ROOT/children", "POST")
@@ -222,7 +232,91 @@ class OneDriveClient(private val auth: OneDriveAuth) {
             val body = JSONObject().put("name", name).put("folder", JSONObject()).put("@microsoft.graph.conflictBehavior", "fail")
             conn.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = conn.responseCode
-            if (code != 409 && code !in 200..299) throw IOException("OneDrive: cannot create folder $name (HTTP $code)")
+            if (code != 409 && code !in 200..299) {
+                val err = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
+                throw IOException("OneDrive: cannot create folder $name (HTTP $code ${err.take(200)})")
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Uploads a local file to approot:/[path]; big files go through an upload session in 10 MiB pieces. */
+    fun uploadFile(path: String, file: File): String {
+        if (file.length() <= SIMPLE_UPLOAD_MAX) {
+            val conn = open("$ROOT:/${encPath(path)}:/content", "PUT")
+            try {
+                conn.doOutput = true
+                conn.setFixedLengthStreamingMode(file.length())
+                conn.setRequestProperty("Content-Type", "application/octet-stream")
+                conn.outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
+                val o = JSONObject(readOk(conn))
+                return o.optString("cTag").ifBlank { o.optString("eTag") }
+            } finally {
+                conn.disconnect()
+            }
+        }
+        val s = open("$ROOT:/${encPath(path)}:/createUploadSession", "POST")
+        val uploadUrl = try {
+            s.doOutput = true
+            s.setRequestProperty("Content-Type", "application/json")
+            s.outputStream.use {
+                it.write(JSONObject().put("item", JSONObject().put("@microsoft.graph.conflictBehavior", "replace")).toString().toByteArray())
+            }
+            JSONObject(readOk(s)).getString("uploadUrl")
+        } finally {
+            s.disconnect()
+        }
+        val total = file.length()
+        val buf = ByteArray(CHUNK)
+        var offset = 0L
+        var last = JSONObject()
+        java.io.RandomAccessFile(file, "r").use { raf ->
+            while (offset < total) {
+                val n = minOf(CHUNK.toLong(), total - offset).toInt()
+                raf.seek(offset)
+                raf.readFully(buf, 0, n)
+                val c = URL(uploadUrl).openConnection() as HttpURLConnection // pre-authenticated: no token
+                try {
+                    c.requestMethod = "PUT"
+                    c.connectTimeout = 15000; c.readTimeout = 120000
+                    c.doOutput = true
+                    c.setFixedLengthStreamingMode(n)
+                    c.setRequestProperty("Content-Range", "bytes $offset-${offset + n - 1}/$total")
+                    c.outputStream.use { it.write(buf, 0, n) }
+                    val text = readOk(c)
+                    if (offset + n >= total) last = runCatching { JSONObject(text) }.getOrElse { JSONObject() }
+                } finally {
+                    c.disconnect()
+                }
+                offset += n
+            }
+        }
+        return last.optString("cTag").ifBlank { last.optString("eTag") }
+    }
+
+    /** Downloads approot:/[path] into [target] (via a temp file); false when it does not exist. */
+    fun downloadToFile(path: String, target: File): Boolean {
+        val conn = open("$ROOT:/${encPath(path)}:/content", "GET")
+        conn.instanceFollowRedirects = false
+        try {
+            val code = conn.responseCode
+            if (code == 404) return false
+            val src = if (code in 300..399) {
+                val d = URL(conn.getHeaderField("Location") ?: throw IOException("Download without location")).openConnection() as HttpURLConnection
+                d.connectTimeout = 15000; d.readTimeout = 120000
+                d
+            } else conn
+            try {
+                if (src.responseCode !in 200..299) throw IOException("OneDrive: download $path HTTP ${src.responseCode}")
+                target.parentFile?.mkdirs()
+                val tmp = File(target.parentFile, ".${target.name}.part")
+                src.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                if (!tmp.renameTo(target)) { target.delete(); tmp.renameTo(target) }
+                return true
+            } finally {
+                if (src !== conn) src.disconnect()
+            }
         } finally {
             conn.disconnect()
         }
@@ -271,5 +365,7 @@ class OneDriveClient(private val auth: OneDriveAuth) {
     companion object {
         const val GRAPH = "https://graph.microsoft.com/v1.0"
         const val ROOT = "$GRAPH/me/drive/special/approot"
+        private const val SIMPLE_UPLOAD_MAX = 60L * 1024 * 1024
+        private const val CHUNK = 32 * 320 * 1024 // 10 MiB, a multiple of 320 KiB as Graph asks
     }
 }

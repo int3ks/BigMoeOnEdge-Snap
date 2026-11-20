@@ -492,7 +492,7 @@ class ChatViewModel(
                     history = emptyList()
                 } else {
                     history = repository.getMessages(session.id).map { HistoryMessage(it.id, it.role, it.content) }
-                    if (session.title == ChatRepository.DEFAULT_TITLE && history.isEmpty()) {
+                    if (ChatRepository.isDefaultTitle(session.title) && history.isEmpty()) {
                         repository.updateSessionTitle(session.id, titleFrom(userText))
                     }
                 }

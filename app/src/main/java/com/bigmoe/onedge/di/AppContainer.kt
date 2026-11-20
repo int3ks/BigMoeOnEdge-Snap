@@ -112,13 +112,16 @@ class AppContainer(private val context: Context) {
         com.bigmoe.onedge.core.RemoteServerStore(File(context.applicationContext.filesDir, "remote_servers.json"))
     }
 
-    /** OneDrive chat sync (own Azure app registration, app folder only). */
+    /** Chats as files in <workspace>/chats (the source; the DB is the index) and the OneDrive sync of them. */
     val chatSync: com.bigmoe.onedge.sync.ChatSync by lazy {
         com.bigmoe.onedge.sync.ChatSync(
             context = context.applicationContext,
             sessionDao = database.chatSessionDao(),
             messageDao = database.chatMessageDao(),
-            remoteServers = remoteServerStore
+            attachmentDao = database.attachmentDao(),
+            artifactDao = database.artifactDao(),
+            remoteServers = remoteServerStore,
+            workspaceRoot = { workspace.rootDir }
         )
     }
 

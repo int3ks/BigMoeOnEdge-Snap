@@ -12,8 +12,12 @@
 
 ## Layout
 
-    Apps/<registration>/chats/<chat id>.json     one chat each
-    Apps/<registration>/settings/servers.json    server models incl. API keys
+On the device the chats are files: `<workspace>/chats/<title>.json` (the source; the Room DB is an index,
+`sync/ChatFolder.kt`). OneDrive mirrors:
+
+    Apps/<registration>/chats/<title>.json        one chat each
+    Apps/<registration>/workspace/<path>          files the chats refer to (attachments, artifacts)
+    Apps/<registration>/settings/servers.json     server models incl. API keys
 
 ## Chat file (`bigmoe-chat`, version 1)
 
@@ -21,7 +25,11 @@
       "modelPath", "modelNames": [], "messages": [ { "id", "role", "content", "timestamp",
       "reasoning"?, "runInfo"?: {}, "variants"?: …, "tokensPerSecond"?, "prefillMs"?, "generatedTokens"?,
       "cacheHitPct"?, "generationElapsedMs"?, "contextUsed"?, "contextTotal"?, "note"?, "prefillTokens"?,
-      "thinkingMs"?, "toolMs"? } ] }
+      "thinkingMs"?, "toolMs"? } ],
+      "attachments": [ { "id", "messageId", "kind", "name", "mime", "path", "sizeBytes", "createdAt" } ],
+      "artifacts": [ { "id", "messageId", "title", "path", "language", "createdAt", "updatedAt" } ] }
+
+The file name (without .json) is the chat's title; paths are relative to the workspace.
 
 Roles: USER, ASSISTANT, SYSTEM, TOOL (tool result, sent as a user turn), CONTEXT (hidden context of the user turn
 before it). `changedAt` (ms) decides conflicts: the newer copy wins. Other front ends (LLamaGUI) must keep fields
