@@ -272,6 +272,13 @@ class ChatSync(
                 }
             }
         }
+        // Files no chat refers to any more (attachment or result deleted, chat deleted): to the OneDrive recycle bin.
+        val known = HashSet<String>().apply { paths.forEach { p -> p.trim('/').takeIf { it.isNotBlank() }?.let { add(it) } } }
+        val gone = ArrayList<String>()
+        fileState.keys().forEach { if (it !in known) gone.add(it) }
+        for (rel in gone) {
+            runCatching { client.delete("$WORKSPACE/$rel") }.onSuccess { fileState.remove(rel) }
+        }
         val total = toUpload.sumOf { it.second.length() }
         if (total > LARGE_UPLOAD && !allowLargeOnce) return Triple(0, down, total)
         allowLargeOnce = false
