@@ -32,7 +32,13 @@ class ChatFolder(
     /** Returns true when the database changed (a file was read in or a chat deleted). */
     suspend fun reconcile(): Boolean {
         val dir = dir.apply { mkdirs() }
-        val state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
+        var state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
+        // Another folder (workspace moved or switched) or an empty one: start over like the first run, so chats
+        // missing there are written out instead of being taken as deleted.
+        val rootKey = dir.canonicalPath
+        val hasFiles = dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }?.isNotEmpty() == true
+        if (state.optString(ROOT_KEY) != rootKey || !hasFiles) state = JSONObject()
+        state.remove(ROOT_KEY)
         // Files: id -> (file, sig). Unknown or changed files are parsed to learn their id.
         val nameToId = HashMap<String, String>()
         state.keys().forEach { id -> state.optJSONObject(id)?.optString("name")?.let { nameToId[it] = id } }
@@ -96,6 +102,7 @@ class ChatFolder(
                 else -> state.remove(id)
             }
         }
+        state.put(ROOT_KEY, rootKey)
         val tmp = File(stateFile.parentFile, stateFile.name + ".tmp")
         tmp.writeText(state.toString())
         tmp.renameTo(stateFile)
@@ -153,6 +160,7 @@ class ChatFolder(
 
     companion object {
         const val FOLDER = "chats"
+        private const val ROOT_KEY = "_root"
 
         fun sig(f: File): String = "${f.length()}|${f.lastModified()}"
 
