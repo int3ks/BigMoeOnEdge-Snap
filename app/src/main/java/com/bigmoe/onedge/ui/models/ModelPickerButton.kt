@@ -116,6 +116,21 @@ fun ModelPickerButton(
                     )
                 }
             }
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val servers by remember { (ctx.applicationContext as com.bigmoe.onedge.OnEdgeApplication).container.remoteServerStore.servers }.collectAsState()
+            servers.forEach { server ->
+                val isLoaded = server.path == loadedPath
+                val enabled = !loading && !(isLoaded && isGenerating)
+                DropdownMenuItem(
+                    enabled = enabled,
+                    text = { Text(server.name + if (isLoaded) " \u2022 Loaded (server)" else " (server)") },
+                    trailingIcon = { Text(if (isLoaded) "Unload" else "Use", color = MaterialTheme.colorScheme.primary) },
+                    onClick = {
+                        open = false
+                        if (isLoaded) viewModel.unload() else viewModel.loadRemote(server.path)
+                    }
+                )
+            }
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("Manage models\u2026") },

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -43,9 +44,15 @@ class EngineController(
     private val samplingPresetProvider: suspend (modelPath: String) -> SamplingPreset? = { null },
     /** KV snapshots on disk (chat switch, reload, app restart without a new prefill); null = never. */
     private val kvSnapshotStore: KvSnapshotStore? = null,
-    private val kvSnapshotsEnabled: suspend () -> Boolean = { false }
+    private val kvSnapshotsEnabled: suspend () -> Boolean = { false },
+    /** Server models (OpenAI-compatible API) by their "remote:<id>" path; null = unknown. */
+    private val remoteServerProvider: (String) -> RemoteServer? = { null }
 ) {
     private val backend: EngineBackend by lazy(backendProvider)
+    private val remote = RemoteChatClient(ioDispatcher)
+
+    /** True when the "loaded" model is a server model: no native engine involved. */
+    fun isRemoteLoaded(): Boolean = RemoteServer.isRemotePath(loadedModel()?.path)
 
     private val _state = MutableStateFlow<EngineState>(EngineState.Unloaded)
     val state: StateFlow<EngineState> = _state.asStateFlow()
@@ -171,7 +178,7 @@ class EngineController(
      * graphs and, when given, the expert-cache budget, without a reload. False while a generation runs.
      */
     suspend fun tuneLive(decodeThreads: Int, prefillThreads: Int, cacheMb: Int? = null): Boolean = withContext(ioDispatcher) {
-        if (loadedModel() == null || !generating.compareAndSet(false, true)) return@withContext false
+        if (loadedModel() == null || isRemoteLoaded() || !generating.compareAndSet(false, true)) return@withContext false
         try {
             lifecycleMutex.withLock {
                 backend.setThreads(decodeThreads, prefillThreads)
@@ -209,6 +216,7 @@ class EngineController(
             kvSessionId = null
             kvDirty = false
             kvFingerprint = null
+            if (RemoteServer.isRemotePath(modelPath)) return@withLock loadRemote(modelPath, requestedConfig)
             val file = File(modelPath)
             if (!file.isFile || !file.canRead()) {
                 val msg = "Model file is not readable: $modelPath"
@@ -394,6 +402,14 @@ class EngineController(
     }
 
     suspend fun unload() = withContext(ioDispatcher) {
+        if (isRemoteLoaded()) {
+            remote.stop()
+            lifecycleMutex.withLock {
+                engineStateKey = null
+                _state.value = EngineState.Unloaded
+            }
+            return@withContext
+        }
         // stop() first so a running generation unwinds quickly; the native free then waits for it.
         try { backend.stop() } catch (_: Throwable) {}
         lifecycleMutex.withLock {
@@ -411,6 +427,9 @@ class EngineController(
     suspend fun decide(request: DecisionRequest): DecisionResult = withContext(ioDispatcher) {
         val ready = _state.value as? EngineState.Ready
             ?: return@withContext DecisionResult(ok = false, error = "No model is loaded. Load a model first.")
+        if (RemoteServer.isRemotePath(ready.info.path)) {
+            return@withContext DecisionResult(ok = false, error = "Not available with a server model.")
+        }
         if (request.choices.size < 2) {
             return@withContext DecisionResult(ok = false, error = "Give at least two options.")
         }
@@ -439,6 +458,7 @@ class EngineController(
     }
 
     fun stopGeneration() {
+        if (isRemoteLoaded()) { remote.stop(); return }
         try { backend.stop() } catch (_: Throwable) {}
     }
 
@@ -460,6 +480,10 @@ class EngineController(
         val ready = _state.value as? EngineState.Ready
         if (ready == null) {
             emit(failed("No model is loaded. Load a model first."))
+            return@flow
+        }
+        if (RemoteServer.isRemotePath(ready.info.path)) {
+            emitAll(remoteGenerate(request, ready.info))
             return@flow
         }
         if (!acquireForApp()) {
@@ -581,6 +605,10 @@ class EngineController(
             emit(chatFailed("No model is loaded. Load a model first.", lease.preempted))
             return@flow
         }
+        if (isRemoteLoaded()) {
+            emit(chatFailed("A server model is loaded; the local API server needs a local model.", lease.preempted))
+            return@flow
+        }
         // The in-app chat may have asked for the engine between the lease being granted and this call; a stop() sent
         // then would be lost (the native side clears its cancel flag when a generation starts), so check here.
         if (lease.preempted) {
@@ -640,6 +668,67 @@ class EngineController(
             }
         } finally {
             engineStateKey = null
+        }
+    }
+
+    /** A server model "load": check that the server answers, then report it as the ready model. */
+    private fun loadRemote(path: String, config: LoadConfig): String? {
+        val server = remoteServerProvider(path)
+        if (server == null) {
+            val msg = "Server model not found (deleted?)."
+            _state.value = EngineState.Failed(path, msg)
+            return msg
+        }
+        // A local model held in RAM is freed: the server does the work now.
+        if (_state.value is EngineState.Ready) try { backend.free() } catch (_: Throwable) {}
+        engineStateKey = null
+        _state.value = EngineState.Loading(path, System.currentTimeMillis())
+        val t0 = System.nanoTime()
+        remote.check(server)?.let { err ->
+            _state.value = EngineState.Failed(path, err)
+            return err
+        }
+        _state.value = EngineState.Ready(
+            ModelInfo(
+                path = path,
+                name = server.name,
+                arch = "remote",
+                nCtx = server.contextSize,
+                nExpertUsed = 0,
+                loadSeconds = (System.nanoTime() - t0) / 1e9,
+                thinkControl = "template",
+                overlapActive = false,
+                visionActive = false,
+                mmprojPath = null,
+                config = config
+            )
+        )
+        return null
+    }
+
+    /** One turn on a server model. Stateless: the budgeted history is sent every time. */
+    private fun remoteGenerate(request: GenerationRequest, info: ModelInfo): Flow<EngineEvent> = flow {
+        val server = remoteServerProvider(info.path)
+        if (server == null) {
+            emit(failed("The server model was removed."))
+            return@flow
+        }
+        if (!generating.compareAndSet(false, true)) {
+            emit(failed("The engine is already generating."))
+            return@flow
+        }
+        try {
+            val budget = ContextPlanner.historyBudget(
+                nCtx = info.nCtx,
+                systemTokens = ContextPlanner.estimateTokens(request.system),
+                promptTokens = ContextPlanner.estimateTokens(request.prompt),
+                maxTokens = request.maxTokens
+            )
+            val prepared = ContextPlanner.prepare(request.history, request.prompt, budget)
+            engineStateKey = null
+            emitAll(remote.generate(server, request, prepared.history, prepared.prompt))
+        } finally {
+            generating.set(false)
         }
     }
 

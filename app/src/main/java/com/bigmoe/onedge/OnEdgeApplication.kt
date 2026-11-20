@@ -33,6 +33,7 @@ class OnEdgeApplication : Application() {
         container.trackModelUse()
         container.autoLoadLastModelIfEnabled()
         container.startApiServerIfEnabled()
+        container.startChatSync()
     }
 
     override fun onTrimMemory(level: Int) {

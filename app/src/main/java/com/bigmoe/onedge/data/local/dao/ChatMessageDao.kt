@@ -8,8 +8,25 @@ import androidx.room.Query
 import com.bigmoe.onedge.data.local.entity.ChatMessageEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Per chat: a cheap fingerprint of its messages (the chat sync uses it to spot local changes). */
+data class MessageFingerprint(
+    @androidx.room.ColumnInfo(name = "session_id") val sessionId: String,
+    val cnt: Int,
+    val len: Long,
+    val maxTs: Long,
+    val varLen: Long
+)
+
 @Dao
 interface ChatMessageDao {
+
+    @Query("SELECT session_id, COUNT(*) AS cnt, SUM(LENGTH(content)) AS len, MAX(timestamp) AS maxTs, SUM(LENGTH(IFNULL(variants_json, ''))) AS varLen FROM chat_messages GROUP BY session_id")
+    suspend fun fingerprints(): List<MessageFingerprint>
+
+    /** Insert or update in place (no delete, so nothing hanging off a message is cascaded away). */
+    @androidx.room.Upsert
+    suspend fun upsertMessages(messages: List<ChatMessageEntity>)
+
 
     // rowid breaks ties between messages saved within the same millisecond, keeping insertion order.
     @Query("SELECT * FROM chat_messages WHERE session_id = :sessionId ORDER BY timestamp ASC, rowid ASC")

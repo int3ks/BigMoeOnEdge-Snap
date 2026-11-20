@@ -393,6 +393,7 @@ fun ModelScreen(
                     }
                 }
             }
+            item(key = "remote_servers") { RemoteServersCard(viewModel) }
             item(key = "model_archive") {
                 ModelArchiveCard(
                     ui = ui,
@@ -653,6 +654,7 @@ private fun StatusCard(
  * take does not keep asking for a reload.
  */
 private fun addOnsChangedFor(info: com.bigmoe.onedge.core.ModelInfo, ui: ModelsUiState, settings: EngineSettings): Boolean {
+    if (com.bigmoe.onedge.core.RemoteServer.isRemotePath(info.path)) return false
     val req = info.requested
     val p = info.path
     val spec = ui.modelSpecs[p] ?: settings.spec

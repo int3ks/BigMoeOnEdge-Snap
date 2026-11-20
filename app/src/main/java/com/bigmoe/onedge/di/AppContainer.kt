@@ -102,9 +102,28 @@ class AppContainer(private val context: Context) {
             memoryOptionsProvider = { path -> modelManager.memoryOptionsForModel(path) },
             samplingPresetProvider = { path -> modelManager.samplingPresetForModel(path) },
             kvSnapshotStore = com.bigmoe.onedge.core.KvSnapshotStore(File(context.applicationContext.filesDir, "kv-snapshots")),
-            kvSnapshotsEnabled = { settingsDataStore.settingsFlow.first().kvSnapshots }
+            kvSnapshotsEnabled = { settingsDataStore.settingsFlow.first().kvSnapshots },
+            remoteServerProvider = { path -> remoteServerStore.byPath(path) }
         )
     }
+
+    /** Server models (OpenAI-compatible API); app-private file, synced only to the user's own OneDrive. */
+    val remoteServerStore: com.bigmoe.onedge.core.RemoteServerStore by lazy {
+        com.bigmoe.onedge.core.RemoteServerStore(File(context.applicationContext.filesDir, "remote_servers.json"))
+    }
+
+    /** OneDrive chat sync (own Azure app registration, app folder only). */
+    val chatSync: com.bigmoe.onedge.sync.ChatSync by lazy {
+        com.bigmoe.onedge.sync.ChatSync(
+            context = context.applicationContext,
+            sessionDao = database.chatSessionDao(),
+            messageDao = database.chatMessageDao(),
+            remoteServers = remoteServerStore
+        )
+    }
+
+    /** Called once from Application.onCreate: sync at start and a few seconds after chats change. */
+    fun startChatSync() = chatSync.start(appScope)
 
     @Volatile
     private var archive: com.bigmoe.onedge.core.ModelArchive? = null
@@ -297,6 +316,10 @@ class AppContainer(private val context: Context) {
                 )
                 val projector = modelManager.mmprojForModel(afterRestart)
                 engineController.loadModel(afterRestart, s.toLoadConfig(), projector, modelManager.draftForModel(afterRestart))
+                return@launch
+            }
+            if (s.autoLoadLastModel && com.bigmoe.onedge.core.RemoteServer.isRemotePath(s.lastModelPath)) {
+                engineController.loadModel(s.lastModelPath, s.toLoadConfig())
                 return@launch
             }
             if (s.autoLoadLastModel && s.lastModelPath.isNotBlank() && File(s.lastModelPath).isFile) {

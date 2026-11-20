@@ -10,6 +10,14 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ChatSessionDao {
 
+    /** Insert or update in place: unlike insertSession (REPLACE) it does not cascade-delete the chat's messages. */
+    @androidx.room.Upsert
+    suspend fun upsertSession(session: ChatSessionEntity)
+
+    @Query("SELECT * FROM chat_sessions")
+    suspend fun getAllSessions(): List<ChatSessionEntity>
+
+
     @Query("SELECT * FROM chat_sessions ORDER BY updated_at DESC")
     fun observeAllSessions(): Flow<List<ChatSessionEntity>>
 

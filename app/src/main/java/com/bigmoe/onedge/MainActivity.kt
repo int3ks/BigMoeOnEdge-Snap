@@ -40,6 +40,12 @@ class MainActivity : ComponentActivity() {
         if (intent.hasExtra(EXTRA_OPEN_SESSION_ID)) recreate()
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Back in front: fetch what the other device changed meanwhile.
+        (application as OnEdgeApplication).container.chatSync.requestSync()
+    }
+
     override fun onStop() {
         super.onStop()
         (application as OnEdgeApplication).container.saveKvSnapshot()

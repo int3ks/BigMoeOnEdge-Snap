@@ -656,6 +656,12 @@ class ModelViewModel(
         }
     }
 
+    /** Server model (OpenAI-compatible API): no memory advice, no projector. */
+    fun loadRemote(path: String) {
+        _uiState.update { it.copy(message = null) }
+        loadNow(path, null)
+    }
+
     fun unload() {
         viewModelScope.launch { engineController.unload() }
     }

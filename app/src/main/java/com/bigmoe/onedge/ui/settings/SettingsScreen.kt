@@ -858,6 +858,10 @@ private fun SettingsContent(
             OutlinedButton(onClick = onOpenLog) { Text("Open log") }
             Divider()
 
+            // ------------------------------------------------------------ OneDrive chat sync
+            OneDriveSyncSection()
+            Divider()
+
             // ------------------------------------------------------------ workspace (private or shared folder)
             WorkspaceLocationSection(viewModel = viewModel, onOpenWorkspace = onOpenWorkspace)
             Divider()
