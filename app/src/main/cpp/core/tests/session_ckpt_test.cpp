@@ -338,6 +338,49 @@ static void swa_path(const char * path) {
     }
 }
 
+// Regenerate of the last answer right after a snapshot was loaded (the app: reload the model, open the
+// chat, press Regenerate). Seen on the MagicPad with Qwen3.6 (7.04): the restored checkpoint 4 tokens
+// before the prompt's end, and the answer ended after 1-4 tokens.
+static void regen_after_snapshot(const char * path, bool moe) {
+    const std::string tag = std::string("regen after snapshot") + (moe ? "" : " (llama)") + ": ";
+    const std::string prefix = std::string(path) + ".regen";
+    auto s = open_session(path, 4, moe, false);
+    GenerateRequest r0;
+    r0.prompt = "Hello there";
+    r0.n_predict = 12;
+    r0.think = false;
+    r0.clear_kv = true;
+    r0.system_prompt = "the world Hello";
+    const RunResult a0 = s->generate(r0);
+    GenerateRequest r1 = r0;
+    r1.prompt = "Hello world";
+    r1.n_predict = 24;
+    r1.clear_kv = false;
+    const RunResult a1 = s->generate(r1);
+    const Session::KvSnapshotResult saved = s->save_kv(prefix);
+    check(a0.ok && a1.ok && saved.ok, tag + "two turns, saved");
+    GenerateRequest regen = r1;
+    regen.clear_kv = true;
+    regen.history = {{"user", "Hello there"}, {"assistant", a0.generated_text}};
+    auto fresh = open_session(path, 4, moe, false);
+    const RunResult want = fresh->generate(regen);
+    const RunResult live = s->generate(regen);
+    std::printf("    live regen reused=%d/%d kv_reuse=%d gen=%d\n", live.n_reused, live.n_prompt_total,
+                live.summary.kv_reuse, (int) live.generated_text.size());
+    check(live.ok && live.generated_text == want.generated_text, tag + "regenerate in the live session answers as fresh");
+    auto loaded = open_session(path, 4, moe, false);
+    const Session::KvSnapshotResult got = loaded->load_kv(prefix);
+    const RunResult l = loaded->generate(regen);
+    std::printf("    loaded regen reused=%d/%d kv_reuse=%d gen=%d (want %d) err=%s\n", l.n_reused, l.n_prompt_total,
+                l.summary.kv_reuse, (int) l.generated_text.size(), (int) want.generated_text.size(), l.error.c_str());
+    check(got.ok && l.ok && l.generated_text == want.generated_text, tag + "regenerate after loading the snapshot answers as fresh");
+    const RunResult l2 = loaded->generate(regen);
+    std::printf("    second regen reused=%d/%d kv_reuse=%d\n", l2.n_reused, l2.n_prompt_total, l2.summary.kv_reuse);
+    check(l2.ok && l2.generated_text == want.generated_text, tag + "and again");
+    check(l2.n_reused == l.n_reused, tag + "the second regenerate reuses as much as the first");
+    for (const char * ext : {".kv", ".dft", ".aux"}) std::remove((prefix + ext).c_str());
+}
+
 int main(int argc, char ** argv) {
     if (argc < 2) {
         std::printf("usage: %s tiny-jamba.gguf [tiny-llama.gguf]\n", argv[0]);
@@ -359,6 +402,7 @@ int main(int argc, char ** argv) {
     snapshot_path(argv[1], 4, true, false);
     snapshot_path(argv[1], 0, true, false);
     cancel_load_path(argv[1]);
+    regen_after_snapshot(argv[1], /*moe*/ true);
     if (argc > 3) swa_path(argv[3]);
     if (failures) {
         std::printf("\n%d check(s) FAILED\n", failures);

@@ -45,6 +45,11 @@ inline constexpr int k_checkpoint_tail_tokens = 4;
 // k_checkpoint_tail_tokens before the prompt's end, and the one at the end. The preamble's checkpoint
 // is held back from eviction only when the list has room for it and for these.
 inline constexpr int k_checkpoint_turn_slots = 2;
+// Snap: when the list is full, a checkpoint an earlier request took this close behind the one before it
+// goes first (the pair 4 tokens before and at a prompt's end). Upstream measures "close" with
+// min_step (8192), so with 4 kept every older checkpoint but the preamble's counted as close and went:
+// a second Regenerate found only the preamble and prefilled the whole conversation again.
+inline constexpr int k_checkpoint_close_tokens = 4 * k_checkpoint_tail_tokens;
 
 class ContextCheckpoints {
 public:

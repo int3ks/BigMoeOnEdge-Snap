@@ -93,7 +93,7 @@ bool ContextCheckpoints::create(const CheckpointContexts & c, int64_t n_tokens, 
     if ((int) list_.size() + 1 >= max_count_) {
         int64_t last = -1;
         for (auto it = list_.begin(); it != list_.end();) {
-            if (!held(*it) && it->id_task != turn && last >= 0 && it->n_tokens <= last + min_step_) {
+            if (!held(*it) && it->id_task != turn && last >= 0 && it->n_tokens <= last + k_checkpoint_close_tokens) {
                 it = list_.erase(it);
                 continue;
             }
