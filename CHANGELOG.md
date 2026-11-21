@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Hugging Face search: MoE / Dense filter.** Read from the GGUF header itself: the first MiB of the smallest matching file is fetched with an HTTP range request and its metadata walked for `<arch>.expert_count` (> 0 = MoE). Repos whose header could not be read (or whose key lies past the first MiB) are left out of a MoE/Dense filter. The type is shown next to the repo.
 - **Hugging Face search sorting:** Downloads (default), Newest (repo creation date, from the API) or Size (smallest model of the chosen formats first; reads every found repo's file list).
 - **Format guide in the Hugging Face search** ("Format guide (speed on a tablet)"): per quant format the bits per weight, a rough CPU-decode speed estimate for this engine, whether the Hexagon NPU prefill handles it (llama.cpp 0411's HTP matmul: Q4_0/Q4_1/Q4_K/Q5_K/Q6_K/Q8_0/IQ4_NL/MXFP4) and the quality. Estimates, not measurements.
 - **Hugging Face search, round 2:** several formats at once (e.g. Q4_0 + Q4_1), an "Open" button per repo (its page in the browser), files grouped into models with the total size (split GGUFs: "N parts") and a "Download all parts" button, and downloads land in the models folder: DownloadManager writes into Download (it may not write elsewhere), and each finished download is moved into the models folder by a receiver while the app runs, or at the next app start (`HfDownloads`).

@@ -53,7 +53,7 @@ import java.util.Locale
 internal data class HfFile(val path: String, val bytes: Long)
 
 /** A repo found by the search, with the GGUF files that match the chosen formats (all GGUFs when none is chosen). */
-private data class HfRepo(val id: String, val downloads: Long, val files: List<HfFile>?)
+private data class HfRepo(val id: String, val downloads: Long, val files: List<HfFile>?, val moe: Boolean? = null)
 
 /** Formats to filter by; matched in the file name, case-insensitive, as a whole token. */
 private val HF_FORMATS = listOf("Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M", "IQ4_NL", "IQ4_XS", "Q5_K_M", "Q6_K", "Q8_0", "Q3_K_M", "Q2_K", "IQ2_XS", "MXFP4")
@@ -85,6 +85,58 @@ private fun httpGet(url: String): String {
         c.disconnect()
     }
 }
+
+/**
+ * MoE or dense, from the GGUF header: reads the first MiB of the file with an HTTP range request and walks
+ * the metadata for `<arch>.expert_count` (> 0 = MoE). True/false, or null when the header could not be
+ * read or the key lies beyond the first MiB (behind a large array).
+ */
+private fun probeMoe(repo: String, path: String): Boolean? = runCatching {
+    val url = "https://huggingface.co/$repo/resolve/main/" + path.split('/').joinToString("/") { Uri.encode(it) }
+    val c = URL(url).openConnection() as HttpURLConnection
+    c.connectTimeout = 15000
+    c.readTimeout = 30000
+    c.setRequestProperty("User-Agent", "BigMoeOnEdge2")
+    c.setRequestProperty("Range", "bytes=0-1048575")
+    val bytes = try {
+        if (c.responseCode !in 200..299) return@runCatching null
+        val out = java.io.ByteArrayOutputStream()
+        c.inputStream.use { ins ->
+            val buf = ByteArray(65536)
+            while (out.size() < 1048576) {
+                val n = ins.read(buf); if (n < 0) break
+                out.write(buf, 0, n)
+            }
+        }
+        out.toByteArray()
+    } finally { c.disconnect() }
+    val b = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    if (b.int != 0x46554747) return@runCatching null // "GGUF"
+    b.int; b.long
+    val nKv = b.long
+    fun str(): String { val n = b.long.toInt(); val a = ByteArray(n); b.get(a); return String(a) }
+    fun skip(type: Int) {
+        when (type) {
+            0, 1, 7 -> b.get()
+            2, 3 -> b.short
+            4, 5, 6 -> b.int
+            10, 11, 12 -> b.long
+            8 -> b.position(b.position() + b.long.toInt())
+            9 -> { val t = b.int; val n = b.long; for (i in 0 until n) skip(t) }
+            else -> error("type $type")
+        }
+    }
+    for (i in 0 until nKv) {
+        val key = str()
+        val type = b.int
+        if (key.endsWith(".expert_count")) {
+            val v = when (type) { 4, 5 -> b.int.toLong(); 10, 11 -> b.long; 2, 3 -> b.short.toLong(); else -> { skip(type); 0L } }
+            return@runCatching v > 0
+        }
+        skip(type)
+    }
+    false // every key read, none says experts: dense
+}.getOrNull()
 
 private fun searchRepos(query: String, sort: String): List<Pair<String, Long>> {
     val q = URLEncoder.encode(query.trim(), "UTF-8")
@@ -228,6 +280,7 @@ fun HuggingFaceCard(modelsDir: String) {
     var expanded by remember { mutableStateOf<String?>(null) }
     var legend by remember { mutableStateOf(false) }
     var sortBy by remember { mutableStateOf("downloads") } // downloads | createdAt | size
+    var kind by remember { mutableStateOf("all") } // all | moe | dense
 
     fun search() {
         if (query.isBlank() || busy) return
@@ -237,21 +290,27 @@ fun HuggingFaceCard(modelsDir: String) {
         expanded = null
         val fmt = formats
         val sort = sortBy
+        val kd = kind
         scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val found = searchRepos(query, if (sort == "createdAt") "createdAt" else "downloads")
                     // Sorting by size needs every repo's file list, as a format filter does.
-                    val list = if (fmt.isEmpty() && sort != "size") {
+                    val list = if (fmt.isEmpty() && sort != "size" && kd == "all") {
                         found.map { HfRepo(it.first, it.second, null) }
                     } else {
                         // Look into every repo's file list and keep the ones that hold the format.
                         found.map { (id, dl) ->
                             async {
                                 val files = runCatching { listGguf(id) }.getOrDefault(emptyList())
-                                HfRepo(id, dl, if (fmt.isEmpty()) files else files.filter { f -> fmt.any { matchesFormat(f.path, it) } })
+                                val kept = if (fmt.isEmpty()) files else files.filter { f -> fmt.any { matchesFormat(f.path, it) } }
+                                // MoE or dense from the header of the smallest file (the first part of a split one).
+                                val moe = if (kd == "all" || kept.isEmpty()) null
+                                          else groupModels(kept).minByOrNull { it.bytes }?.parts?.first()?.let { probeMoe(id, it.path) }
+                                HfRepo(id, dl, kept, moe)
                             }
                         }.awaitAll().filter { !it.files.isNullOrEmpty() }
+                            .filter { kd == "all" || (kd == "moe" && it.moe == true) || (kd == "dense" && it.moe == false) }
                     }
                     if (sort == "size") list.sortedBy { r -> groupModels(r.files.orEmpty()).minOfOrNull { it.bytes } ?: Long.MAX_VALUE } else list
                 }
@@ -296,6 +355,10 @@ fun HuggingFaceCard(modelsDir: String) {
                 }
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Type:", style = MaterialTheme.typography.bodySmall)
+                listOf("all" to "All", "moe" to "MoE", "dense" to "Dense").forEach { (k, l) ->
+                    FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(l) })
+                }
                 Text("Sort:", style = MaterialTheme.typography.bodySmall)
                 listOf("downloads" to "Downloads", "createdAt" to "Newest", "size" to "Size (smallest)").forEach { (k, l) ->
                     FilterChip(selected = sortBy == k, onClick = { sortBy = k }, label = { Text(l) })
@@ -324,7 +387,8 @@ fun HuggingFaceCard(modelsDir: String) {
                     Column(Modifier.weight(1f).clickable { openRepo(r) }.padding(vertical = 4.dp)) {
                         Text(r.id, style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "${r.downloads} downloads" + (r.files?.let { " · ${groupModels(it).size} model(s)" } ?: ""),
+                            "${r.downloads} downloads" + (r.files?.let { " · ${groupModels(it).size} model(s)" } ?: "") +
+                                when (r.moe) { true -> " · MoE"; false -> " · dense"; null -> "" },
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
