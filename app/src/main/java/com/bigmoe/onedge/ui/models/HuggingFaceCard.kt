@@ -58,6 +58,21 @@ private data class HfRepo(val id: String, val downloads: Long, val files: List<H
 /** Formats to filter by; matched in the file name, case-insensitive, as a whole token. */
 private val HF_FORMATS = listOf("Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M", "IQ4_NL", "IQ4_XS", "Q5_K_M", "Q6_K", "Q8_0", "Q3_K_M", "Q2_K", "IQ2_XS", "MXFP4")
 
+/** Format guide: rough estimates for this engine on a Snapdragon tablet (CPU decode, Hexagon prefill), not measurements. */
+private val HF_LEGEND = listOf(
+    "Q4_0" to "4.5 bit · fastest CPU decode · NPU yes · quality lowest of the 4-bit (take an i1/imatrix file)",
+    "Q4_1" to "5.0 bit · about as fast as Q4_0, ~11 % bigger · NPU yes · a bit better than Q4_0",
+    "IQ4_NL" to "4.5 bit · close to Q4_0 speed · NPU yes · better than Q4_0",
+    "IQ4_XS" to "4.25 bit · a bit slower (table lookups) · NPU no (CPU prefill) · good quality for its size",
+    "Q4_K_S" to "~4.6 bit · a bit slower than Q4_0 · NPU yes · good",
+    "Q4_K_M" to "~4.85 bit · slower than Q4_0 (Q4_K + Q6_K mix) · NPU yes · best of the 4-bit",
+    "Q5_K_M / Q6_K" to "5.7 / 6.6 bit · slower, much bigger (more flash reads) · NPU yes · near lossless",
+    "Q8_0" to "8.5 bit · simple but twice the bytes of Q4 · NPU yes · lossless for practical use",
+    "Q3_K_M / Q2_K" to "~3.9 / ~3 bit · small, not faster on CPU · NPU no (CPU prefill, slow) · clearly worse; only i1/UD files",
+    "IQ2_XS" to "~2.3 bit · slow kernels · NPU no · last resort for models that do not fit otherwise",
+    "MXFP4" to "4.25 bit · fast where the model was trained for it (gpt-oss) · NPU yes",
+)
+
 private fun httpGet(url: String): String {
     val c = URL(url).openConnection() as HttpURLConnection
     c.connectTimeout = 15000
@@ -211,6 +226,7 @@ fun HuggingFaceCard(modelsDir: String) {
     var status by remember { mutableStateOf("") }
     var repos by remember { mutableStateOf<List<HfRepo>>(emptyList()) }
     var expanded by remember { mutableStateOf<String?>(null) }
+    var legend by remember { mutableStateOf(false) }
 
     fun search() {
         if (query.isBlank() || busy) return
@@ -273,6 +289,16 @@ fun HuggingFaceCard(modelsDir: String) {
                 FilterChip(selected = formats.isEmpty(), onClick = { formats = emptySet() }, label = { Text("any") })
                 HF_FORMATS.forEach { f ->
                     FilterChip(selected = f in formats, onClick = { formats = if (f in formats) formats - f else formats + f }, label = { Text(f) })
+                }
+            }
+            TextButton(onClick = { legend = !legend }) { Text(if (legend) "Hide format guide" else "Format guide (speed on a tablet)") }
+            if (legend) {
+                Text("Rough estimates for this app (CPU decode, NPU prefill), not measured on your device. Decode here is mostly compute-bound: fewer bits help mainly when the model would not fit or the cache is small.", style = MaterialTheme.typography.bodySmall)
+                HF_LEGEND.forEach { (f, d) ->
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(f, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 8.dp).weight(0.3f))
+                        Text(d, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(0.7f))
+                    }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
