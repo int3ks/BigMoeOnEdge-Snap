@@ -42,7 +42,8 @@ internal fun MemorySection(
     deviceRamBytes: Long,
     npuAvailable: Boolean,
     onNpu: (Boolean?) -> Unit,
-    onCacheMb: (Int?) -> Unit
+    onCacheMb: (Int?) -> Unit,
+    onDiscardPct: (Int?) -> Unit = {}
 ) {
     val small = MaterialTheme.typography.bodySmall
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
@@ -81,8 +82,16 @@ internal fun MemorySection(
                 listOf(0 to defaultLabel) + com.bigmoe.onedge.core.SettingChoices.CACHE_MB.map { it to "$it MiB" },
                 selected = options.cacheMb ?: 0
             ) { onCacheMb(it.takeIf { v -> v > 0 }) }
+            // -1 stands for "Default" (the global setting); 0 is a real choice here (off for this model).
+            val pctLabel = { p: Int -> if (p == 0) "off" else "coldest $p%" }
+            com.bigmoe.onedge.ui.settings.ChoiceSetting(
+                "Droppable cache share for this model",
+                listOf(-1 to "Default (" + pctLabel(settings.cacheDiscardPct) + ")") +
+                    com.bigmoe.onedge.core.SettingChoices.DISCARD_PCT.map { it to pctLabel(it) },
+                selected = options.discardPct ?: -1
+            ) { onDiscardPct(it.takeIf { v -> v >= 0 }) }
         }
-        Text("Both apply the next time this model loads.", style = MaterialTheme.typography.labelSmall, color = dim)
+        Text("These apply the next time this model loads.", style = MaterialTheme.typography.labelSmall, color = dim)
 
         // ── estimate ──
         if (estimate == null) {

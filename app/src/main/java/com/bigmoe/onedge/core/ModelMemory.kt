@@ -3,7 +3,8 @@ package com.bigmoe.onedge.core
 import java.io.File
 
 /** What a model's card overrides of the global memory settings; a null field = the global setting applies. */
-data class ModelMemoryOptions(val npu: Boolean? = null, val cacheMb: Int? = null)
+/** A null field = the global setting applies. [discardPct]: the droppable share of the expert cache (0 = off). */
+data class ModelMemoryOptions(val npu: Boolean? = null, val cacheMb: Int? = null, val discardPct: Int? = null)
 
 /**
  * What a model will take in RAM, worked out from the tensor directory of its GGUF file(s) before it is loaded.

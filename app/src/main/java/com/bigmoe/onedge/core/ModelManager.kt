@@ -542,7 +542,8 @@ class ModelManager(
         val key = encodePath(canonicalPath(modelPath))
         ModelMemoryOptions(
             npu = when (props.getProperty(key + NPU_SUFFIX)) { "on" -> true; "off" -> false; else -> null },
-            cacheMb = props.getProperty(key + CACHE_SUFFIX)?.toIntOrNull()?.takeIf { it > 0 }
+            cacheMb = props.getProperty(key + CACHE_SUFFIX)?.toIntOrNull()?.takeIf { it > 0 },
+            discardPct = props.getProperty(key + DISCARD_SUFFIX)?.toIntOrNull()?.coerceIn(0, 100)
         )
     }
 
@@ -557,6 +558,13 @@ class ModelManager(
         val props = modelOptions()
         val key = encodePath(canonicalPath(modelPath)) + CACHE_SUFFIX
         if (cacheMb == null || cacheMb <= 0) props.remove(key) else props.setProperty(key, cacheMb.toString())
+        saveModelOptions(props)
+    }
+
+    suspend fun setDiscardPctForModel(modelPath: String, pct: Int?) = withContext(io) {
+        val props = modelOptions()
+        val key = encodePath(canonicalPath(modelPath)) + DISCARD_SUFFIX
+        if (pct == null) props.remove(key) else props.setProperty(key, pct.coerceIn(0, 100).toString())
         saveModelOptions(props)
     }
 
@@ -1535,6 +1543,7 @@ class ModelManager(
         private const val KV_SUFFIX = ".kv"
         private const val NPU_SUFFIX = ".npu"
         private const val CACHE_SUFFIX = ".cache"
+        private const val DISCARD_SUFFIX = ".discard"
         /** A model without its own choice: Q8_0, about half the memory of F16 and nearly lossless. */
         val DEFAULT_KV_CACHE_TYPE = KvCacheType.Q8_0
         private const val SPEC_SUFFIX = ".spec"

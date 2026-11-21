@@ -302,6 +302,13 @@ class ModelViewModel(
         }
     }
 
+    fun setDiscardPctForModel(modelPath: String, pct: Int?) {
+        viewModelScope.launch {
+            modelManager.setDiscardPctForModel(modelPath, pct)
+            refresh()
+        }
+    }
+
     fun setCacheMbForModel(modelPath: String, cacheMb: Int?) {
         viewModelScope.launch {
             modelManager.setCacheMbForModel(modelPath, cacheMb)

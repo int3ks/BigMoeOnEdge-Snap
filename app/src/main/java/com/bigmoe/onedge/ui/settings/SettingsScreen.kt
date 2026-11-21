@@ -89,7 +89,7 @@ private object Choices {
     val IO = com.bigmoe.onedge.core.SettingChoices.IO_LANES
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)
-    val DISCARD = listOf(0, 10, 25, 50, 100)
+    val DISCARD = com.bigmoe.onedge.core.SettingChoices.DISCARD_PCT
     val PREDICT_SPEC = listOf(0, 1, 2, 4)
     val ROUTE_AHEAD = listOf(0, 1, 2, 4)
     val DROP_COLD = listOf(0, 50, 75, 100)

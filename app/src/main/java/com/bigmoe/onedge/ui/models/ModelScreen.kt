@@ -474,7 +474,8 @@ fun ModelScreen(
                             deviceRamBytes = viewModel.deviceRamBytes,
                             npuAvailable = viewModel.npuAvailable,
                             onNpu = { viewModel.setNpuForModel(model.path, it) },
-                            onCacheMb = { viewModel.setCacheMbForModel(model.path, it) }
+                            onCacheMb = { viewModel.setCacheMbForModel(model.path, it) },
+                            onDiscardPct = { viewModel.setDiscardPctForModel(model.path, it) }
                         )
                     },
                     archiveAction = {

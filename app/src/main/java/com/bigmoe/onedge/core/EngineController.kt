@@ -243,7 +243,8 @@ class EngineController(
                     false -> false
                 },
                 cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
-                cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb
+                cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb,
+                cacheDiscardPct = memoryOptions.discardPct ?: requestedGlobal.cacheDiscardPct
             )
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the

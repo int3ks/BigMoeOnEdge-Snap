@@ -6,6 +6,7 @@ package com.bigmoe.onedge.core
  */
 object SettingChoices {
     /** Expert cache in MiB: 250 MiB steps up to 2000, then 500 MiB steps up to 10000 (Auto and off come first on screen). */
+    val DISCARD_PCT = listOf(0, 10, 25, 50, 100)
     val CACHE_MB = listOf(500, 1000, 1250, 1500, 1750) + (2000..10000 step 500).toList()
     /** Parallel I/O lanes; the engine allows up to 8. */
     val IO_LANES = (1..8).toList()
