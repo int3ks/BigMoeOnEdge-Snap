@@ -310,10 +310,10 @@ object HfDownloads {
  * file of one format (Q4_0, Q4_K_M, ...), and download a file to the Download folder.
  */
 @Composable
-fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
+fun HuggingFaceCard(modelsDir: String, startOpen: Boolean = false, onMoved: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var open by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf(startOpen) }
     var query by remember { mutableStateOf("") }
     var formats by remember { mutableStateOf<Set<String>>(emptySet()) }
     var busy by remember { mutableStateOf(false) }
@@ -537,6 +537,25 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** The Hugging Face page (top-bar button): search, format guide and downloads in one scrolling column. */
+@Composable
+fun HuggingFaceScreen(modelsDir: String, onMoved: () -> Unit) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { HfDownloads.register(context) { onMoved() } }
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { Text("HUGGING FACE", style = MaterialTheme.typography.headlineMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold) },
+                actions = { com.bigmoe.onedge.ui.navigation.MainNavButtons(com.bigmoe.onedge.ui.navigation.TopTab.HUB) }
+            )
+        }
+    ) { padding ->
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(padding)) {
+            item { HuggingFaceCard(modelsDir, startOpen = true, onMoved = onMoved) }
         }
     }
 }

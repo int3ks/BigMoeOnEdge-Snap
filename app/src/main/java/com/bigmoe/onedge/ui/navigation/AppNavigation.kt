@@ -80,6 +80,7 @@ sealed class Screen(val route: String) {
     data object Workspace : Screen("workspace")
     data object AutoSettings : Screen("autosettings")
     data object Log : Screen("log")
+    data object Hub : Screen("hub")
     data object PerfLog : Screen("perflog")
     data object File : Screen("file/{path}") {
         fun createRoute(path: String): String = "file/${Uri.encode(path)}"
@@ -120,6 +121,7 @@ fun AppNavigation(
             TopTab.MODELS -> Screen.Models.route
             TopTab.SETTINGS -> Screen.Settings.route
             TopTab.LOG -> Screen.Log.route
+            TopTab.HUB -> Screen.Hub.route
         }
         if (dest == route) return
         navController.navigate(dest) {
@@ -254,6 +256,10 @@ fun AppNavigation(
                     onOpenPerfLog = { navController.navigate(Screen.PerfLog.route) { launchSingleTop = true } },
                     onOpenLog = { goTo(TopTab.LOG) }
                 )
+            }
+            composable(route = Screen.Hub.route) {
+                val modelsUi by modelViewModel.uiState.collectAsState()
+                com.bigmoe.onedge.ui.models.HuggingFaceScreen(modelsUi.modelsDir) { modelViewModel.refresh() }
             }
             composable(route = Screen.Log.route) {
                 LogScreen(viewModel = settingsViewModel)

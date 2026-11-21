@@ -393,11 +393,6 @@ fun ModelScreen(
                     }
                 }
             }
-            item(key = "hf_search") {
-                val ctx = androidx.compose.ui.platform.LocalContext.current
-                androidx.compose.runtime.LaunchedEffect(Unit) { HfDownloads.register(ctx) { viewModel.refresh() } }
-                HuggingFaceCard(ui.modelsDir) { viewModel.refresh() }
-            }
             item(key = "remote_servers") { RemoteServersCard(viewModel) }
             item(key = "model_archive") {
                 ModelArchiveCard(
