@@ -22,6 +22,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -244,6 +247,33 @@ object HfDownloads {
         return moved
     }
 
+    /** One of our downloads as the DownloadManager reports it. */
+    data class Item(val id: Long, val name: String, val done: Long, val total: Long, val status: Int)
+
+    fun items(context: Context): List<Item> {
+        val ids = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all.keys.mapNotNull { it.toLongOrNull() }
+        if (ids.isEmpty()) return emptyList()
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val out = ArrayList<Item>()
+        dm.query(DownloadManager.Query().setFilterById(*ids.toLongArray()))?.use { c ->
+            while (c.moveToNext()) {
+                out += Item(
+                    c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)),
+                    c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: "?",
+                    c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                    c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
+                    c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                )
+            }
+        }
+        return out.sortedBy { it.name }
+    }
+
+    fun cancel(context: Context, id: Long) {
+        (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(id)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(id.toString()).apply()
+    }
+
     private var receiver: BroadcastReceiver? = null
 
     /** While the app runs, move each download as soon as it finishes. */
@@ -268,7 +298,7 @@ object HfDownloads {
  * file of one format (Q4_0, Q4_K_M, ...), and download a file to the Download folder.
  */
 @Composable
-fun HuggingFaceCard(modelsDir: String) {
+fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
@@ -279,6 +309,20 @@ fun HuggingFaceCard(modelsDir: String) {
     var repos by remember { mutableStateOf<List<HfRepo>>(emptyList()) }
     var expanded by remember { mutableStateOf<String?>(null) }
     var legend by remember { mutableStateOf(false) }
+    var downloads by remember { mutableStateOf<List<HfDownloads.Item>>(emptyList()) }
+    // Progress of our downloads, every 2 s; finished ones are moved into the models folder here too, so
+    // that works even where the completion broadcast does not arrive.
+    LaunchedEffect(Unit) {
+        while (true) {
+            val (list, moved) = withContext(Dispatchers.IO) {
+                val m = runCatching { HfDownloads.moveFinished(context) }.getOrDefault(0)
+                runCatching { HfDownloads.items(context) }.getOrDefault(emptyList()) to m
+            }
+            downloads = list
+            if (moved > 0) onMoved()
+            delay(2000)
+        }
+    }
     var sortBy by remember { mutableStateOf("downloads") } // downloads | createdAt | size
     var kind by remember { mutableStateOf("all") } // all | moe | dense
 
@@ -339,6 +383,27 @@ fun HuggingFaceCard(modelsDir: String) {
             Row(Modifier.fillMaxWidth().clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
                 Text("Hugging Face search", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Text(if (open) "▲" else "▼")
+            }
+            downloads.forEach { d ->
+                val frac = if (d.total > 0) (d.done.toFloat() / d.total).coerceIn(0f, 1f) else 0f
+                val state = when (d.status) {
+                    DownloadManager.STATUS_PENDING -> "waiting"
+                    DownloadManager.STATUS_PAUSED -> "paused (network?)"
+                    DownloadManager.STATUS_FAILED -> "failed"
+                    DownloadManager.STATUS_SUCCESSFUL -> "done, moving to Models"
+                    else -> String.format(Locale.ROOT, "%.0f %%", frac * 100)
+                }
+                Column(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(d.name, style = MaterialTheme.typography.bodySmall)
+                            Text("${sizeText(d.done)} of ${sizeText(d.total)} · $state", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (d.status != DownloadManager.STATUS_SUCCESSFUL)
+                            TextButton(onClick = { HfDownloads.cancel(context, d.id); downloads = downloads.filter { it.id != d.id } }) { Text("Cancel") }
+                    }
+                    LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth())
+                }
             }
             if (!open) return@Column
             OutlinedTextField(
