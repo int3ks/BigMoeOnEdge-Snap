@@ -41,8 +41,9 @@ class AppStorageReport(context: Context) {
         models.listFiles().orEmpty().forEach { f ->
             when {
                 f.isFile && f.name.endsWith(".gguf", true) && !f.name.startsWith(".") ->
-                    add(f, f.name, "A model (or a shard of one) in the app storage: imported, or fetched from the archive. " +
-                        "Remove it on its card above to keep its links tidy.", false)
+                    add(f, f.name, "A model (or a shard of one) left in the app storage by a version before 7.17. It is moved " +
+                        "into the model folder at start when there is room; delete what you do not need.", true,
+                        "The file is deleted from the app storage, with the other parts of a split model and what was attached to it.")
                 f.isFile && f.name.endsWith(".part") ->
                     add(f, "Unfinished copy: ${f.name.removePrefix(".").removeSuffix(".part")}",
                         "Left by an import or an archive fetch that was cancelled or broke off. A fetch continues from it; nothing else uses it.",

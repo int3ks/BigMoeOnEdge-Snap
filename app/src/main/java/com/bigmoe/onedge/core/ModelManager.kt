@@ -161,8 +161,6 @@ class ModelManager(
         val target = store()
         val files = appStorageModels()
         val total = files.sumOf { it.length() }
-        if (target.usableSpace < files.filter { !File(target, it.name).isFile }.sumOf { it.length() } + SPACE_MARGIN)
-            throw IOException("Not enough free storage in ${target.path} to move the models out of the app (${formatBytes(total)}).")
         var done = 0L
         val left = mutableListOf<String>()
         val moved = mutableMapOf<String, String>()
@@ -173,6 +171,8 @@ class ModelManager(
                 if (to.length() == f.length()) { f.delete(); moved[from] = to.canonicalPath } else left += f.name
                 done += f.length(); onProgress(done, total, f.name); continue
             }
+            // Moved one by one, as far as the room goes; what does not fit stays and is tried at the next start.
+            if (target.usableSpace < f.length() + SPACE_MARGIN) { left += "${f.name} (no room)"; done += f.length(); continue }
             val part = File(target, ".${f.name}.move.part")
             part.delete()
             f.inputStream().use { input ->

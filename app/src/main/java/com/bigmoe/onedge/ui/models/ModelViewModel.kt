@@ -134,7 +134,8 @@ class ModelViewModel(
                     it.copy(
                         importProgress = null,
                         message = if (left.isEmpty()) "Models moved from the app storage into the model folder."
-                        else "Moved into the model folder, except (a different file of the same name is there): " + left.joinToString()
+                        else "Still in the app storage (no room in the model folder, or a different file of that name is there): " +
+                            left.joinToString() + ". Delete what you do not need under \"App storage used\"; the rest moves at the next start."
                     )
                 }
             } catch (e: Exception) {
@@ -593,7 +594,14 @@ class ModelViewModel(
     fun deleteStorageItem(item: com.bigmoe.onedge.core.StorageItem) {
         val report = storageReport ?: return
         viewModelScope.launch {
-            runCatching { report.delete(item) }
+            // A model goes through the model manager: its other shards and its links go with it.
+            val path = item.paths.singleOrNull()?.takeIf { it.endsWith(".gguf", true) }
+            runCatching {
+                if (path != null) {
+                    if (engineModelPath()?.let { java.io.File(it).canonicalPath } == java.io.File(path).canonicalPath) engineController.unload()
+                    if (!modelManager.delete(path)) report.delete(item)
+                } else report.delete(item)
+            }
                 .onFailure { e -> _uiState.update { it.copy(message = e.message ?: "Could not delete") } }
             refresh()
             scanAppStorage()
