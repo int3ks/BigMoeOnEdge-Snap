@@ -6,6 +6,11 @@
 #include "bmoe/version.h"
 #include "bmoe/ngram_draft.h"
 #include "chat_parse.h"
+
+namespace {
+// The thought written into an empty reasoning span for a model that echoes empty spans (mini_think).
+const std::string kMiniThought = "The user wants a direct answer without long reasoning, so I answer right away.";
+} // namespace
 #include "decide/decider.h"
 #include "decide/llama_backend.h"
 #include "logits.h"
@@ -494,7 +499,9 @@ struct Session::Impl {
     // How a think=false request can be honoured on this model; probed once at open(). Template
     // (the fail-open default) means the flag alone does the job and generate() adds nothing.
     ThinkControl think_ctl = ThinkControl::Template;
-    bool force_think = false; // thinking off yielded only empty reasoning spans; answer with it on
+    // Thinking off gave only empty reasoning spans on this model: from then on the prompt's empty span
+    // carries a short thought (detail::fill_empty_think), which such a model answers after.
+    bool mini_think = false;
     bool backend_inited = false;
     // What release_file_mappings left behind on purpose; released only after `model` is gone
     // (its teardown still unmaps/closes what it believes is its mapping; see mapping_release.h).
@@ -1676,14 +1683,6 @@ RunResult Session::generate(const GenerateRequest & req,
                             const std::function<void(const TokenMetrics &)> & on_token,
                             IMetricsSink * sink) {
     Impl & im = *impl_;
-    // This model was found to need thinking on (see the empty-span check after the decode loop).
-    if (im.force_think && !req.think) {
-        GenerateRequest again = req;
-        again.think = true;
-        RunResult r = generate(again, on_token, sink);
-        r.think_forced = true;
-        return r;
-    }
     const MoeStreamConfig & moe = im.cfg.moe;
     llama_context * ctx = im.ctx.get();
 
@@ -1840,6 +1839,7 @@ RunResult Session::generate(const GenerateRequest & req,
             inputs.parallel_tool_calls = true;
             common_chat_params cp = common_chat_templates_apply(im.chat_tmpls.get(), inputs);
             prompt = cp.prompt.str();
+            if (im.mini_think && !req.think && !prefilled_answer) detail::fill_empty_think(prompt, kMiniThought);
             parse_params = detail::build_parse_params(cp);
             message_delimiters = cp.message_delimiters;
         } catch (const std::exception & e) {
@@ -1884,6 +1884,7 @@ RunResult Session::generate(const GenerateRequest & req,
 
             common_chat_params cp = common_chat_templates_apply(im.chat_tmpls.get(), inputs);
             prompt = cp.prompt.str();
+            if (im.mini_think && !req.think && !prefilled_answer) detail::fill_empty_think(prompt, kMiniThought);
             parse_params = detail::build_parse_params(cp);
             message_delimiters = cp.message_delimiters;
         } catch (const std::exception & e) {
@@ -2019,9 +2020,15 @@ RunResult Session::generate(const GenerateRequest & req,
         if (prefilled_answer) return {raw, ""};
         try {
             common_chat_msg msg = common_chat_parse(common_chat_input(raw), partial, parse_params);
+            int spans = 0;
+            // An answer that so far is only (the start of) empty spans shows as nothing: text sent to
+            // the app cannot be taken back, and a retried turn would then never stream.
+            if (partial && detail::only_empty_think(msg.content, spans)) msg.content.clear();
             return {detail::strip_empty_think(msg.content), msg.reasoning_content};
         } catch (const std::exception & e) {
             detail::warn_parse_failed_once(e.what());
+            int spans = 0;
+            if (partial && detail::only_empty_think(raw, spans)) return {"", ""};
             return {detail::strip_empty_think(raw), ""};
         }
     };
@@ -2801,23 +2808,27 @@ RunResult Session::generate(const GenerateRequest & req,
         s.route_ahead_issue_ns = im.hook->route_ahead_issue_ns();
         s.route_ahead_wd_ns = im.hook->route_ahead_wd_ns();
     }
-    // The empty-span failure: a turn that ended (or looped) on empty reasoning spans alone. Undo it and
-    // answer again with thinking on — the mode this model does work in — and keep that for the rest of
-    // the session, so later turns do not pay for the failed attempt first.
-    if (chat_on && !req.think && !res.cancelled && !im.force_think) {
+    // The empty-span failure: thinking off, and the turn ended (or looped) on empty reasoning spans
+    // alone — the model echoes the empty span the template put in its prompt instead of answering. Undo
+    // the turn and answer again with a short thought written into that span (still thinking off), and
+    // keep doing so for this model until it is reloaded. Tried once: a second failure stands as it is.
+    if (chat_on && !req.think && !res.cancelled && !im.mini_think && !prefilled_answer) {
         int spans = 0;
         if (empty_think_loop || (natural_end && n_gen <= 16 && detail::only_empty_think(gen, spans) && spans >= 1)) {
             std::fprintf(stderr,
-                         "bmoe: thinking off gave only empty <think></think> spans (%d tokens); this model needs "
-                         "thinking on - answering again with thinking on for this session\n", n_gen);
+                         "bmoe: thinking off gave only empty <think></think> spans (%d tokens); answering again "
+                         "with a short thought in the span (kept for this model until it is reloaded)\n", n_gen);
             rollback_turn();
-            im.force_think = true;
-            GenerateRequest again = req;
-            again.think = true;
-            RunResult r = generate(again, on_token, sink);
+            im.mini_think = true;
+            RunResult r = generate(req, on_token, sink);
             r.think_forced = true;
             return r;
         }
+    }
+    if (chat_on && !req.think && im.mini_think && (empty_think_loop || n_gen <= 16)) {
+        int spans = 0;
+        if (detail::only_empty_think(gen, spans))
+            std::fprintf(stderr, "bmoe: still only empty <think></think> spans with the short thought in the span\n");
     }
     if (sink) sink->on_summary(s);
 

@@ -38,8 +38,8 @@ struct RunResult {
     // Empty otherwise (chat off, non-reasoning model, harmony no-think). Display-only; the answer
     // in generated_text already has it stripped. See TokenMetrics::reasoning.
     std::string reasoning_text;
-    // Thinking was asked off, but this model answered with empty reasoning spans only, so the turn
-    // was answered with thinking on instead (and the session keeps it on).
+    // Thinking was asked off, but this model answered with empty reasoning spans only, so the turn was
+    // answered again with a short thought written into the prompt's empty span (kept for the session).
     bool think_forced = false;
     // Stateless chat requests only (GenerateRequest::chat_messages_json); all empty/zero otherwise.
     std::vector<ChatToolCall> tool_calls;

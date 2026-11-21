@@ -34,4 +34,9 @@ std::string strip_empty_think(const std::string & s);
 // were; an unclosed `<think>` at the end counts as one more (the model is opening the next).
 bool only_empty_think(const std::string & raw, int & spans);
 
+// When `prompt` ends with an empty reasoning span (the template's "thinking off": `<think>` +
+// whitespace + `</think>` + whitespace), write `thought` into it and return true. Some models echo an
+// EMPTY span instead of answering; a closed span with a few words in it is one they answer after.
+bool fill_empty_think(std::string & prompt, const std::string & thought);
+
 } // namespace bmoe::detail

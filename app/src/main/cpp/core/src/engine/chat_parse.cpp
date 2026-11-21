@@ -72,4 +72,16 @@ bool only_empty_think(const std::string & raw, int & spans) {
     }
 }
 
+bool fill_empty_think(std::string & prompt, const std::string & thought) {
+    const size_t lo = std::char_traits<char>::length(kOpen), lc = std::char_traits<char>::length(kClose);
+    size_t end = prompt.size();
+    while (end > 0 && is_ws(prompt[end - 1])) --end;
+    if (end < lc || prompt.compare(end - lc, lc, kClose) != 0) return false;
+    size_t inner = end - lc;
+    while (inner > 0 && is_ws(prompt[inner - 1])) --inner;
+    if (inner < lo || prompt.compare(inner - lo, lo, kOpen) != 0) return false;
+    prompt.replace(inner, end - lc - inner, "\n" + thought + "\n");
+    return true;
+}
+
 } // namespace bmoe::detail
