@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Fix: a model that cannot answer with thinking off gave empty answers** (Qwen3.8 Flash Next abliterated i1-Q2_K stopped after 1-4 tokens, or looped `<think></think>`). With thinking off such a model echoes the empty reasoning span the template put in its prompt instead of answering. The engine now detects a turn of nothing but empty spans (two of them, or one followed by the end of the turn), rolls it back and answers again with thinking on, and keeps thinking on for that model until it is reloaded (log: `thinking off gave only empty <think></think> spans`). Empty `<think></think>` spans are also stripped from the shown answer.
 - **Hugging Face has its own page:** a cloud-download button in every page's top bar (between Models and Settings) opens it; the card moved there from the Models page and starts open.
 - **Fix: an interrupted download stayed paused after an app update.** The resume from `Application.onCreate` started the foreground service while the app was not yet in the foreground, which Android refuses (silently caught). The Hugging Face card now resumes pending jobs when it is shown, and a paused job has a Resume button.
 - **Hugging Face search: parameter range instead of MoE/Dense** (the header probe found nothing on the device). "Params from ... to ..." (any/4B-100B, 8B-250B/any); the count comes from the API's GGUF summary (`expand[]=gguf`, `gguf.total`), else from the repo name ("35B", "E4B"); repos without either are left out of a range filter. The count is shown next to each repo. 60 results instead of 40.

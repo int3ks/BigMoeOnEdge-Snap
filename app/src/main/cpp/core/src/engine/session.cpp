@@ -494,6 +494,7 @@ struct Session::Impl {
     // How a think=false request can be honoured on this model; probed once at open(). Template
     // (the fail-open default) means the flag alone does the job and generate() adds nothing.
     ThinkControl think_ctl = ThinkControl::Template;
+    bool force_think = false; // thinking off yielded only empty reasoning spans; answer with it on
     bool backend_inited = false;
     // What release_file_mappings left behind on purpose; released only after `model` is gone
     // (its teardown still unmaps/closes what it believes is its mapping; see mapping_release.h).
@@ -1675,6 +1676,14 @@ RunResult Session::generate(const GenerateRequest & req,
                             const std::function<void(const TokenMetrics &)> & on_token,
                             IMetricsSink * sink) {
     Impl & im = *impl_;
+    // This model was found to need thinking on (see the empty-span check after the decode loop).
+    if (im.force_think && !req.think) {
+        GenerateRequest again = req;
+        again.think = true;
+        RunResult r = generate(again, on_token, sink);
+        r.think_forced = true;
+        return r;
+    }
     const MoeStreamConfig & moe = im.cfg.moe;
     llama_context * ctx = im.ctx.get();
 
@@ -2010,10 +2019,10 @@ RunResult Session::generate(const GenerateRequest & req,
         if (prefilled_answer) return {raw, ""};
         try {
             common_chat_msg msg = common_chat_parse(common_chat_input(raw), partial, parse_params);
-            return {msg.content, msg.reasoning_content};
+            return {detail::strip_empty_think(msg.content), msg.reasoning_content};
         } catch (const std::exception & e) {
             detail::warn_parse_failed_once(e.what());
-            return {raw, ""};
+            return {detail::strip_empty_think(raw), ""};
         }
     };
 
@@ -2335,6 +2344,7 @@ RunResult Session::generate(const GenerateRequest & req,
     bool stop_hit = false;     // a stateless-chat stop string matched
     std::string stop_seq;
     bool natural_end = false;  // the model ended the turn itself (end-of-generation token)
+    bool empty_think_loop = false; // think off, and the model emits only empty reasoning spans
     double last_compute_s = 0.0; // the last decode's compute time, what the cache brake reads
     // Between two decodes, the only time the budget may move. A stalled token is asked about first,
     // because it is the cheap signal; the residency sample is the expensive one and runs only to
@@ -2565,6 +2575,14 @@ RunResult Session::generate(const GenerateRequest & req,
             if (spec_on) mtp_ctx.push_back(out);
             ++n_gen;
             ++n_emitted_here;
+            // Thinking off, and the model answers with nothing but empty reasoning spans: it echoes the
+            // empty span the template put in its prompt instead of answering. Seen on thinking-trained
+            // models that never learnt the off switch (an abliterated Qwen3.8 Flash Next, i1-Q2_K). Two
+            // spans are the loop; one span and the end of the turn is the same failure, caught below.
+            if (chat_on && !req.think && !empty_think_loop && gen.size() < 256) {
+                int spans = 0;
+                if (detail::only_empty_think(gen, spans) && spans >= 2) empty_think_loop = true;
+            }
 
             TokenMetrics m;
             m.step = n_gen;
@@ -2602,8 +2620,9 @@ RunResult Session::generate(const GenerateRequest & req,
                 tally.record(m, 0.0, 0, 0.0, im.turn, moe.enabled ? &st : nullptr, sink != nullptr);
             if (on_token) on_token(m);
             if (sink) sink->on_token(m);
-            if (stop_hit) break;
+            if (stop_hit || empty_think_loop) break;
         }
+        if (empty_think_loop) break;
 
         brake_cache();
 
@@ -2782,6 +2801,24 @@ RunResult Session::generate(const GenerateRequest & req,
         s.route_ahead_issue_ns = im.hook->route_ahead_issue_ns();
         s.route_ahead_wd_ns = im.hook->route_ahead_wd_ns();
     }
+    // The empty-span failure: a turn that ended (or looped) on empty reasoning spans alone. Undo it and
+    // answer again with thinking on — the mode this model does work in — and keep that for the rest of
+    // the session, so later turns do not pay for the failed attempt first.
+    if (chat_on && !req.think && !res.cancelled && !im.force_think) {
+        int spans = 0;
+        if (empty_think_loop || (natural_end && n_gen <= 16 && detail::only_empty_think(gen, spans) && spans >= 1)) {
+            std::fprintf(stderr,
+                         "bmoe: thinking off gave only empty <think></think> spans (%d tokens); this model needs "
+                         "thinking on - answering again with thinking on for this session\n", n_gen);
+            rollback_turn();
+            im.force_think = true;
+            GenerateRequest again = req;
+            again.think = true;
+            RunResult r = generate(again, on_token, sink);
+            r.think_forced = true;
+            return r;
+        }
+    }
     if (sink) sink->on_summary(s);
 
     // One non-partial parse of the finished generation, shared by the returned text and the history
@@ -2798,12 +2835,12 @@ RunResult Session::generate(const GenerateRequest & req,
         }
     }
     if (final_parsed) {
-        res.generated_text = final_msg.content;
+        res.generated_text = detail::strip_empty_think(final_msg.content);
         res.reasoning_text = final_msg.reasoning_content;
     } else {
         // Not chat, a prefilled turn (the stream IS the answer), or a parse that threw: the raw
         // generation stands on its own, exactly as shown_view would have reported it.
-        res.generated_text = gen;
+        res.generated_text = chat_on ? detail::strip_empty_think(gen) : gen;
     }
 
     res.n_prompt_total = image_turn ? n_prompt_eff : n_prompt;

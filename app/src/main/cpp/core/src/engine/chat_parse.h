@@ -25,4 +25,13 @@ common_chat_parser_params build_parse_params(const common_chat_params & cp);
 // invisible; the next wiring regression should be noticed.
 void warn_parse_failed_once(const char * what);
 
+// Remove empty reasoning spans (`<think>` + only whitespace + `</think>`) and the whitespace after
+// them. A model asked not to think can echo the empty span the template placed in its prompt; the
+// parser, built for an answer without one, then leaves the tags in the shown text.
+std::string strip_empty_think(const std::string & s);
+
+// Whether `raw` is nothing but empty reasoning spans and whitespace. `spans` gets how many there
+// were; an unclosed `<think>` at the end counts as one more (the model is opening the next).
+bool only_empty_think(const std::string & raw, int & spans);
+
 } // namespace bmoe::detail
