@@ -267,7 +267,9 @@ fun ChatScreen(
                         val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
                         if (modelName != null) {
                             Text(
-                                text = modelName + (memoryNow?.let { " \u2022 ${it.freeMb} MiB free" } ?: ""),
+                                text = modelName + (memoryNow?.let { m ->
+                                    " \u2022 ${m.freeMb} MiB free" + (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "")
+                                } ?: ""),
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall,

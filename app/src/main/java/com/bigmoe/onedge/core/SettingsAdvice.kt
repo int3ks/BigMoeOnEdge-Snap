@@ -168,7 +168,7 @@ object SettingsAdvice {
         - turn (one answer): promptChars = length of the user message; prefillTokens = tokens actually prefilled
           (small when the chat's earlier context was reused from the KV cache); prefillSeconds ≈ time to first token;
           ctxUsed of nCtx = context filled after the answer; generated = answer tokens; decodeTps; cacheHitPct = expert
-          cache hits; minFreeMb = lowest free RAM during the answer (sampled every 2 s); startThermal/endThermal =
+          cache hits; minFreeMb = lowest free RAM during the answer (sampled every 2 s); maxSwapMb = most of the app in swap (zram) during it; startThermal/endThermal =
           Android thermal status (0 none, 1 light, 2 moderate, 3 severe, 4 critical); Headroom = how close the device
           is to throttling (1.0 = throttling now); BatteryC = battery temperature; cfg.* = all load settings;
           engine.* = the engine's own figures for the answer: n_prompt_total/n_reused (prompt tokens, of them reused

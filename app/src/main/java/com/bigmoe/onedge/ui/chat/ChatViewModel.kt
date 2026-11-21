@@ -1189,8 +1189,12 @@ class ChatViewModel(
         private val decodeMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMask)
         private val prefillMask = com.bigmoe.onedge.core.CpuTopology.effective(settings.cpuMaskPrefill)
         @Volatile private var minFree = Long.MAX_VALUE
+        @Volatile private var maxSwap = -1L
         private val watch: Job = viewModelScope.launch {
-            MemoryWatch.now.collect { n -> if (n != null && n.freeMb < minFree) minFree = n.freeMb }
+            MemoryWatch.now.collect { n ->
+                if (n != null && n.freeMb < minFree) minFree = n.freeMb
+                if (n != null && n.swapMb > maxSwap) maxSwap = n.swapMb
+            }
         }
         private val stopper: Job = viewModelScope.launch {
             generationManager.state.first { it.active }
@@ -1225,6 +1229,7 @@ class ChatViewModel(
                     message.thinkingMs?.let { put("thinkingMs", it) }
                     message.toolMs?.let { put("toolMs", it) }
                     minFreeMb?.let { put("minFreeMb", it) }
+                    if (maxSwap >= 0) put("maxSwapMb", maxSwap)
                     message.note?.let { put("note", it.take(200)) }
                     heatStart.put(this, "start")
                     PerfLog.thermalNow().put(this, "end")

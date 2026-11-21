@@ -10,7 +10,8 @@ import java.io.FileOutputStream
 import java.util.Properties
 
 /** Free RAM right now, as Android reports it. [thresholdMb] is the level below which Android calls memory low. */
-data class MemoryNow(val freeMb: Long, val thresholdMb: Long, val totalMb: Long, val low: Boolean)
+/** [swapMb]: how much of this app Android moved into swap (zram), VmSwap of /proc/self/status; -1 = unreadable. */
+data class MemoryNow(val freeMb: Long, val thresholdMb: Long, val totalMb: Long, val low: Boolean, val swapMb: Long = -1)
 
 /**
  * What was seen of the free RAM while a model was in use, remembered per model across app starts.
@@ -46,6 +47,16 @@ object MemoryWatch {
     private val _now = MutableStateFlow<MemoryNow?>(null)
     val now: StateFlow<MemoryNow?> = _now.asStateFlow()
 
+    /**
+     * This process's memory in swap (on the MagicPad zram: compressed RAM), in MiB; -1 when unreadable. Expert cache
+     * or dense weights in there cost a decompression on every touch (the engine's major faults per token).
+     */
+    fun ownSwapMb(): Long = runCatching {
+        java.io.File("/proc/self/status").useLines { lines ->
+            lines.firstOrNull { it.startsWith("VmSwap:") }?.filter { it.isDigit() }?.toLong()?.div(1024) ?: -1L
+        }
+    }.getOrDefault(-1L)
+
     private val _records = MutableStateFlow<Map<String, ModelMemoryRecord>>(emptyMap())
     /** Keyed by model path. */
     val records: StateFlow<Map<String, ModelMemoryRecord>> = _records.asStateFlow()
@@ -80,7 +91,7 @@ object MemoryWatch {
                 runCatching {
                     val info = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
                     val mb = 1024L * 1024L
-                    val now = MemoryNow(info.availMem / mb, info.threshold / mb, info.totalMem / mb, info.lowMemory)
+                    val now = MemoryNow(info.availMem / mb, info.threshold / mb, info.totalMem / mb, info.lowMemory, ownSwapMb())
                     _now.value = now
                     val state = engineState.value
                     val path = when (state) {
