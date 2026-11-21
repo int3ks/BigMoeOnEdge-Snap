@@ -111,6 +111,37 @@ class ModelViewModel(
 
     init {
         refresh()
+        migrateAppStorage()
+    }
+
+    /**
+     * Models are kept in the model folder only (7.17). Moves what an older version left in the app's storage
+     * there once, with the import progress bar; the loaded model is unloaded first when it is one of them.
+     */
+    private fun migrateAppStorage() {
+        viewModelScope.launch {
+            val files = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { modelManager.appStorageModels() } }
+                .getOrDefault(emptyList())
+            if (files.isEmpty() || modelManager.modelFolder() == null) return@launch
+            val paths = files.map { it.canonicalPath }.toSet()
+            if (engineModelPath()?.let { runCatching { java.io.File(it).canonicalPath }.getOrDefault(it) } in paths) engineController.unload()
+            _uiState.update { it.copy(importProgress = ImportProgress("Moving models out of the app", 0, 0)) }
+            try {
+                val left = modelManager.migrateAppStorage { done, total, name ->
+                    _uiState.update { it.copy(importProgress = ImportProgress("Moving $name to the model folder", done, total)) }
+                }
+                _uiState.update {
+                    it.copy(
+                        importProgress = null,
+                        message = if (left.isEmpty()) "Models moved from the app storage into the model folder."
+                        else "Moved into the model folder, except (a different file of the same name is there): " + left.joinToString()
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(importProgress = null, message = "Could not move the models out of the app storage: ${e.message}") }
+            }
+            refresh()
+        }
     }
 
     fun refresh() {
@@ -159,7 +190,11 @@ class ModelViewModel(
                 val result = modelManager.importModelsIncrementally(resolver, uris, targetImportId) { copied, total ->
                     _uiState.update { s -> s.copy(importProgress = ImportProgress(s.importProgress?.name ?: "…", copied, total)) }
                 }
-                _uiState.update { it.copy(message = result.message) }
+                // A file picked from Downloads is moved, not copied: once the whole import is in the model folder
+                // the original goes (where the provider lets us; otherwise it stays and nothing is lost).
+                val movedOut = if (result.importedModels.isNotEmpty() && result.incompleteImport == null)
+                    uris.count { deleteIfInDownloads(resolver, it) } else 0
+                _uiState.update { it.copy(message = result.message + if (movedOut > 0) " Removed from Downloads." else "") }
                 refresh()
             } catch (e: CancellationException) {
                 _uiState.update { it.copy(message = "Import cancelled") }
@@ -172,6 +207,13 @@ class ModelViewModel(
             }
         }
     }
+
+    private fun deleteIfInDownloads(resolver: ContentResolver, uri: Uri): Boolean = runCatching {
+        val id = android.provider.DocumentsContract.getDocumentId(uri)
+        val inDownloads = uri.authority == "com.android.providers.downloads.documents" ||
+            (uri.authority == "com.android.externalstorage.documents" && id.substringAfter(':').startsWith("Download/"))
+        inDownloads && android.provider.DocumentsContract.deleteDocument(resolver, uri)
+    }.getOrDefault(false)
 
     fun removeIncompleteImport(id: String) {
         viewModelScope.launch {
@@ -468,7 +510,7 @@ class ModelViewModel(
     /** Archive -> a local copy in [into] (the app's storage = cache, or the model folder = kept), where it can be loaded. */
     fun fetchFromArchive(name: String, into: com.bigmoe.onedge.core.FetchTarget) {
         val archive = modelArchive ?: return
-        val done = if (into == com.bigmoe.onedge.core.FetchTarget.MODEL_FOLDER) "Copied to the model folder." else "Fetched into the app storage."
+        val done = "Copied to the model folder."
         archiveJob(com.bigmoe.onedge.core.ModelArchive.displayName(name), done) { onProgress -> archive.fetch(name, into, onProgress) }
     }
 
@@ -502,12 +544,6 @@ class ModelViewModel(
             }
             refresh()
         }
-    }
-
-    /** The archive list's button: the copy in the app storage (the model folder keeps its copies; clear those on their card). */
-    fun clearAppCopy(name: String) {
-        val path = modelArchive?.copyPath(name, com.bigmoe.onedge.core.FetchTarget.APP) ?: return
-        clearCopy(path)
     }
 
     fun dismissClearCache() { _uiState.update { it.copy(pendingClearCache = null) } }

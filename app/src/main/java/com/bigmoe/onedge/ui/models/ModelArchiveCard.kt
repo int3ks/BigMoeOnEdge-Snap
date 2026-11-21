@@ -47,7 +47,6 @@ internal fun ModelArchiveCard(
     onRefresh: () -> Unit,
     onFetch: (String, FetchTarget) -> Unit,
     onUseInPlace: (String) -> Unit,
-    onClearCache: (String) -> Unit,
     onCancel: () -> Unit,
     onDownloadToModels: (GgufSet) -> Unit,
     onDownloadToArchive: (GgufSet) -> Unit
@@ -74,8 +73,8 @@ internal fun ModelArchiveCard(
             if (expanded) {
             if (ui.archiveSources.isEmpty()) {
                 Text(
-                    "Keep big models on USB sticks, SSDs or the SD card so you do not download them again, and fetch one " +
-                        "into the app when you want to use it. Clearing it from the app afterwards keeps what you set on its card.",
+                    "Keep big models on USB sticks, SSDs or the SD card so you do not download them again, and copy one " +
+                        "to the model folder or use it in place when you want it. What you set on its card is kept.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -137,7 +136,7 @@ internal fun ModelArchiveCard(
             if (ui.archiveEntries.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Text("In the archive", style = MaterialTheme.typography.titleSmall)
-                ui.archiveEntries.forEach { entry -> ArchiveRow(entry, idle, ui.modelFolder != null, onFetch, onUseInPlace, onClearCache) }
+                ui.archiveEntries.forEach { entry -> ArchiveRow(entry, idle, ui.modelFolder != null, onFetch, onUseInPlace) }
             }
 
             if (ui.downloads.isNotEmpty()) {
@@ -182,15 +181,13 @@ private fun ArchiveRow(
     idle: Boolean,
     hasModelFolder: Boolean,
     onFetch: (String, FetchTarget) -> Unit,
-    onUseInPlace: (String) -> Unit,
-    onClearCache: (String) -> Unit
+    onUseInPlace: (String) -> Unit
 ) {
     val usable = entry.reachable && entry.complete
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(entry.displayName, style = MaterialTheme.typography.bodyMedium)
         val where = buildList {
             if (FetchTarget.MODEL_FOLDER in entry.copies) add("in the model folder")
-            if (FetchTarget.APP in entry.copies) add("in the app storage")
             if (entry.inPlace) add("used in place")
         }
         val state = when {
@@ -212,11 +209,6 @@ private fun ArchiveRow(
                 onClick = { onFetch(entry.name, FetchTarget.MODEL_FOLDER) },
                 enabled = idle && usable && hasModelFolder && !inFolder
             ) { Text(if (inFolder) "In Models" else "Copy to Models") }
-            if (FetchTarget.APP in entry.copies) {
-                TextButton(onClick = { onClearCache(entry.name) }, enabled = idle) { Text("Clear app copy") }
-            } else {
-                TextButton(onClick = { onFetch(entry.name, FetchTarget.APP) }, enabled = idle && usable) { Text("Fetch to app") }
-            }
             TextButton(onClick = { onUseInPlace(entry.name) }, enabled = usable && !entry.inPlace) {
                 Text(if (entry.inPlace) "Used in place" else "Use in place")
             }

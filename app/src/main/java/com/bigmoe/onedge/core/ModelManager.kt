@@ -136,6 +136,87 @@ class ModelManager(
 
     private val modelFolderFile: File get() = File(modelsDir, ".model-folder")
 
+    /**
+     * Where imported models, LoRA adapters and drafters are written: the model folder. The app's own storage
+     * ([modelsDir]) only keeps the lists and settings; models in it from before 7.17 are moved out by
+     * [migrateAppStorage].
+     */
+    private fun store(): File {
+        val f = modelFolder() ?: throw IOException("Choose a model folder on the Models page first: models are stored there.")
+        if (!f.isDirectory) f.mkdirs()
+        if (!f.isDirectory || !f.canWrite()) throw IOException("The model folder ${f.path} cannot be written.")
+        return f
+    }
+
+    /** GGUF files still in the app's storage (models, shards, LoRA adapters, drafters, projectors). */
+    fun appStorageModels(): List<File> =
+        modelsDir.listFiles { f -> f.isFile && f.name.endsWith(".gguf", true) && !f.name.startsWith(".") }.orEmpty().sortedBy { it.name }
+
+    /**
+     * Moves every GGUF in the app's storage into the model folder (copy, then delete the original; the two lie on
+     * different file systems). What is attached to or set for a file follows it to its new path. A file whose name
+     * is taken in the folder by a file of the same size counts as moved; a different one stays and is reported.
+     */
+    suspend fun migrateAppStorage(onProgress: (done: Long, total: Long, name: String) -> Unit): List<String> = withContext(io) {
+        val target = store()
+        val files = appStorageModels()
+        val total = files.sumOf { it.length() }
+        if (target.usableSpace < files.filter { !File(target, it.name).isFile }.sumOf { it.length() } + SPACE_MARGIN)
+            throw IOException("Not enough free storage in ${target.path} to move the models out of the app (${formatBytes(total)}).")
+        var done = 0L
+        val left = mutableListOf<String>()
+        val moved = mutableMapOf<String, String>()
+        for (f in files) {
+            val to = File(target, f.name)
+            val from = f.canonicalPath
+            if (to.isFile) {
+                if (to.length() == f.length()) { f.delete(); moved[from] = to.canonicalPath } else left += f.name
+                done += f.length(); onProgress(done, total, f.name); continue
+            }
+            val part = File(target, ".${f.name}.move.part")
+            part.delete()
+            f.inputStream().use { input ->
+                part.outputStream().use { out ->
+                    val buf = ByteArray(8 shl 20)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        onProgress(done, total, f.name)
+                    }
+                    out.fd.sync()
+                }
+            }
+            if (part.length() != f.length() || !part.renameTo(to)) { part.delete(); left += f.name; continue }
+            f.delete()
+            moved[from] = to.canonicalPath
+        }
+        if (moved.isNotEmpty()) repointPaths(moved)
+        left
+    }
+
+    /** Rewrites every stored path (keys and values) from [moved]'s keys to its values. */
+    private fun repointPaths(moved: Map<String, String>) {
+        val enc = moved.entries.associate { (a, b) -> encodePath(a) to encodePath(b) }
+        fun rekey(props: java.util.Properties, values: Boolean): java.util.Properties {
+            val out = java.util.Properties()
+            for (k in props.stringPropertyNames()) {
+                // A key is an encoded path, optionally followed by a ".suffix" (the encoding has no dots).
+                val dot = k.indexOf('.').let { if (it < 0) k.length else it }
+                val nk = (enc[k.substring(0, dot)] ?: k.substring(0, dot)) + k.substring(dot)
+                val v = props.getProperty(k)
+                out.setProperty(nk, if (values) enc[v] ?: v else v)
+            }
+            return out
+        }
+        saveModelOptions(rekey(modelOptions(), values = false))
+        saveLoraLinks(rekey(loraLinks(), values = true))
+        saveDraftLinks(rekey(draftLinks(), values = true))
+        saveMmprojLinks(rekey(mmprojLinks(), values = true))
+        saveRegisteredPaths(registeredPaths().map { moved[it] ?: it }.toSet())
+    }
+
     /** The folder whose GGUFs are listed automatically, or null when switched off. */
     fun modelFolder(): File? {
         val f = modelFolderFile
@@ -660,16 +741,16 @@ class ModelManager(
             }
         }
         val sorted = if (split.isEmpty()) selected else selected.sortedBy { SHARD.find(it.second)!!.groupValues[1].toInt() }
-        val targets = sorted.map { File(modelsDir, it.second) }
+        val targets = sorted.map { File(store(), it.second) }
         if (targets.map { it.canonicalPath }.distinct().size != targets.size) throw IOException("Selected GGUF paths collide after normalizing file names.")
         targets.firstOrNull { it.exists() }?.let { throw IOException("A file named ${it.name} already exists; rename or remove it before importing.") }
 
         val totalKnown = sorted.filter { it.third > 0 }.sumOf { it.third }
-        if (totalKnown > 0 && modelsDir.usableSpace < totalKnown + SPACE_MARGIN) {
-            throw IOException("Not enough free storage: need at least ${formatBytes(totalKnown)}, only ${formatBytes(modelsDir.usableSpace)} free.")
+        if (totalKnown > 0 && store().usableSpace < totalKnown + SPACE_MARGIN) {
+            throw IOException("Not enough free storage: need at least ${formatBytes(totalKnown)}, only ${formatBytes(store().usableSpace)} free.")
         }
         val importNonce = System.nanoTime()
-        val staged = sorted.mapIndexed { i, _ -> File(modelsDir, ".import-$importNonce-$i.part") }
+        val staged = sorted.mapIndexed { i, _ -> File(store(), ".import-$importNonce-$i.part") }
         val activePaths = staged.map { it.canonicalPath }
         activePaths.forEach(ACTIVE_IMPORT_PATHS::add)
         var copiedTotal = 0L
@@ -683,7 +764,7 @@ class ModelManager(
                             currentCoroutineContext().ensureActive()
                             val n = input.read(buf)
                             if (n < 0) break
-                            if (modelsDir.usableSpace < n + SPACE_MARGIN) {
+                            if (store().usableSpace < n + SPACE_MARGIN) {
                                 throw IOException("Storage is nearly full while copying ${row.second}; the partial import was removed.")
                             }
                             output.write(buf, 0, n)
@@ -792,17 +873,17 @@ class ModelManager(
         if (!originalName.endsWith(".gguf", ignoreCase = true)) throw IOException("Choose a LoRA adapter in .gguf format.")
         val loraName = if (isLoraName(originalName)) originalName else "lora-$originalName"
         val extensionless = loraName.removeSuffixIgnoreCase(".gguf")
-        var destination = File(modelsDir, loraName)
+        var destination = File(store(), loraName)
         var suffix = 2
         while (destination.exists()) {
-            destination = File(modelsDir, "$extensionless-$suffix.gguf")
+            destination = File(store(), "$extensionless-$suffix.gguf")
             suffix++
         }
-        val temp = File(modelsDir, ".import-lora-${System.nanoTime()}.part")
+        val temp = File(store(), ".import-lora-${System.nanoTime()}.part")
         val active = temp.canonicalPath
         ACTIVE_IMPORT_PATHS.add(active)
         try {
-            if (reportedSize > 0 && modelsDir.usableSpace < reportedSize + SPACE_MARGIN) {
+            if (reportedSize > 0 && store().usableSpace < reportedSize + SPACE_MARGIN) {
                 throw IOException("Not enough free app storage to copy this LoRA adapter (about ${formatBytes(reportedSize)}).")
             }
             var copied = 0L
@@ -867,17 +948,17 @@ class ModelManager(
         }
         val draftName = if (isDraftName(originalName)) originalName else "mtp-$originalName"
         val extensionless = draftName.removeSuffixIgnoreCase(".gguf")
-        var destination = File(modelsDir, draftName)
+        var destination = File(store(), draftName)
         var suffix = 2
         while (destination.exists()) {
-            destination = File(modelsDir, "$extensionless-$suffix.gguf")
+            destination = File(store(), "$extensionless-$suffix.gguf")
             suffix++
         }
-        val temp = File(modelsDir, ".import-mtp-${System.nanoTime()}.part")
+        val temp = File(store(), ".import-mtp-${System.nanoTime()}.part")
         val active = temp.canonicalPath
         ACTIVE_IMPORT_PATHS.add(active)
         try {
-            if (reportedSize > 0 && modelsDir.usableSpace < reportedSize + SPACE_MARGIN) {
+            if (reportedSize > 0 && store().usableSpace < reportedSize + SPACE_MARGIN) {
                 throw IOException("Not enough free app storage to copy this MTP sidecar. Need about ${formatBytes(reportedSize)} plus working space.")
             }
             var copied = 0L
@@ -889,7 +970,7 @@ class ModelManager(
                         currentCoroutineContext().ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
-                        if (modelsDir.usableSpace < read + SPACE_MARGIN) {
+                        if (store().usableSpace < read + SPACE_MARGIN) {
                             throw IOException("Storage became insufficient while copying the MTP draft; the partial copy was removed.")
                         }
                         output.write(buffer, 0, read)
@@ -1014,7 +1095,7 @@ class ModelManager(
         if (existingConflict != null) {
             throw IOException("An incomplete import named '${existingConflict.displayName}' expects ${existingConflict.expectedShardCount} shards, but these filenames declare ${first.count}. Remove the old incomplete import or select the correct files.")
         }
-        val readyPrefixConflict = modelsDir.listFiles().orEmpty().firstOrNull { file ->
+        val readyPrefixConflict = store().listFiles().orEmpty().firstOrNull { file ->
             if (!file.isFile) false else parseShardName(file.name)?.let { existing ->
                 existing.index == 1 && existing.prefix.equals(first.prefix, true) && existing.count != first.count
             } == true
@@ -1040,7 +1121,7 @@ class ModelManager(
         if (!pendingDir.exists() && !pendingDir.mkdirs()) throw IOException("Could not create a private staging folder for this model.")
         val groupPrefix = props.getProperty("prefix") ?: first.prefix
         val targetNames = (1..first.count).map { shardFileName(groupPrefix, it, first.count) }
-        val finalTargets = targetNames.map { File(modelsDir, it) }
+        val finalTargets = targetNames.map { File(store(), it) }
         if (finalTargets.any { it.exists() }) {
             if (!manifest.exists()) pendingDir.deleteRecursively()
             throw IOException("A model with this split filename already exists in the model library. Rename or remove it before importing another copy.")
@@ -1058,9 +1139,9 @@ class ModelManager(
             }
         }
         val totalKnown = parsedRows.sumOf { it.first.sizeBytes.takeIf { n -> n > 0 } ?: 0L }
-        if (totalKnown > 0 && modelsDir.usableSpace < totalKnown + SPACE_MARGIN) {
+        if (totalKnown > 0 && store().usableSpace < totalKnown + SPACE_MARGIN) {
             if (!manifest.exists() && dirExistsBefore.not()) pendingDir.deleteRecursively()
-            throw IOException("Not enough free storage for the selected shards: need at least ${formatBytes(totalKnown)} plus temporary space; ${formatBytes(modelsDir.usableSpace)} is free.")
+            throw IOException("Not enough free storage for the selected shards: need at least ${formatBytes(totalKnown)} plus temporary space; ${formatBytes(store().usableSpace)} is free.")
         }
         if (props.isEmpty()) {
             props.setProperty("id", expectedId)
@@ -1095,7 +1176,7 @@ class ModelManager(
                             currentCoroutineContext().ensureActive()
                             val n = input.read(buffer)
                             if (n < 0) break
-                            if (modelsDir.usableSpace < n + SPACE_MARGIN) throw IOException("Storage is nearly full while copying ${source.name}; this partial shard was discarded.")
+                            if (store().usableSpace < n + SPACE_MARGIN) throw IOException("Storage is nearly full while copying ${source.name}; this partial shard was discarded.")
                             output.write(buffer, 0, n)
                             copiedForThisFile += n
                             copiedThisBatch += n
@@ -1203,7 +1284,7 @@ class ModelManager(
             persistManifest(manifest, props)
             return ModelImportResult(emptyList(), incompleteFrom(pendingDir, props), "All shard files are present, but validation failed: $validationIssue")
         }
-        val finalTargets = (1..count).map { File(modelsDir, shardFileName(groupPrefix, it, count)) }
+        val finalTargets = (1..count).map { File(store(), shardFileName(groupPrefix, it, count)) }
         if (finalTargets.any { it.exists() }) {
             val error = "A destination shard filename already exists; no staged shard was moved into the model library. Remove/rename the conflicting model first."
             props.setProperty("status", "CONFLICT")
@@ -1220,11 +1301,11 @@ class ModelManager(
         persistManifest(manifest, props)
 
         val moved = mutableListOf<Pair<File, File>>()
-        val loaded = File(modelsDir, shardFileName(groupPrefix, 1, count))
+        val loaded = File(store(), shardFileName(groupPrefix, 1, count))
         try {
             for (i in 1..count) {
                 val from = File(pendingDir, shardFileName(groupPrefix, i, count))
-                val to = File(modelsDir, from.name)
+                val to = File(store(), from.name)
                 if (!from.renameTo(to)) throw IOException("Could not register shard ${from.name} in the model library.")
                 moved += from to to
             }
@@ -1232,7 +1313,7 @@ class ModelManager(
             props.setProperty("firstShardPath", loaded.canonicalPath)
             props.setProperty("presentShardIndices", (1..count).joinToString(","))
             props.setProperty("totalSizeBytes", logicalModelSize(loaded).toString())
-            for (i in 1..count) props.setProperty("shard.$i.path", File(modelsDir, shardFileName(groupPrefix, i, count)).canonicalPath)
+            for (i in 1..count) props.setProperty("shard.$i.path", File(store(), shardFileName(groupPrefix, i, count)).canonicalPath)
             persistManifest(completeManifestFile(loaded), props)
         } catch (t: Throwable) {
             runCatching { completeManifestFile(loaded).delete() }
@@ -1258,7 +1339,7 @@ class ModelManager(
         val manifestPath = runCatching { manifest.canonicalPath }.getOrDefault(manifest.absolutePath)
         if (!ACTIVE_IMPORT_PATHS.add(manifestPath)) return false
         try {
-            val firstManaged = File(modelsDir, shardFileName(prefix, 1, count))
+            val firstManaged = File(store(), shardFileName(prefix, 1, count))
             val completed = completeManifestFile(firstManaged)
             if (completed.isFile) {
                 val ready = Properties()
@@ -1275,7 +1356,7 @@ class ModelManager(
             var recoveryError: String? = null
             for (index in 1..count) {
                 val name = shardFileName(prefix, index, count)
-                val managed = File(modelsDir, name)
+                val managed = File(store(), name)
                 val staged = File(dir, name)
                 if (managed.isFile && !staged.exists()) {
                     if (!managed.renameTo(staged)) recoveryError = "Could not restore ${managed.name} from the model folder after an interrupted promotion."
@@ -1326,14 +1407,16 @@ class ModelManager(
     }
 
     private fun cleanupStaleSingleFileImportTemps() {
-        modelsDir.listFiles { file -> file.isFile && file.name.matches(Regex("\\.import-\\d+-\\d+\\.part")) }
-            .orEmpty().forEach { file ->
+        listOfNotNull(modelsDir, modelFolder()).flatMap { d ->
+            d.listFiles { file -> file.isFile && file.name.matches(Regex("\\.import-\\d+-\\d+\\.part")) }.orEmpty().toList()
+        }.forEach { file ->
                 val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
                 if (path !in ACTIVE_IMPORT_PATHS) file.delete()
             }
     }
 
-    private fun incompleteRoot(): File = File(modelsDir, ".incomplete-split-imports")
+    // Staged shards are renamed into the model folder, so they are staged on its file system.
+    private fun incompleteRoot(): File = File(modelFolder() ?: modelsDir, ".incomplete-split-imports")
 
     private fun completedManifestRoot(): File = File(modelsDir, ".model-manifests")
 

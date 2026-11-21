@@ -245,10 +245,10 @@ fun ModelScreen(
                                 onClick = { picker.launch(arrayOf("*/*")) },
                                 enabled = ui.importProgress == null,
                                 modifier = Modifier.fillMaxWidth()
-                            ) { Text("Import GGUF file(s) (copy into the app)") }
+                            ) { Text("Import GGUF file(s) into the model folder") }
                             Text(
-                                "Copying needs the space twice. It can be faster when the file is on slow storage such as an SD card, " +
-                                    "and it is the way for cloud or other provider files that have no direct path.",
+                                "Copies into the model folder; a file from Downloads is then removed there (moved). " +
+                                    "The way for cloud or other provider files that have no direct path.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -403,7 +403,6 @@ fun ModelScreen(
                     onRefresh = viewModel::refresh,
                     onFetch = viewModel::fetchFromArchive,
                     onUseInPlace = viewModel::useArchiveModelInPlace,
-                    onClearCache = { viewModel.clearAppCopy(it) },
                     onCancel = viewModel::cancelImport,
                     onDownloadToModels = viewModel::moveDownloadToModels,
                     onDownloadToArchive = viewModel::moveDownloadToArchive
@@ -482,8 +481,7 @@ fun ModelScreen(
                         // A local copy of an archive model (app storage or model folder) can go without losing its
                         // settings; any other model of the model folder can move out to the archive.
                         val inModelFolder = !model.inAppStorage && ui.modelFolder?.let { model.path.startsWith("$it/") } == true
-                        val place = if (model.inAppStorage) com.bigmoe.onedge.core.FetchTarget.APP
-                        else com.bigmoe.onedge.core.FetchTarget.MODEL_FOLDER
+                        val place = com.bigmoe.onedge.core.FetchTarget.MODEL_FOLDER
                         val entry = ui.archiveEntries.firstOrNull { it.name == model.name && place in it.copies }
                         val isCopy = (model.inAppStorage || inModelFolder) && entry != null
                         if (isCopy && entry != null) {

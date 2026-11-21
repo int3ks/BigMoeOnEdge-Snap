@@ -67,7 +67,7 @@ data class SourceSuggestion(val name: String, val path: String)
 data class StorageSpace(val label: String, val path: String, val freeBytes: Long, val totalBytes: Long)
 
 /** Where "Fetch" puts an archive model. */
-enum class FetchTarget { APP, MODEL_FOLDER }
+enum class FetchTarget { MODEL_FOLDER } // the app storage keeps no models (7.17)
 
 /**
  * Three places for model files, each with one job:
@@ -115,10 +115,9 @@ class ModelArchive(
     }
 
     /** Where a local copy of an archive model can be: the app's storage first, then the model folder. */
-    private fun localDirs(): List<File> = listOfNotNull(cacheDir, modelManager.modelFolder())
+    private fun localDirs(): List<File> = listOfNotNull(modelManager.modelFolder())
 
     private fun dirOf(target: FetchTarget): File? = when (target) {
-        FetchTarget.APP -> cacheDir
         FetchTarget.MODEL_FOLDER -> modelManager.modelFolder()
     }
 
@@ -224,7 +223,7 @@ class ModelArchive(
             if (total <= 0L) return null
             return StorageSpace(label, d.path, runCatching { p.usableSpace }.getOrDefault(0L), total)
         }
-        listOfNotNull(of("App storage", cacheDir), of("Model folder", modelManager.modelFolder())) +
+        listOfNotNull(of("Model folder", modelManager.modelFolder())) +
             sources().filter { reachable(it) }.mapNotNull { of("Archive: ${it.name}", File(it.path)) }
     }
 
@@ -323,7 +322,7 @@ class ModelArchive(
      */
     suspend fun fetch(name: String, into: FetchTarget, onProgress: (copied: Long, total: Long) -> Unit): File = withContext(io) {
         val (src, set) = findComplete(name) ?: throw notFound(name)
-        val target = dirOf(into) ?: throw IOException("The model folder is switched off; fetch into the app storage or turn it on.")
+        val target = dirOf(into) ?: throw IOException("The model folder is switched off; turn it on to copy models.")
         if (!target.isDirectory && !target.mkdirs()) throw IOException("Cannot create ${target.path}.")
         val todo = set.files.filterNot { s -> File(target, s.name).let { it.isFile && it.length() == s.length() } }
         val missing = todo.sumOf { s ->
