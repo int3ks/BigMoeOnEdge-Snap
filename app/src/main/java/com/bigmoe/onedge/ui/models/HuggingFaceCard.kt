@@ -57,7 +57,7 @@ import java.util.Locale
 internal data class HfFile(val path: String, val bytes: Long)
 
 /** A repo found by the search, with the GGUF files that match the chosen formats (all GGUFs when none is chosen). */
-private data class HfRepo(val id: String, val downloads: Long, val files: List<HfFile>?, val moe: Boolean? = null)
+private data class HfRepo(val id: String, val downloads: Long, val files: List<HfFile>?, val moe: Boolean? = null, val params: Long? = null)
 
 /** Formats to filter by; matched in the file name, case-insensitive, as a whole token. */
 private val HF_FORMATS = listOf("Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M", "IQ4_NL", "IQ4_XS", "Q5_K_M", "Q6_K", "Q8_0", "Q3_K_M", "Q2_K", "IQ2_XS", "MXFP4")
@@ -142,12 +142,23 @@ private fun probeMoe(repo: String, path: String): Boolean? = runCatching {
     false // every key read, none says experts: dense
 }.getOrNull()
 
-private fun searchRepos(query: String, sort: String): List<Pair<String, Long>> {
+/** Parameter count from a repo name ("Qwen3.6-35B-A3B" -> 35e9, "Gemma-4-E4B" -> 4e9); the first "<n>B" token. */
+private fun paramsFromName(id: String): Long? {
+    val m = Regex("""(?:^|[-_/. ])[Ee]?(\d+(?:\.\d+)?)[Bb](?:$|[-_. ])""").find(id.substringAfter('/')) ?: return null
+    return (m.groupValues[1].toDouble() * 1e9).toLong()
+}
+
+/** (id, downloads, parameter count): the count from the API's GGUF summary, else from the repo name. */
+private fun searchRepos(query: String, sort: String): List<Triple<String, Long, Long?>> {
     val q = URLEncoder.encode(query.trim(), "UTF-8")
-    val arr = JSONArray(httpGet("https://huggingface.co/api/models?search=$q&filter=gguf&sort=$sort&direction=-1&limit=40"))
+    val base = "https://huggingface.co/api/models?search=$q&filter=gguf&sort=$sort&direction=-1&limit=60"
+    val text = runCatching { httpGet("$base&expand%5B%5D=gguf&expand%5B%5D=downloads") }.getOrElse { httpGet(base) }
+    val arr = JSONArray(text)
     return (0 until arr.length()).map { i ->
         val o = arr.getJSONObject(i)
-        o.getString("id") to o.optLong("downloads", 0)
+        val id = o.getString("id")
+        val total = o.optJSONObject("gguf")?.optLong("total", 0L)?.takeIf { it > 0 }
+        Triple(id, o.optLong("downloads", 0), total ?: paramsFromName(id))
     }
 }
 
@@ -331,7 +342,8 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
         }
     }
     var sortBy by remember { mutableStateOf("downloads") } // downloads | createdAt | size
-    var kind by remember { mutableStateOf("all") } // all | moe | dense
+    var minB by remember { mutableStateOf(0) }   // parameter range in billions, 0 = no lower bound
+    var maxB by remember { mutableStateOf(0) }   // 0 = no upper bound
 
     fun search() {
         if (query.isBlank() || busy) return
@@ -341,27 +353,25 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
         expanded = null
         val fmt = formats
         val sort = sortBy
-        val kd = kind
+        val lo = minB.toLong() * 1_000_000_000L
+        val hi = if (maxB == 0) Long.MAX_VALUE else maxB.toLong() * 1_000_000_000L
         scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val found = searchRepos(query, if (sort == "createdAt") "createdAt" else "downloads")
+                        .filter { (minB == 0 && maxB == 0) || (it.third != null && it.third!! in lo..hi) }
                     // Sorting by size needs every repo's file list, as a format filter does.
-                    val list = if (fmt.isEmpty() && sort != "size" && kd == "all") {
-                        found.map { HfRepo(it.first, it.second, null) }
+                    val list = if (fmt.isEmpty() && sort != "size") {
+                        found.map { HfRepo(it.first, it.second, null, params = it.third) }
                     } else {
                         // Look into every repo's file list and keep the ones that hold the format.
-                        found.map { (id, dl) ->
+                        found.map { (id, dl, pc) ->
                             async {
                                 val files = runCatching { listGguf(id) }.getOrDefault(emptyList())
                                 val kept = if (fmt.isEmpty()) files else files.filter { f -> fmt.any { matchesFormat(f.path, it) } }
-                                // MoE or dense from the header of the smallest file (the first part of a split one).
-                                val moe = if (kd == "all" || kept.isEmpty()) null
-                                          else groupModels(kept).minByOrNull { it.bytes }?.parts?.first()?.let { probeMoe(id, it.path) }
-                                HfRepo(id, dl, kept, moe)
+                                HfRepo(id, dl, kept, null, pc)
                             }
                         }.awaitAll().filter { !it.files.isNullOrEmpty() }
-                            .filter { kd == "all" || (kd == "moe" && it.moe == true) || (kd == "dense" && it.moe == false) }
                     }
                     if (sort == "size") list.sortedBy { r -> groupModels(r.files.orEmpty()).minOfOrNull { it.bytes } ?: Long.MAX_VALUE } else list
                 }
@@ -443,13 +453,21 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                 }
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Type:", style = MaterialTheme.typography.bodySmall)
-                listOf("all" to "All", "moe" to "MoE", "dense" to "Dense").forEach { (k, l) ->
-                    FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(l) })
-                }
                 Text("Sort:", style = MaterialTheme.typography.bodySmall)
                 listOf("downloads" to "Downloads", "createdAt" to "Newest", "size" to "Size (smallest)").forEach { (k, l) ->
                     FilterChip(selected = sortBy == k, onClick = { sortBy = k }, label = { Text(l) })
+                }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Params from:", style = MaterialTheme.typography.bodySmall)
+                listOf(0, 4, 8, 12, 20, 30, 60, 100).forEach { b ->
+                    FilterChip(selected = minB == b, onClick = { minB = b }, label = { Text(if (b == 0) "any" else "${b}B") })
+                }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("to:", style = MaterialTheme.typography.bodySmall)
+                listOf(8, 16, 40, 60, 80, 130, 250, 0).forEach { b ->
+                    FilterChip(selected = maxB == b, onClick = { maxB = b }, label = { Text(if (b == 0) "any" else "${b}B") })
                 }
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -482,7 +500,7 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                         Text(r.id, style = MaterialTheme.typography.bodyMedium)
                         Text(
                             "${r.downloads} downloads" + (r.files?.let { " · ${groupModels(it).size} model(s)" } ?: "") +
-                                when (r.moe) { true -> " · MoE"; false -> " · dense"; null -> "" },
+                                (r.params?.let { String.format(Locale.ROOT, " · %.1fB params", it / 1e9) } ?: ""),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
