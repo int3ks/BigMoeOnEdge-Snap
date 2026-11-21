@@ -1211,7 +1211,13 @@ class ChatViewModel(
             val minFreeMb = minFree.takeIf { it != Long.MAX_VALUE }
             val info = if (message.role == MessageRole.ASSISTANT && base != null) {
                 RunInfo.withPreset(base, engineController.samplingPresetFor(base.path))
-                    .copy(minFreeMb = minFreeMb).toJson()
+                    .copy(
+                        minFreeMb = minFreeMb,
+                        maxSwapMb = maxSwap.takeIf { it >= 0 },
+                        majfltPerToken = engineController.lastRunJson()?.let { j ->
+                            runCatching { org.json.JSONObject(j).optDouble("majflt_per_token", Double.NaN) }.getOrNull()
+                        }?.takeIf { !it.isNaN() }
+                    ).toJson()
             } else null
             val stats = message.stats
             if (message.role == MessageRole.ASSISTANT && model != null && stats != null && stats.nGenerated > 0) {

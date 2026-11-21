@@ -27,7 +27,11 @@ data class RunInfo(
     val preset: String? = null,
     val systemPrompt: String? = null,
     /** Lowest free RAM seen while the turn ran (sampled every 2 s by MemoryWatch); null when no sample. */
-    val minFreeMb: Long? = null
+    val minFreeMb: Long? = null,
+    /** Most of the app seen in swap (zram) while the turn ran. */
+    val maxSwapMb: Long? = null,
+    /** The engine's major page faults per generated token (expert cache or weights read back from swap/flash). */
+    val majfltPerToken: Double? = null
 ) {
     fun toJson(): String = JSONObject().apply {
         put("model", model); put("path", path)
@@ -45,6 +49,8 @@ data class RunInfo(
         preset?.let { put("preset", it) }
         systemPrompt?.let { put("systemPrompt", it) }
         minFreeMb?.let { put("minFreeMb", it) }
+        maxSwapMb?.let { put("maxSwapMb", it) }
+        majfltPerToken?.let { put("majfltPerToken", it) }
     }.toString()
 
     /** "/storage/.../Models" -> "Models", for the details line. */
@@ -100,7 +106,9 @@ data class RunInfo(
                     repeatPenalty = d("repeat"),
                     preset = s("preset"),
                     systemPrompt = s("systemPrompt"),
-                    minFreeMb = if (o.has("minFreeMb")) o.getLong("minFreeMb") else null
+                    minFreeMb = if (o.has("minFreeMb")) o.getLong("minFreeMb") else null,
+                    maxSwapMb = if (o.has("maxSwapMb")) o.getLong("maxSwapMb") else null,
+                    majfltPerToken = if (o.has("majfltPerToken")) o.getDouble("majfltPerToken") else null
                 )
             }.getOrNull()
         }

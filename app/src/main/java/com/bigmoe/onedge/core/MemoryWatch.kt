@@ -11,7 +11,11 @@ import java.util.Properties
 
 /** Free RAM right now, as Android reports it. [thresholdMb] is the level below which Android calls memory low. */
 /** [swapMb]: how much of this app Android moved into swap (zram), VmSwap of /proc/self/status; -1 = unreadable. */
-data class MemoryNow(val freeMb: Long, val thresholdMb: Long, val totalMb: Long, val low: Boolean, val swapMb: Long = -1)
+/** [faultsPerSec]: the app's major page faults per second since the previous sample (swap-ins or file pages read again); -1 = unknown. */
+data class MemoryNow(
+    val freeMb: Long, val thresholdMb: Long, val totalMb: Long, val low: Boolean, val swapMb: Long = -1,
+    val faultsPerSec: Long = -1
+)
 
 /**
  * What was seen of the free RAM while a model was in use, remembered per model across app starts.
@@ -51,6 +55,15 @@ object MemoryWatch {
      * This process's memory in swap (on the MagicPad zram: compressed RAM), in MiB; -1 when unreadable. Expert cache
      * or dense weights in there cost a decompression on every touch (the engine's major faults per token).
      */
+    private var lastFaults = -1L
+    private var lastFaultsAt = 0L
+
+    /** Major page faults of this process so far (field 12 of /proc/self/stat, after the command name); -1 = unreadable. */
+    fun ownMajorFaults(): Long = runCatching {
+        val s = java.io.File("/proc/self/stat").readText()
+        s.substring(s.lastIndexOf(')') + 2).split(' ')[9].toLong()
+    }.getOrDefault(-1L)
+
     fun ownSwapMb(): Long = runCatching {
         java.io.File("/proc/self/status").useLines { lines ->
             lines.firstOrNull { it.startsWith("VmSwap:") }?.filter { it.isDigit() }?.toLong()?.div(1024) ?: -1L
@@ -91,7 +104,12 @@ object MemoryWatch {
                 runCatching {
                     val info = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
                     val mb = 1024L * 1024L
-                    val now = MemoryNow(info.availMem / mb, info.threshold / mb, info.totalMem / mb, info.lowMemory, ownSwapMb())
+                    val flt = ownMajorFaults()
+                    val tNow = android.os.SystemClock.elapsedRealtime()
+                    val rate = if (flt >= 0 && lastFaults >= 0 && tNow > lastFaultsAt) (flt - lastFaults) * 1000 / (tNow - lastFaultsAt) else -1L
+                    lastFaults = flt
+                    lastFaultsAt = tNow
+                    val now = MemoryNow(info.availMem / mb, info.threshold / mb, info.totalMem / mb, info.lowMemory, ownSwapMb(), rate)
                     _now.value = now
                     val state = engineState.value
                     val path = when (state) {

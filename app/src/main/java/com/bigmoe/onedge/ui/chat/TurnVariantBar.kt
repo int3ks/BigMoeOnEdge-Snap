@@ -136,6 +136,8 @@ private fun runDetails(r: RunInfo, timestamp: Long): String = buildList<String> 
     if (sampling.isNotEmpty()) add(sampling.joinToString(" • "))
     r.systemPrompt?.takeIf { it.isNotBlank() }?.let { add("System prompt: $it") }
     r.minFreeMb?.let { add("Lowest free RAM during the answer: $it MiB") }
+    r.maxSwapMb?.let { add("Most of the app in zram during the answer: $it MiB") }
+    r.majfltPerToken?.let { add("Major page faults per token: ${String.format(Locale.US, "%.0f", it)} (0 = everything was in RAM)") }
     add(DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(timestamp)))
 }.joinToString("\n")
 

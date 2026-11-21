@@ -268,7 +268,8 @@ fun ChatScreen(
                         if (modelName != null) {
                             Text(
                                 text = modelName + (memoryNow?.let { m ->
-                                    " \u2022 ${m.freeMb} MiB free" + (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "")
+                                    " \u2022 ${m.freeMb} MiB free" + (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "") +
+                                        (if (m.faultsPerSec >= 0) " \u2022 ${m.faultsPerSec} faults/s" else "")
                                 } ?: ""),
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
