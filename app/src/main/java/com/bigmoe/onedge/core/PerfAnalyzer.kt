@@ -27,12 +27,27 @@ object PerfAnalyzer {
     /** Android thermal status from which an answer counts as throttled (2 = moderate). */
     const val THROTTLED = 2
 
+    /** Answers with fewer generated tokens than this say nothing about the decode speed (cold first tokens). */
+    const val MIN_GENERATED = 32
+
+    /** A run that ended this long after its last answer or load went while idle (Android clearing a background app). */
+    const val IDLE_SECONDS = 120L
+
+    /** Exit reasons that are the user's doing, not the settings'. */
+    private val USER_EXITS = setOf("USER_REQUESTED", "USER_STOPPED", "PERMISSION_CHANGE")
+
+    /** Whether a crash entry counts against the settings it ran with: it ended while in use, not idle, not by the user. */
+    fun crashInUse(d: JSONObject): Boolean =
+        d.optLong("idleSeconds", 0L) <= IDLE_SECONDS && d.optString("exitReason") !in USER_EXITS
+
     private class Turn(val at: Long, val d: JSONObject, val key: String)
 
     private class Group(val key: String) {
         val turns = mutableListOf<Turn>()
         var throttled = 0
+        var short = 0
         var crashes = 0
+        var idleEnds = 0
         val comparable get() = turns
     }
 
@@ -76,10 +91,18 @@ object PerfAnalyzer {
                 "loads ${counts["load"] ?: 0}, failed loads ${counts["load_failed"] ?: 0}, answers ${counts["turn"] ?: 0}, " +
                 "crashes ${counts["crash"] ?: 0}"
         )
+        val builds = parsed.mapNotNull { (_, d) -> d.optString("app").takeIf { it.isNotEmpty() } }
+        if (builds.isNotEmpty()) {
+            sb.appendLine(
+                "App builds: " + builds.groupingBy { it }.eachCount().entries.joinToString(", ") { "${it.key} (${it.value})" } +
+                    (if (builds.size < parsed.size) ", older entries without a build" else "")
+            )
+        }
         sb.appendLine(
             "Ranking: groups without crash first, then median decode t/s (higher), then median time to first token " +
-                "(lower). Medians use answers that started below thermal status $THROTTLED (moderate); groups with " +
-                "fewer than $MIN_ANSWERS such answers are listed but not ranked."
+                "(lower). Medians use answers that started below thermal status $THROTTLED (moderate) and generated at " +
+                "least $MIN_GENERATED tokens; groups with fewer than $MIN_ANSWERS such answers are listed but not ranked. " +
+                "A crash counts only when the app ended within $IDLE_SECONDS s of its last answer or load and not by the user."
         )
 
         for ((name, list) in parsed.groupBy { it.first.model }) {
@@ -98,12 +121,17 @@ object PerfAnalyzer {
                         }
                         val key = settingsKey(d.optJSONObject("cfg"), d.optBoolean("npuReady"), live)
                         val g = groups.getOrPut(key) { Group(key) }
-                        if (d.optInt("startThermal", 0) >= THROTTLED) g.throttled++ else g.turns += Turn(e.at, d, key)
+                        when {
+                            d.optInt("startThermal", 0) >= THROTTLED -> g.throttled++
+                            d.has("generated") && d.optInt("generated") < MIN_GENERATED -> g.short++
+                            else -> g.turns += Turn(e.at, d, key)
+                        }
                     }
                     "crash" -> {
                         val load = loadBefore(e.at) ?: continue
                         val key = settingsKey(load.second.optJSONObject("cfg"), load.second.optBoolean("npuReady"))
-                        groups.getOrPut(key) { Group(key) }.crashes++
+                        val g = groups.getOrPut(key) { Group(key) }
+                        if (crashInUse(d)) g.crashes++ else g.idleEnds++
                     }
                 }
             }
@@ -122,9 +150,15 @@ object PerfAnalyzer {
             )
             ranked.forEachIndexed { i, g -> sb.append(groupLine(i + 1, g)) }
             list.filter { it.first.kind == "crash" }.forEach { (e, d) ->
+                val inUse = crashInUse(d)
+                val idle = d.optLong("idleSeconds", -1L)
                 sb.appendLine(
-                    "Crash ${fmt.format(Date(e.at))}: ${d.optString("config")}" +
-                        (if (d.has("minFreeMb")) ", lowest free RAM seen ${d.getLong("minFreeMb")} MiB" else "")
+                    (if (inUse) "Crash " else "Ended while idle (not counted) ") + "${fmt.format(Date(e.at))}: ${d.optString("config")}" +
+                        (if (d.has("minFreeMb")) ", lowest free RAM seen ${d.getLong("minFreeMb")} MiB" else "") +
+                        (if (idle >= 0) ", ${idle / 60} min ${idle % 60} s after the last answer or load" else "") +
+                        (d.optString("exitReason").takeIf { it.isNotEmpty() }?.let { r ->
+                            ", Android: $r" + (if (d.has("exitImportance")) " (importance ${d.getInt("exitImportance")})" else "")
+                        } ?: "")
                 )
             }
             list.filter { it.first.kind == "load_failed" }.takeLast(5).forEach { (e, d) ->
@@ -147,8 +181,13 @@ object PerfAnalyzer {
         val ctx = t.map { it.d.optInt("ctxUsed").toDouble() }.filter { it > 0 }
         val nCtx = t.firstOrNull()?.d?.optInt("nCtx") ?: 0
         val ram = t.mapNotNull { if (it.d.has("minFreeMb")) it.d.getLong("minFreeMb") else null }
-        val parts = mutableListOf("answers ${t.size}" + if (g.throttled > 0) " (+${g.throttled} throttled, left out)" else "")
+        val left = listOfNotNull(
+            g.throttled.takeIf { it > 0 }?.let { "$it throttled" },
+            g.short.takeIf { it > 0 }?.let { "$it under $MIN_GENERATED tokens" }
+        )
+        val parts = mutableListOf("answers ${t.size}" + if (left.isNotEmpty()) " (+${left.joinToString(", ")}, left out)" else "")
         if (g.crashes > 0) parts += "CRASHES ${g.crashes}"
+        if (g.idleEnds > 0) parts += "ended while idle ${g.idleEnds} (not counted)"
         median(decode)?.let { parts += "decode median ${f1(it)} t/s (${f1(decode.min())}–${f1(decode.max())})" }
         median(pre)?.let { parts += "prefill median ${f1(it)} t/s (n=${pre.size})" }
         median(ttft)?.let { parts += "time to first token median ${f1(it)} s" }
@@ -190,16 +229,23 @@ object PerfAnalyzer {
                 val d = JSONObject(e.data)
                 for (k in d.keys()) {
                     val v = d.get(k)
-                    if (v is JSONObject) for (ck in v.keys()) flat["cfg.$ck"] = v.get(ck).toString()
+                    if (v is JSONObject) for (ck in v.keys()) flat["$k.$ck"] = v.get(ck).toString()
                     else flat[k] = v.toString()
                 }
             }
             flat
         }
         val head = listOf("id", "at", "kind", "model")
-        val cols = head + rows.flatMap { it.keys }.distinct().filter { it !in head }.sortedBy { (if (it.startsWith("cfg.")) "1" else "0") + it }
+        fun order(c: String) = (if (c.startsWith("cfg.")) "2" else if (c.contains('.')) "1" else "0") + c
+        val all = rows.flatMap { it.keys }.distinct().filter { it !in head }.sortedBy(::order)
+        // A column with the same value in every row (empty counts) says nothing per row: it is listed once above
+        // the table instead — about half the columns, and every one of them costs a reader's tokens on each row.
+        val same = if (rows.size < 2) emptyList() else all.filter { c -> rows.map { it[c].orEmpty() }.distinct().size == 1 }
+        val cols = head + (all - same.toSet())
         fun esc(s: String) = if (s.any { it == ',' || it == '"' || it == '\n' }) "\"" + s.replace("\"", "\"\"") + "\"" else s
         return buildString {
+            val shown = same.filter { c -> rows.first()[c].orEmpty().isNotEmpty() }
+            if (shown.isNotEmpty()) appendLine("# same in every row: " + shown.joinToString("; ") { "$it=${rows.first()[it]}" })
             appendLine(cols.joinToString(","))
             rows.forEach { r -> appendLine(cols.joinToString(",") { esc(r[it].orEmpty()) }) }
         }

@@ -33,6 +33,11 @@ struct CacheBrakePolicy {
     double stall_factor = 2.0; // a token this many times slower than the reference is a stall
 };
 
+// Share of the cache's sampled pages that must be gone from RAM before a stalled token may halve the budget.
+// One page of 64 was enough before, and a hot device (compute x2) plus a stray reclaimed page halved the cache
+// with gigabytes free.
+constexpr double kBrakeLostMin = 0.10;
+
 class CacheBrake {
 public:
     explicit CacheBrake(CacheBrakePolicy pol = {}) : pol_(pol) {}

@@ -169,6 +169,7 @@ static void remember_run(const bmoe::RunSummary & s) {
     num("n_prompt_total", s.n_prompt_total);
     num("n_reused", s.n_reused);
     num("kv_reuse", s.kv_reuse);
+    num("kv_diverge", s.kv_diverge);
     num("cache_resident_mib", s.cache_resident_mib);
     num("cache_budget_mib", s.cache_budget_mib);
     num("cache_evictions", (double) s.cache_evictions);

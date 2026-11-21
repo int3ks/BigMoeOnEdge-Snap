@@ -176,16 +176,23 @@ object SettingsAdvice {
           cache_evictions, moe_read_mib (read from flash), s_per_token split into compute/io/stall_s_per_token,
           cores_busy (cpu time / wall time; near the thread count = compute-bound, low = waiting), majflt_per_token,
           drafted/accepted/verify_decodes (guess ahead: proposed and confirmed tokens), prefill_device_tokens/nodes
-          (> 0 = the prefill really ran on the NPU).
+          (> 0 = the prefill really ran on the NPU), kv_diverge (first prompt token that differed from the cached KV;
+          n_reused below it = a checkpoint stood in).
         - load: loadSeconds, freeBeforeMb (only when no model was loaded before; "replaced" names the model a load
-          replaced), freeAfterMb, npuReady (the NPU was really set up), cfg.*.
-        - crash: the app ended while a model was loaded — almost always Android killing it for RAM; minFreeMb is the
-          lowest free RAM seen before; it is matched to the newest load of that model before it.
+          replaced), freeAfterMb, npuReady (the NPU was really set up), swapTotalMb/swapFreeMb (0 = the device has no
+          swap: then majflt are file pages read again, not swap-ins), cfg.*.
+        - crash: the app ended while a model was loaded; minFreeMb is the lowest free RAM seen since that load; it is
+          matched to the newest load of that model before it. idleSeconds = time from the last answer or load to the
+          last moment the app was seen alive; exitReason/exitImportance = Android's record of the end (LOW_MEMORY,
+          SIGNALED, CRASH_NATIVE, USER_REQUESTED …; importance 100 = foreground, 400 = cached in the background).
+          A crash idle for more than 120 s or ended by the user is not counted against the settings.
         - load_failed: the error of a load that did not finish.
+        - Every entry: app/appCode = the build that recorded it (older entries have none). Prefer the newest build's
+          numbers; an engine change can make older ones stale.
 
         Careful: compare like with like — an answer whose prompt came from the KV cache prefills almost nothing; longer
         contexts are slower; a hot device throttles (answers that started at thermal status 2 or more are left out of
-        the medians). Few answers per setting mean little. Goal order: no crash first, then decode speed, then time to
+        the medians, and so are answers under 32 generated tokens). Few answers per setting mean little. Goal order: no crash first, then decode speed, then time to
         first token.
     """.trimIndent()
 
@@ -216,7 +223,8 @@ object SettingsAdvice {
         Settings that can be changed:
         @@KNOBS@@
 
-        The summary below is computed by the app (medians, grouping, crash matching); the CSV after it has every entry.
+        The summary below is computed by the app (medians, grouping, crash matching); the CSV after it has every entry
+        of the exported period. Columns with the same value in every row are listed once above the table.
     """.trimIndent().replace("@@BACKGROUND@@", BACKGROUND).replace("@@KNOBS@@", knobList(settings))
 
     /** The prompt for a local model: the computed report, the settings and a strict answer format. */

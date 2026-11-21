@@ -77,6 +77,13 @@ public:
         int64_t n_prompt = 0;
         int n_batch = 0;  // the prefill's piece
         int n_ubatch = 0; // the context's ubatch
+        // The prefill runs on a device (NPU) that streams every expert of every layer once per piece, whatever
+        // the piece's width: each extra stop inside the device range is another full sweep of the experts over
+        // flash (MagicPad, 26B-A4B: ~10 GiB and several seconds each). Then the prefill stops only at the end of
+        // the preamble (a new chat with the same system prompt reuses it; a short one goes on the CPU anyway) and
+        // k_checkpoint_tail_tokens before the prompt's end (that piece is a few tokens, on the CPU). A Regenerate
+        // or a follow-up still finds its checkpoint; an edit of an older message re-prefills from the preamble.
+        bool device = false;
     };
     // The first stop strictly inside (i, i + chunk), or i + chunk when there is none.
     int64_t next_stop(const Stops & s, int64_t i, int64_t chunk) const;

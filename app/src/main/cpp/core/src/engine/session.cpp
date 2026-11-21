@@ -2030,10 +2030,12 @@ RunResult Session::generate(const GenerateRequest & req,
     // byte-identity gates exercise stays unchanged.
     size_t n_common = 0;
     int kv_reuse = KV_REUSE_NONE; // reported in RunSummary::kv_reuse
+    int kv_diverge = -1;          // reported in RunSummary::kv_diverge
     if (chat_on && !im.kv_tokens.empty()) {
         const size_t max_common = tokens.size() > 0 ? tokens.size() - 1 : 0;
         while (n_common < im.kv_tokens.size() && n_common < max_common && im.kv_tokens[n_common] == tokens[n_common])
             ++n_common;
+        kv_diverge = (int) n_common;
         if (n_common < im.kv_tokens.size()) {
             // A recurrent state (Qwen3.5/3.6) or a sliding window (Gemma) can refuse a partial removal.
             // Then the newest context checkpoint before the divergence stands in for the cut, and only a
@@ -2181,7 +2183,8 @@ RunResult Session::generate(const GenerateRequest & req,
     const double arena_stall0 = im.prefill ? im.prefill->arena_stall_seconds() : 0.0;
     const long long device_nodes0 = im.hook->device_nodes();
     const int ckpt_turn = ++im.checkpoint_turn;
-    const detail::ContextCheckpoints::Stops ckpt_stops{&user_starts, n_prompt, pf_step, (int) llama_n_ubatch(ctx)};
+    const detail::ContextCheckpoints::Stops ckpt_stops{&user_starts, n_prompt, pf_step, (int) llama_n_ubatch(ctx),
+                                                       /*device*/ im.prefill != nullptr};
     for (int i = (int) n_common, chunk = 0; i < n_prompt_text_end; i += chunk) {
         chunk = std::min(pf_step, n_prompt - i);
         // A piece stops where a checkpoint is due (a user message's start, the prompt's last tokens,
@@ -2342,6 +2345,7 @@ RunResult Session::generate(const GenerateRequest & req,
     std::string stop_seq;
     bool natural_end = false;  // the model ended the turn itself (end-of-generation token)
     double last_compute_s = 0.0; // the last decode's compute time, what the cache brake reads
+    bool last_wide = false;      // the last decode verified drafts (1 + k tokens): its compute is not one token's
     // Between two decodes, the only time the budget may move. A stalled token is asked about first,
     // because it is the cheap signal; the residency sample is the expensive one and runs only to
     // confirm it, so a run that never stalls never pays for it.
@@ -2355,10 +2359,17 @@ RunResult Session::generate(const GenerateRequest & req,
             --brake_quiet;
             return;
         }
+        // A verify decode runs 1 + k tokens through every layer and routes the experts of all of them, so it is
+        // slower than a plain decode by design. Measured against the plain decodes' median it looked like a stall
+        // and, with any page of the sample gone, halved the cache with gigabytes free (perf log 2026-11-21: 6000 ->
+        // 1371 MiB at 5.4 GB free). It neither enters the reference nor is judged.
+        if (last_wide) return;
         const double ref = im.brake.reference();
         if (!im.brake.stalled(last_compute_s)) return;
         const double lost = im.source.cache_lost_frac(/*sample*/ 64);
-        if (lost <= 0.0) return; // slow, but not because memory went: the cores, the clock, a neighbour
+        // Slow, but not because memory went: the cores, the clock (a hot device halves it), a neighbour. One page of
+        // 64 gone is not a memory crisis either — it took a real share of the cache to justify halving it.
+        if (lost < kBrakeLostMin) return;
         const size_t budget = im.source.cache_budget();
         const size_t floor = im.source.worst_cycle_bytes(im.n_expert_used);
         const size_t next = CacheBrake::braked(budget, floor);
@@ -2604,6 +2615,7 @@ RunResult Session::generate(const GenerateRequest & req,
             if (e == 0) {
                 tally.record(m, wall, f1 - f0, c1 - c0, im.turn, moe.enabled ? &st : nullptr, sink != nullptr);
                 last_compute_s = m.compute_ms / 1000.0;
+                last_wide = wide;
             } else
                 tally.record(m, 0.0, 0, 0.0, im.turn, moe.enabled ? &st : nullptr, sink != nullptr);
             if (on_token) on_token(m);
@@ -2700,6 +2712,7 @@ RunResult Session::generate(const GenerateRequest & req,
     s.n_ctx_used = n_ctx_used;
     s.n_prompt_total = image_turn ? n_prompt_eff : n_prompt;
     s.n_reused = image_turn ? 0 : (int) n_common;
+    s.kv_diverge = image_turn ? -1 : kv_diverge;
     s.n_prefill_eval = s.n_prompt;
     s.kv_reuse = kv_reuse;
     s.load_seconds = im.load_seconds;

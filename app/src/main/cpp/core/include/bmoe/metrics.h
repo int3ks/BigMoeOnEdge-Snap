@@ -142,6 +142,9 @@ struct RunSummary {
     int n_reused = 0;
     int n_prefill_eval = 0;
     int kv_reuse = 0;
+    // Chat turns: the first prompt token that differed from the KV the previous turn left (= n_reused when the
+    // memory could cut there; more when a checkpoint before it stood in), -1 = no cached KV to compare with.
+    int kv_diverge = -1;
     double load_seconds = 0.0;
     double prefill_seconds = 0.0;
 

@@ -29,3 +29,11 @@ Moved out of CLAUDE.md to save tokens (state 2026-11-11).
 * Archive network sources (not started, Tom decides later): SMB direct (Java SMB library, check it on MagicOS first),
   HTTP directory listing (`python -m http.server` on the PC), or SAF via a provider app. Fetch and move only - no
   "Use in place" without a file path.
+* Q4_0 experts are not repacked (session.cpp loads with "no repack"), so Q4_0 decodes slower than Q4_1 on the CPU
+  (perf log 2026-11-21: compute 0.28–0.30 vs ~0.19 s/token, 35B-A3B, 6 threads). Repacking an expert into the
+  interleaved Q4_0 layout when it enters the cache would give Q4_0 the i8mm kernels; Q4_0 is already the NPU's native
+  format (least RAM and flash per prefill). Measure: compute_s_per_token Q4_0 vs Q4_1, same cores and prompt.
+* Decode cost grows with context: G4-MeroMero compute 0.165 → 0.31 s/token at ctx 0.8k → 7.3k (partly hot device).
+  Check the CPU flash-attention path with Q8_0 KV against F16 KV.
+* NPU prefill is still one full expert sweep per piece; a prompt longer than batchWidth costs a sweep per batch. A
+  wider device graph or a layer-major device prefill would read the experts once per prompt.

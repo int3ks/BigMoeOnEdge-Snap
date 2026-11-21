@@ -64,8 +64,8 @@ private val HF_FORMATS = listOf("Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M", "IQ4_NL", "I
 
 /** Format guide: rough estimates for this engine on a Snapdragon tablet (CPU decode, Hexagon prefill), not measurements. */
 private val HF_LEGEND = listOf(
-    "Q4_0" to "4.5 bit · fastest CPU decode · NPU yes · quality lowest of the 4-bit (take an i1/imatrix file)",
-    "Q4_1" to "5.0 bit · about as fast as Q4_0, ~11 % bigger · NPU yes · a bit better than Q4_0",
+    "Q4_0" to "4.5 bit · CPU decode slower than Q4_1 here (experts are not repacked; measured ~1.5x the compute time on a 35B-A3B) · NPU native: least RAM and flash per prefill · quality lowest of the 4-bit (take an i1/imatrix file)",
+    "Q4_1" to "5.0 bit · fastest CPU decode measured on this engine, ~11 % bigger than Q4_0 · NPU yes · a bit better than Q4_0",
     "IQ4_NL" to "4.5 bit · close to Q4_0 speed · NPU yes · better than Q4_0",
     "IQ4_XS" to "4.25 bit · a bit slower (table lookups) · NPU no (CPU prefill) · good quality for its size",
     "Q4_K_S" to "~4.6 bit · a bit slower than Q4_0 · NPU yes · good",

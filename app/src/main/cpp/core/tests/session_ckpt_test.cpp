@@ -17,7 +17,9 @@
 #include "bmoe/runtime.h"
 #include "bmoe/metrics.h"
 #include "bmoe/load_progress.h"
+#include "context_checkpoints.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -381,7 +383,30 @@ static void regen_after_snapshot(const char * path, bool moe) {
     for (const char * ext : {".kv", ".dft", ".aux"}) std::remove((prefix + ext).c_str());
 }
 
+// Where the prefill stops for checkpoints. On the host every user message start and n_ubatch + 4 / 4 tokens
+// before the end; with a prefill device (one full expert sweep per piece) only the preamble's end and the 4-token
+// tail, so a long conversation is not cut into many device pieces.
+static void ckpt_stops_device() {
+    bmoe::detail::ContextCheckpoints c;
+    c.configure(4, 8192, 0);
+    const std::vector<size_t> us = {12, 200, 400};
+    auto ends = [&](bool device) {
+        const bmoe::detail::ContextCheckpoints::Stops st{&us, 576, 512, 512, device};
+        std::vector<int64_t> v;
+        for (int64_t i = 0; i < 576;) {
+            const int64_t e = c.next_stop(st, i, std::min<int64_t>(512, 576 - i));
+            v.push_back(e);
+            i = e;
+        }
+        return v;
+    };
+    const std::vector<int64_t> host = ends(false), dev = ends(true);
+    check(host == std::vector<int64_t>({12, 64, 200, 400, 572, 576}), "host prefill stops at every user start and both tail points");
+    check(dev == std::vector<int64_t>({12, 524, 572, 576}), "device prefill stops only at the preamble, the piece width and the 4-token tail");
+}
+
 int main(int argc, char ** argv) {
+    ckpt_stops_device();
     if (argc < 2) {
         std::printf("usage: %s tiny-jamba.gguf [tiny-llama.gguf]\n", argv[0]);
         return 2;

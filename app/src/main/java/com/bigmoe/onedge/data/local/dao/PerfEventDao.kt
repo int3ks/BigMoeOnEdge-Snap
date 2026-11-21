@@ -19,4 +19,7 @@ interface PerfEventDao {
 
     @Query("DELETE FROM perf_events")
     suspend fun clear()
+
+    @Query("DELETE FROM perf_events WHERE at < :at")
+    suspend fun deleteBefore(at: Long)
 }

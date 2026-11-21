@@ -54,6 +54,8 @@ object MemoryWatch {
     private var started = false
 
     private class Run(val path: String) {
+        /** The load this run belongs to: a reload of the same file is a new run with its own figures. */
+        var info: ModelInfo? = null
         var config = ""
         var beforeLoadMb = 0L
         var afterLoadMb = 0L
@@ -87,6 +89,15 @@ object MemoryWatch {
                         else -> null
                     }
                     var current = run
+                    // The same model loaded again (other settings): the old run ended normally with its unload, the
+                    // new one gets its own config and lowest value. Seen as a Loading state or, when a short load fell
+                    // between two samples, as a Ready state of another load.
+                    if (current != null && current.path == path && current.afterLoadMb > 0 &&
+                        (state is EngineState.Loading || (state is EngineState.Ready && state.info !== current.info))
+                    ) {
+                        finish(current)
+                        current = null
+                    }
                     if (current != null && current.path != path) {
                         finish(current)
                         current = null
@@ -95,6 +106,7 @@ object MemoryWatch {
                         val r = current ?: Run(path).also { it.beforeLoadMb = now.freeMb }
                         if (state is EngineState.Ready && r.afterLoadMb == 0L) {
                             r.afterLoadMb = now.freeMb
+                            r.info = state.info
                             val c = state.info.config
                             r.config = (if (state.info.npuPrefillReady) "NPU on" else "NPU off") + ", cache " + when (c.cacheMode) {
                                 CacheMode.FIXED -> "${c.cacheMb} MiB"

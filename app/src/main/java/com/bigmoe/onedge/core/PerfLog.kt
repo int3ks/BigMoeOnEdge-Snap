@@ -50,13 +50,33 @@ object PerfLog {
         dao = eventDao
         appContext = context.applicationContext
         scope = appScope
+        appVersion = runCatching {
+            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+            (pi.versionName ?: "?") to pi.longVersionCode
+        }.getOrNull()
         MemoryWatch.onAbortedRun = { path, config, minMb, seen ->
-            record("crash", File(path).name, JSONObject().apply {
-                put("path", path)
-                put("config", config)
-                if (minMb >= 0) put("minFreeMb", minMb)
-                put("lastSeenAt", seen)
-            }, at = if (seen > 0) seen else System.currentTimeMillis())
+            val model = File(path).name
+            appScope.launch(Dispatchers.IO) {
+                // How long the app sat idle before it went: a run that ended long after its last answer or load was
+                // Android clearing a background app, not the settings failing.
+                val lastActive = runCatching {
+                    eventDao.all().lastOrNull { it.model == model && (it.kind == "turn" || it.kind == "load") && (seen <= 0 || it.at <= seen) }?.at
+                }.getOrNull()
+                val exit = exitAfter(seen)
+                record("crash", model, JSONObject().apply {
+                    put("path", path)
+                    put("config", config)
+                    if (minMb >= 0) put("minFreeMb", minMb)
+                    put("lastSeenAt", seen)
+                    if (lastActive != null && seen > 0) put("idleSeconds", (seen - lastActive) / 1000)
+                    exit?.let {
+                        put("exitReason", it.reason)
+                        put("exitImportance", it.importance)
+                        put("exitAt", it.at)
+                        it.description?.let { d -> put("exitDescription", d.take(200)) }
+                    }
+                }, at = if (seen > 0) seen else System.currentTimeMillis())
+            }
         }
         appScope.launch {
             var loadingPath: String? = null
@@ -88,6 +108,9 @@ object PerfLog {
                             if (freeBefore >= 0) put("freeBeforeMb", freeBefore)
                             replacing?.let { put("replaced", it) }
                             put("freeAfterMb", freeMbNow())
+                            // Whether Android swaps (zram or a swap file, e.g. a "RAM extension"): decides if a
+                            // major fault of the engine is a swap-in or a file page read again.
+                            swapMb()?.let { (total, free) -> put("swapTotalMb", total); put("swapFreeMb", free) }
                             heatBefore?.put(this, "start")
                             thermalNow().put(this, "end")
                             put("cfg", configJson(s.info.config))
@@ -114,6 +137,11 @@ object PerfLog {
 
     private fun record(kind: String, model: String, data: JSONObject, at: Long = System.currentTimeMillis()) {
         val d = dao ?: return
+        // Which build recorded it: an analysis can leave out what older builds measured.
+        appVersion?.let { (name, code) ->
+            if (!data.has("app")) data.put("app", name)
+            if (!data.has("appCode")) data.put("appCode", code)
+        }
         scope?.launch(Dispatchers.IO) {
             runCatching { d.insert(PerfEventEntity(at = at, kind = kind, model = model, data = data.toString())) }
         }
@@ -123,6 +151,47 @@ object PerfLog {
 
     suspend fun clear() {
         dao?.clear()
+    }
+
+    /** Deletes every entry recorded before [at] (ms); the rest stays. */
+    suspend fun clearBefore(at: Long) {
+        dao?.deleteBefore(at)
+    }
+
+    /** Name and code of this build, null until [start]. */
+    @Volatile private var appVersion: Pair<String, Long>? = null
+
+    class ExitNote(val reason: String, val importance: Int, val at: Long, val description: String?)
+
+    /**
+     * Android's record of how the earlier process ended, if it ended after [seenMs] (the last moment the run was seen
+     * alive; 0 = unknown, then the newest record). Android 11+, null before or when there is none.
+     */
+    private fun exitAfter(seenMs: Long): ExitNote? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val ctx = appContext ?: return null
+        return runCatching {
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val mine = android.os.Process.myPid()
+            val e = am.getHistoricalProcessExitReasons(ctx.packageName, 0, 10)
+                .firstOrNull { it.pid != mine && (seenMs <= 0 || it.timestamp >= seenMs - 5_000) } ?: return null
+            val reason = when (e.reason) {
+                android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
+                android.app.ApplicationExitInfo.REASON_CRASH -> "CRASH"
+                android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "CRASH_NATIVE"
+                android.app.ApplicationExitInfo.REASON_SIGNALED -> "SIGNALED"
+                android.app.ApplicationExitInfo.REASON_ANR -> "ANR"
+                android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "EXCESSIVE_RESOURCE_USAGE"
+                android.app.ApplicationExitInfo.REASON_USER_REQUESTED -> "USER_REQUESTED"
+                android.app.ApplicationExitInfo.REASON_USER_STOPPED -> "USER_STOPPED"
+                android.app.ApplicationExitInfo.REASON_EXIT_SELF -> "EXIT_SELF"
+                android.app.ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "DEPENDENCY_DIED"
+                android.app.ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "PERMISSION_CHANGE"
+                android.app.ApplicationExitInfo.REASON_OTHER -> "OTHER"
+                else -> "CODE_${e.reason}"
+            }
+            ExitNote(reason, e.importance, e.timestamp, e.description)
+        }.getOrNull()
     }
 
     fun counts(kind: String) = dao?.countFlow(kind)
@@ -142,6 +211,17 @@ object PerfLog {
             }
         }
     }
+
+    /** SwapTotal and SwapFree from /proc/meminfo in MiB, null when unreadable. */
+    fun swapMb(): Pair<Long, Long>? = runCatching {
+        var total = -1L
+        var free = -1L
+        File("/proc/meminfo").forEachLine { l ->
+            if (l.startsWith("SwapTotal:")) total = l.filter { it.isDigit() }.toLong() / 1024
+            if (l.startsWith("SwapFree:")) free = l.filter { it.isDigit() }.toLong() / 1024
+        }
+        if (total < 0) null else total to free
+    }.getOrNull()
 
     fun freeMbNow(): Long {
         val am = appContext?.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return -1

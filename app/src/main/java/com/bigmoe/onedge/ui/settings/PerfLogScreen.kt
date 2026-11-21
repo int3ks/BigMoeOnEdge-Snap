@@ -20,6 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -31,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,8 +63,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Performance log (core/PerfLog.kt): what was recorded, the computed summary per model, an export for a chat with
@@ -83,8 +89,7 @@ fun PerfLogScreen(
     var askOpen by remember { mutableStateOf(false) }
     var clearOpen by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableStateOf(0) }
-    // Export: log files of the period waiting for the user's yes/no (only offered while "Write to file" is on).
-    var offerLogs by remember { mutableStateOf<List<File>?>(null) }
+    var exportOpen by remember { mutableStateOf(false) }
     val turnCount = remember { PerfLog.counts("turn") ?: kotlinx.coroutines.flow.flowOf(0) }
     val turns by turnCount.collectAsState(initial = 0)
 
@@ -120,16 +125,7 @@ fun PerfLogScreen(
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { askOpen = true }, enabled = events.any { it.kind == "turn" }) { Text("Ask a model") }
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        val settings = container.settingsDataStore.settingsFlow.first()
-                        val since = events.firstOrNull()?.at ?: 0L
-                        val logs = if (settings.logToFile) {
-                            withContext(Dispatchers.IO) { com.bigmoe.onedge.core.LogFiles.filesSince(since) }
-                        } else emptyList()
-                        if (logs.isEmpty()) exportReport(context, container, report, events, emptyList()) else offerLogs = logs
-                    }
-                }, enabled = events.isNotEmpty()) { Text("Export for Claude") }
+                OutlinedButton(onClick = { exportOpen = true }, enabled = events.isNotEmpty()) { Text("Export for Claude") }
                 TextButton(onClick = { clearOpen = true }, enabled = events.isNotEmpty()) { Text("Clear log") }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -152,39 +148,145 @@ fun PerfLogScreen(
             }
         )
     }
-    offerLogs?.let { logs ->
-        val mb = logs.sumOf { it.length() } / (1024.0 * 1024.0)
-        AlertDialog(
-            onDismissRequest = { offerLogs = null },
-            title = { Text("Include the log file?") },
-            text = {
-                Text(
-                    "${logs.size} log file(s) from this period (${String.format(Locale.US, "%.1f", mb)} MB). The end of each " +
-                        "(up to ${LOG_TAIL_KB} KB) goes into the export. Logs can contain parts of your prompts."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { offerLogs = null; scope.launch { exportReport(context, container, report, events, logs) } }) { Text("Include") }
-            },
-            dismissButton = {
-                TextButton(onClick = { offerLogs = null; scope.launch { exportReport(context, container, report, events, emptyList()) } }) { Text("Without") }
+    if (exportOpen) {
+        ExportDialog(
+            firstAt = events.firstOrNull()?.at ?: 0L,
+            onDismiss = { exportOpen = false },
+            onExport = { since, logs ->
+                exportOpen = false
+                val sel = if (since == null) events else events.filter { it.at >= since }
+                scope.launch { exportReport(context, container, PerfAnalyzer.report(sel, about, ram), sel, logs) }
             }
         )
     }
     if (clearOpen) {
+        var picking by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { clearOpen = false },
             title = { Text("Clear the performance log?") },
-            text = { Text("All recorded loads, answers and crashes are deleted. Chats are not touched.") },
+            text = {
+                Text(
+                    "Delete everything recorded before a day you pick (that day and later stay), or the whole log. " +
+                        "Chats are not touched."
+                )
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    clearOpen = false
-                    scope.launch { withContext(Dispatchers.IO) { PerfLog.clear() }; reloadKey++ }
-                }) { Text("Clear") }
+                Row {
+                    TextButton(onClick = { picking = true }) { Text("Before a date…") }
+                    TextButton(onClick = {
+                        clearOpen = false
+                        scope.launch { withContext(Dispatchers.IO) { PerfLog.clear() }; reloadKey++ }
+                    }) { Text("Everything") }
+                }
             },
             dismissButton = { TextButton(onClick = { clearOpen = false }) { Text("Keep") } }
         )
+        if (picking) {
+            PickDay(
+                initial = System.currentTimeMillis(),
+                onDismiss = { picking = false },
+                onPicked = { day ->
+                    picking = false
+                    clearOpen = false
+                    scope.launch { withContext(Dispatchers.IO) { PerfLog.clearBefore(day) }; reloadKey++ }
+                }
+            )
+        }
     }
+}
+
+/**
+ * Export settings: from which day on (null = all entries) and, while "Write to file" is on, whether the end of the
+ * log files of that period goes in.
+ */
+@Composable
+private fun ExportDialog(firstAt: Long, onDismiss: () -> Unit, onExport: (since: Long?, logs: List<File>) -> Unit) {
+    val context = LocalContext.current
+    val container = (context.applicationContext as OnEdgeApplication).container
+    var since by remember { mutableStateOf<Long?>(null) }
+    var picking by remember { mutableStateOf(false) }
+    var includeLogs by remember { mutableStateOf(false) }
+    var logs by remember { mutableStateOf<List<File>>(emptyList()) }
+    LaunchedEffect(since) {
+        val settings = container.settingsDataStore.settingsFlow.first()
+        logs = if (settings.logToFile) {
+            withContext(Dispatchers.IO) { com.bigmoe.onedge.core.LogFiles.filesSince(since ?: firstAt) }
+        } else emptyList()
+    }
+    val day = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Export for Claude") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("From", style = MaterialTheme.typography.labelLarge)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = since == null, onClick = { since = null })
+                    Text("All entries (since ${day.format(Date(firstAt))})", style = MaterialTheme.typography.bodyMedium)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = since != null, onClick = { picking = true })
+                    Text(
+                        since?.let { "From ${day.format(Date(it))} on" } ?: "From a date…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.clickable { picking = true }
+                    )
+                }
+                if (logs.isNotEmpty()) {
+                    val mb = logs.sumOf { it.length() } / (1024.0 * 1024.0)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = includeLogs, onCheckedChange = { includeLogs = it })
+                        Text(
+                            "Include the log file: ${logs.size} file(s) of this period " +
+                                "(${String.format(Locale.US, "%.1f", mb)} MB), the end of each (up to $LOG_TAIL_KB KB). " +
+                                "Logs can contain parts of your prompts.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onExport(since, if (includeLogs) logs else emptyList()) }) { Text("Export") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+    if (picking) {
+        PickDay(
+            initial = since ?: System.currentTimeMillis(),
+            onDismiss = { picking = false },
+            onPicked = { since = it; picking = false }
+        )
+    }
+}
+
+/** A day picker; [onPicked] gets local midnight of the picked day (the picker itself works in UTC days). */
+@Composable
+private fun PickDay(initial: Long, onDismiss: () -> Unit, onPicked: (Long) -> Unit) {
+    val state = rememberDatePickerState(initialSelectedDateMillis = localDayAsUtc(initial))
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { state.selectedDateMillis?.let { onPicked(utcDayAsLocal(it)) } }, enabled = state.selectedDateMillis != null) {
+                Text("OK")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    ) { DatePicker(state = state) }
+}
+
+private fun localDayAsUtc(ms: Long): Long {
+    val l = Calendar.getInstance().apply { timeInMillis = ms }
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(l.get(Calendar.YEAR), l.get(Calendar.MONTH), l.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+}
+
+private fun utcDayAsLocal(ms: Long): Long {
+    val u = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = ms }
+    return Calendar.getInstance().apply {
+        clear()
+        set(u.get(Calendar.YEAR), u.get(Calendar.MONTH), u.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
 }
 
 @Composable

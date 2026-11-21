@@ -52,6 +52,7 @@ int64_t ContextCheckpoints::next_stop(const Stops & s, int64_t i, int64_t chunk)
         for (auto it = std::upper_bound(s.user_starts->begin(), s.user_starts->end(), (size_t) i);
              it != s.user_starts->end() && inside((int64_t) *it); ++it) {
             const int64_t p = (int64_t) *it;
+            if (s.device && p != (int64_t) s.user_starts->front()) continue;
             if (p == last_user_start(s.user_starts) || last < 0 || p > last + min_step_) {
                 stop = p;
                 break;
@@ -59,6 +60,7 @@ int64_t ContextCheckpoints::next_stop(const Stops & s, int64_t i, int64_t chunk)
         }
     }
     for (const int offset : {k_checkpoint_tail_tokens + s.n_ubatch, k_checkpoint_tail_tokens}) {
+        if (s.device && offset != k_checkpoint_tail_tokens) continue;
         const int64_t p = s.n_prompt - std::min(s.n_batch, offset);
         if (inside(p)) stop = p;
     }
