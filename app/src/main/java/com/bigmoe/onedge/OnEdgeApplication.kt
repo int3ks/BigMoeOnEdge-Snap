@@ -21,6 +21,8 @@ class OnEdgeApplication : Application() {
         LogFiles.init(this) { container.workspace.rootDir }
         // Hugging Face downloads that finished while the app was closed go into the models folder now.
         Thread { runCatching { com.bigmoe.onedge.ui.models.HfDownloads.moveFinished(this) } }.start()
+        // Our own parallel downloads that were interrupted resume.
+        runCatching { com.bigmoe.onedge.ui.models.HfDl.connections = getSharedPreferences("hf_dl", MODE_PRIVATE).getInt("connections", 5); com.bigmoe.onedge.ui.models.HfDl.resume(this) }
         // Log page: record llama.cpp's and the engine's log from the start, but only when the user switched it on
         // (Log page, off by default). Off the main thread: it reads the setting and loads the native library.
         Thread {

@@ -24,6 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.delay
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -310,6 +311,12 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
     var expanded by remember { mutableStateOf<String?>(null) }
     var legend by remember { mutableStateOf(false) }
     var downloads by remember { mutableStateOf<List<HfDownloads.Item>>(emptyList()) }
+    val prefs = remember { context.getSharedPreferences("hf_dl", Context.MODE_PRIVATE) }
+    var conns by remember { mutableStateOf(prefs.getInt("connections", 5)) }
+    HfDl.connections = conns
+    val own by HfDl.items.collectAsState()
+    val landed by HfDl.finished.collectAsState()
+    LaunchedEffect(landed) { if (landed > 0) onMoved() }
     // Progress of our downloads, every 2 s; finished ones are moved into the models folder here too, so
     // that works even where the completion broadcast does not arrive.
     LaunchedEffect(Unit) {
@@ -384,6 +391,22 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                 Text("Hugging Face search", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Text(if (open) "▲" else "▼")
             }
+            own.forEach { d ->
+                val frac = if (d.total > 0) (d.done.toFloat() / d.total).coerceIn(0f, 1f) else 0f
+                Column(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(d.name, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                String.format(Locale.ROOT, "%.0f %% · %s of %s · %.1f MB/s · %s", frac * 100, sizeText(d.done), sizeText(d.total), d.bytesPerSec / 1e6, d.state),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                        TextButton(onClick = { HfDl.cancel(context, d.id) }) { Text("Cancel") }
+                    }
+                    LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth())
+                }
+            }
             downloads.forEach { d ->
                 val frac = if (d.total > 0) (d.done.toFloat() / d.total).coerceIn(0f, 1f) else 0f
                 val state = when (d.status) {
@@ -429,6 +452,12 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                     FilterChip(selected = sortBy == k, onClick = { sortBy = k }, label = { Text(l) })
                 }
             }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Connections per file:", style = MaterialTheme.typography.bodySmall)
+                listOf(1, 3, 5, 8, 12).forEach { n ->
+                    FilterChip(selected = conns == n, onClick = { conns = n; prefs.edit().putInt("connections", n).apply() }, label = { Text("$n") })
+                }
+            }
             TextButton(onClick = { legend = !legend }) { Text(if (legend) "Hide format guide" else "Format guide (speed on a tablet)") }
             if (legend) {
                 Text("Rough estimates for this app (CPU decode, NPU prefill), not measured on your device. Decode here is mostly compute-bound: fewer bits help mainly when the model would not fit or the cache is small.", style = MaterialTheme.typography.bodySmall)
@@ -444,7 +473,7 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                 Text(status, style = MaterialTheme.typography.bodySmall)
             }
             Text(
-                "Several formats can be chosen; then only repos holding a file of one of them are listed (each repo's file list is read, so it takes a few seconds). Downloads run in Android's download manager and are moved into $modelsDir when finished.",
+                "Several formats can be chosen; then only repos holding a file of one of them are listed (each repo's file list is read, so it takes a few seconds). Downloads go straight into $modelsDir with several connections per file and resume after a network drop or an app restart. Fewer connections if Hugging Face answers 429.",
                 style = MaterialTheme.typography.bodySmall
             )
             repos.forEach { r ->
@@ -475,7 +504,10 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                                 )
                             }
                             TextButton(onClick = {
-                                m.parts.forEach { HfDownloads.enqueue(context, r.id, it, modelsDir) }
+                                m.parts.forEach { f ->
+                                    val url = "https://huggingface.co/${r.id}/resolve/main/" + f.path.split('/').joinToString("/") { Uri.encode(it) }
+                                    HfDl.enqueue(context, url, File(modelsDir, f.path.substringAfterLast('/')), f.bytes)
+                                }
                                 Toast.makeText(context, "Download started: ${m.name}" + if (m.parts.size > 1) " (${m.parts.size} parts)" else "", Toast.LENGTH_SHORT).show()
                             }) { Text(if (m.parts.size > 1) "Download all parts" else "Download") }
                         }

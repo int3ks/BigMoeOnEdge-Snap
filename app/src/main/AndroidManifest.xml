@@ -111,6 +111,13 @@
         </service>
 
         <service
+            android:name=".ui.models.HfDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="downloading AI model files the user picked" />
+        </service>
+
+        <service
             android:name=".server.ApiServerService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
