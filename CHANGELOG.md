@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Fix: Hugging Face downloads went into the app storage.** They now go into the model folder chosen on the Models page (without one the Download buttons are off and say so).
 - **Droppable cache share per model:** the model card's Memory section has "Droppable cache share for this model" (Default = the global setting, off, 10/25/50/100 %); applied at the next load of that model.
 - **Removed the empty-`<think>` retry of 7.15/7.16:** the empty spans on Qwen3.8 Flash Next were a symptom of answers breaking off, not a thinking problem (see `docs/OPEN_FLASH_NEXT.md`, postponed). Kept: empty `<think></think>` spans are stripped from the shown answer and never streamed.
 - **Hugging Face has its own page:** a cloud-download button in every page's top bar (between Models and Settings) opens it; the card moved there from the Models page and starts open.

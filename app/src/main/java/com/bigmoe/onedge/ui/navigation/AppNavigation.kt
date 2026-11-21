@@ -259,7 +259,7 @@ fun AppNavigation(
             }
             composable(route = Screen.Hub.route) {
                 val modelsUi by modelViewModel.uiState.collectAsState()
-                com.bigmoe.onedge.ui.models.HuggingFaceScreen(modelsUi.modelsDir) { modelViewModel.refresh() }
+                com.bigmoe.onedge.ui.models.HuggingFaceScreen(modelsUi.modelFolder.orEmpty()) { modelViewModel.refresh() }
             }
             composable(route = Screen.Log.route) {
                 LogScreen(viewModel = settingsViewModel)

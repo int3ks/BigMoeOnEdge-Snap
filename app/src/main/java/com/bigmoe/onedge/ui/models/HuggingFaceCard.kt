@@ -514,6 +514,7 @@ fun HuggingFaceCard(modelsDir: String, startOpen: Boolean = false, onMoved: () -
                     }) { Text("Open") }
                 }
                 if (expanded == r.id) {
+                    if (modelsDir.isBlank()) Text("Choose a model folder on the Models page first: downloads go there.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     val files = r.files
                     if (files == null) Text("Loading files...", style = MaterialTheme.typography.bodySmall)
                     else if (files.isEmpty()) Text("No GGUF files", style = MaterialTheme.typography.bodySmall)
@@ -526,7 +527,7 @@ fun HuggingFaceCard(modelsDir: String, startOpen: Boolean = false, onMoved: () -
                                     style = MaterialTheme.typography.labelSmall
                                 )
                             }
-                            TextButton(onClick = {
+                            TextButton(enabled = modelsDir.isNotBlank(), onClick = {
                                 m.parts.forEach { f ->
                                     val url = "https://huggingface.co/${r.id}/resolve/main/" + f.path.split('/').joinToString("/") { Uri.encode(it) }
                                     HfDl.enqueue(context, url, File(modelsDir, f.path.substringAfterLast('/')), f.bytes)
