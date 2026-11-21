@@ -328,6 +328,9 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
     val own by HfDl.items.collectAsState()
     val landed by HfDl.finished.collectAsState()
     LaunchedEffect(landed) { if (landed > 0) onMoved() }
+    // Resume interrupted jobs now that the app is in the foreground (a foreground service cannot be
+    // started from Application.onCreate on recent Android, so the resume there may have been refused).
+    LaunchedEffect(Unit) { runCatching { HfDl.resume(context) } }
     // Progress of our downloads, every 2 s; finished ones are moved into the models folder here too, so
     // that works even where the completion broadcast does not arrive.
     LaunchedEffect(Unit) {
@@ -412,6 +415,8 @@ fun HuggingFaceCard(modelsDir: String, onMoved: () -> Unit = {}) {
                                 style = MaterialTheme.typography.labelSmall
                             )
                         }
+                        if (d.bytesPerSec == 0L && (d.state == "paused" || d.state == "waiting"))
+                            TextButton(onClick = { runCatching { HfDl.start(context) } }) { Text("Resume") }
                         TextButton(onClick = { HfDl.cancel(context, d.id) }) { Text("Cancel") }
                     }
                     LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth())
