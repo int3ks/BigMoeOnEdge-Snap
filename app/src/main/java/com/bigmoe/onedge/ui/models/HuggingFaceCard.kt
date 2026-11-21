@@ -314,8 +314,10 @@ fun HuggingFaceCard(modelsDir: String, startOpen: Boolean = false, onMoved: () -
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(startOpen) }
-    var query by remember { mutableStateOf("") }
-    var formats by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // The last search (text and parameters) comes back when the page opens again.
+    val searchPrefs = remember { context.getSharedPreferences("hf_search", Context.MODE_PRIVATE) }
+    var query by remember { mutableStateOf(searchPrefs.getString("query", "") ?: "") }
+    var formats by remember { mutableStateOf<Set<String>>(searchPrefs.getStringSet("formats", emptySet())?.toSet() ?: emptySet()) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var repos by remember { mutableStateOf<List<HfRepo>>(emptyList()) }
@@ -344,12 +346,14 @@ fun HuggingFaceCard(modelsDir: String, startOpen: Boolean = false, onMoved: () -
             delay(2000)
         }
     }
-    var sortBy by remember { mutableStateOf("downloads") } // downloads | createdAt | size
-    var minB by remember { mutableStateOf(0) }   // parameter range in billions, 0 = no lower bound
-    var maxB by remember { mutableStateOf(0) }   // 0 = no upper bound
+    var sortBy by remember { mutableStateOf(searchPrefs.getString("sort", "downloads") ?: "downloads") } // downloads | createdAt | size
+    var minB by remember { mutableStateOf(searchPrefs.getInt("minB", 0)) }   // parameter range in billions, 0 = no lower bound
+    var maxB by remember { mutableStateOf(searchPrefs.getInt("maxB", 0)) }   // 0 = no upper bound
 
     fun search() {
         if (query.isBlank() || busy) return
+        searchPrefs.edit().putString("query", query).putStringSet("formats", formats).putString("sort", sortBy)
+            .putInt("minB", minB).putInt("maxB", maxB).apply()
         busy = true
         status = "Searching..."
         repos = emptyList()
@@ -386,6 +390,8 @@ fun HuggingFaceCard(modelsDir: String, startOpen: Boolean = false, onMoved: () -
             }.onFailure { status = "Search failed: ${it.message}" }
         }
     }
+    // Shows the last search's results again on opening (they are not stored, so it is run once more).
+    LaunchedEffect(Unit) { if (query.isNotBlank()) search() }
 
     fun openRepo(r: HfRepo) {
         if (expanded == r.id) { expanded = null; return }

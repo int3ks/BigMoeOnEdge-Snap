@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Hugging Face page keeps the last search:** text, formats, sorting and parameter range are saved on each search and the search runs again when the page opens.
 - **Models left in the app storage: Delete in "App storage used"**, and the move to the model folder goes file by file as far as the room goes (7.17 moved nothing when all did not fit). What stays is tried again at the next start.
 - **No more models in the app storage.** Imports (file picker), LoRA adapters, drafters and projectors are written into the model folder; a file imported from Downloads is removed there afterwards (moved). The archive's "Fetch to app" / "Clear app copy" are gone (Copy to Models and Use in place stay). Models an older version kept in the app storage are moved into the model folder once at start (progress bar; settings and attachments follow the new path; a loaded one is unloaded first). Without a model folder an import says to choose one.
 - **Fix: Hugging Face downloads went into the app storage.** They now go into the model folder chosen on the Models page (without one the Download buttons are off and say so).
