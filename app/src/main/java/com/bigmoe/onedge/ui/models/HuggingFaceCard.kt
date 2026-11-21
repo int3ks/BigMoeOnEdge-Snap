@@ -86,9 +86,9 @@ private fun httpGet(url: String): String {
     }
 }
 
-private fun searchRepos(query: String): List<Pair<String, Long>> {
+private fun searchRepos(query: String, sort: String): List<Pair<String, Long>> {
     val q = URLEncoder.encode(query.trim(), "UTF-8")
-    val arr = JSONArray(httpGet("https://huggingface.co/api/models?search=$q&filter=gguf&sort=downloads&direction=-1&limit=40"))
+    val arr = JSONArray(httpGet("https://huggingface.co/api/models?search=$q&filter=gguf&sort=$sort&direction=-1&limit=40"))
     return (0 until arr.length()).map { i ->
         val o = arr.getJSONObject(i)
         o.getString("id") to o.optLong("downloads", 0)
@@ -227,6 +227,7 @@ fun HuggingFaceCard(modelsDir: String) {
     var repos by remember { mutableStateOf<List<HfRepo>>(emptyList()) }
     var expanded by remember { mutableStateOf<String?>(null) }
     var legend by remember { mutableStateOf(false) }
+    var sortBy by remember { mutableStateOf("downloads") } // downloads | createdAt | size
 
     fun search() {
         if (query.isBlank() || busy) return
@@ -235,21 +236,24 @@ fun HuggingFaceCard(modelsDir: String) {
         repos = emptyList()
         expanded = null
         val fmt = formats
+        val sort = sortBy
         scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    val found = searchRepos(query)
-                    if (fmt.isEmpty()) {
+                    val found = searchRepos(query, if (sort == "createdAt") "createdAt" else "downloads")
+                    // Sorting by size needs every repo's file list, as a format filter does.
+                    val list = if (fmt.isEmpty() && sort != "size") {
                         found.map { HfRepo(it.first, it.second, null) }
                     } else {
                         // Look into every repo's file list and keep the ones that hold the format.
                         found.map { (id, dl) ->
                             async {
                                 val files = runCatching { listGguf(id) }.getOrDefault(emptyList())
-                                HfRepo(id, dl, files.filter { f -> fmt.any { matchesFormat(f.path, it) } })
+                                HfRepo(id, dl, if (fmt.isEmpty()) files else files.filter { f -> fmt.any { matchesFormat(f.path, it) } })
                             }
                         }.awaitAll().filter { !it.files.isNullOrEmpty() }
                     }
+                    if (sort == "size") list.sortedBy { r -> groupModels(r.files.orEmpty()).minOfOrNull { it.bytes } ?: Long.MAX_VALUE } else list
                 }
             }
             busy = false
@@ -289,6 +293,12 @@ fun HuggingFaceCard(modelsDir: String) {
                 FilterChip(selected = formats.isEmpty(), onClick = { formats = emptySet() }, label = { Text("any") })
                 HF_FORMATS.forEach { f ->
                     FilterChip(selected = f in formats, onClick = { formats = if (f in formats) formats - f else formats + f }, label = { Text(f) })
+                }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Sort:", style = MaterialTheme.typography.bodySmall)
+                listOf("downloads" to "Downloads", "createdAt" to "Newest", "size" to "Size (smallest)").forEach { (k, l) ->
+                    FilterChip(selected = sortBy == k, onClick = { sortBy = k }, label = { Text(l) })
                 }
             }
             TextButton(onClick = { legend = !legend }) { Text(if (legend) "Hide format guide" else "Format guide (speed on a tablet)") }

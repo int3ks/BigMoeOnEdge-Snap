@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Hugging Face search sorting:** Downloads (default), Newest (repo creation date, from the API) or Size (smallest model of the chosen formats first; reads every found repo's file list).
 - **Format guide in the Hugging Face search** ("Format guide (speed on a tablet)"): per quant format the bits per weight, a rough CPU-decode speed estimate for this engine, whether the Hexagon NPU prefill handles it (llama.cpp 0411's HTP matmul: Q4_0/Q4_1/Q4_K/Q5_K/Q6_K/Q8_0/IQ4_NL/MXFP4) and the quality. Estimates, not measurements.
 - **Hugging Face search, round 2:** several formats at once (e.g. Q4_0 + Q4_1), an "Open" button per repo (its page in the browser), files grouped into models with the total size (split GGUFs: "N parts") and a "Download all parts" button, and downloads land in the models folder: DownloadManager writes into Download (it may not write elsewhere), and each finished download is moved into the models folder by a receiver while the app runs, or at the next app start (`HfDownloads`).
 - **Hugging Face search on the Models page** (`ui/models/HuggingFaceCard.kt`, collapsible card "Hugging Face search"): search GGUF repos by name (most downloaded first), optionally filtered by quant format (Q4_0, Q4_1, Q4_K_S, Q4_K_M, IQ4_NL, ...; the file lists of the found repos are read and only repos with a file of that format are shown), tap a repo for its GGUF files with sizes, Download puts the file into the Download folder via Android's DownloadManager (notification with progress), from where the archive card moves it.
