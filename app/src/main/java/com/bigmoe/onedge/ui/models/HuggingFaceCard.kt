@@ -1,6 +1,11 @@
 package com.bigmoe.onedge.ui.models
 
 import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import java.io.File
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
@@ -45,9 +50,9 @@ import java.net.URLEncoder
 import java.util.Locale
 
 /** One GGUF file of a Hugging Face repo. */
-private data class HfFile(val path: String, val bytes: Long)
+internal data class HfFile(val path: String, val bytes: Long)
 
-/** A repo found by the search, with the GGUF files that match the chosen format (all GGUFs when none is chosen). */
+/** A repo found by the search, with the GGUF files that match the chosen formats (all GGUFs when none is chosen). */
 private data class HfRepo(val id: String, val downloads: Long, val files: List<HfFile>?)
 
 /** Formats to filter by; matched in the file name, case-insensitive, as a whole token. */
@@ -109,18 +114,86 @@ private fun matchesFormat(path: String, format: String): Boolean {
 private fun sizeText(bytes: Long): String =
     if (bytes <= 0) "?" else String.format(Locale.ROOT, "%.1f GB", bytes / 1_000_000_000.0)
 
-/** Into the public Download folder, as a browser download would go; from there the archive card moves it. */
-private fun enqueue(context: Context, repo: String, file: HfFile) {
-    val name = file.path.substringAfterLast('/')
-    val url = "https://huggingface.co/$repo/resolve/main/" + file.path.split('/').joinToString("/") { Uri.encode(it) } + "?download=true"
-    val req = DownloadManager.Request(Uri.parse(url))
-        .setTitle(name)
-        .setDescription(repo)
-        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-        .setAllowedOverMetered(true)
-    (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
-    Toast.makeText(context, "Download started: $name", Toast.LENGTH_SHORT).show()
+/** A model: one file, or the parts of a split GGUF (name-00001-of-00003.gguf), with their total size. */
+private data class HfModel(val name: String, val parts: List<HfFile>) {
+    val bytes: Long get() = parts.sumOf { it.bytes }
+}
+
+private val PART_RE = Regex("""-(\d{5})-of-(\d{5})\.gguf$""", RegexOption.IGNORE_CASE)
+
+private fun groupModels(files: List<HfFile>): List<HfModel> =
+    files.groupBy { PART_RE.replace(it.path, ".gguf") }
+        .map { (key, parts) -> HfModel(key.substringAfterLast('/'), parts.sortedBy { it.path }) }
+        .sortedBy { it.name }
+
+private const val PREFS = "hf_downloads"
+
+/**
+ * Downloads run through Android's DownloadManager (it survives the app being closed) into the Download
+ * folder, and are moved into the models folder once finished: by the receiver below while the app runs,
+ * otherwise at the next start (moveFinished from OnEdgeApplication). DownloadManager itself may not write
+ * outside the standard folders.
+ */
+object HfDownloads {
+    internal fun enqueue(context: Context, repo: String, file: HfFile, modelsDir: String) {
+        val name = file.path.substringAfterLast('/')
+        val url = "https://huggingface.co/$repo/resolve/main/" + file.path.split('/').joinToString("/") { Uri.encode(it) } + "?download=true"
+        val req = DownloadManager.Request(Uri.parse(url))
+            .setTitle(name)
+            .setDescription("$repo → Models")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+            .setAllowedOverMetered(true)
+        val id = (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(id.toString(), File(modelsDir, name).absolutePath).apply()
+    }
+
+    /** Move every finished download of ours into the models folder; forget failed ones. Returns how many moved. */
+    fun moveFinished(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        var moved = 0
+        for ((key, target) in prefs.all) {
+            val id = key.toLongOrNull() ?: continue
+            val dest = target as? String ?: continue
+            dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
+                if (!c.moveToFirst()) { prefs.edit().remove(key).apply(); return@use }
+                val st = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                if (st == DownloadManager.STATUS_FAILED) { prefs.edit().remove(key).apply(); return@use }
+                if (st != DownloadManager.STATUS_SUCCESSFUL) return@use
+                val local = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))?.let { Uri.parse(it).path }
+                val src = local?.let { File(it) }
+                if (src == null || !src.exists()) { prefs.edit().remove(key).apply(); return@use }
+                val out = File(dest).also { it.parentFile?.mkdirs() }
+                val ok = src.renameTo(out) || runCatching { src.copyTo(out, overwrite = true); src.delete(); true }.getOrDefault(false)
+                if (ok) {
+                    moved++
+                    prefs.edit().remove(key).apply()
+                    // The finished entry pointed at the Download copy, which is gone now.
+                    runCatching { dm.remove(id) }
+                }
+            }
+        }
+        return moved
+    }
+
+    private var receiver: BroadcastReceiver? = null
+
+    /** While the app runs, move each download as soon as it finishes. */
+    fun register(context: Context, onMoved: () -> Unit = {}) {
+        val app = context.applicationContext
+        moveFinished(app)
+        if (receiver != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                Thread { if (moveFinished(app) > 0) onMoved() }.start()
+            }
+        }
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(r, filter, Context.RECEIVER_EXPORTED)
+        else app.registerReceiver(r, filter)
+        receiver = r
+    }
 }
 
 /**
@@ -128,12 +201,12 @@ private fun enqueue(context: Context, repo: String, file: HfFile) {
  * file of one format (Q4_0, Q4_K_M, ...), and download a file to the Download folder.
  */
 @Composable
-fun HuggingFaceCard() {
+fun HuggingFaceCard(modelsDir: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    var format by remember { mutableStateOf<String?>(null) }
+    var formats by remember { mutableStateOf<Set<String>>(emptySet()) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var repos by remember { mutableStateOf<List<HfRepo>>(emptyList()) }
@@ -145,19 +218,19 @@ fun HuggingFaceCard() {
         status = "Searching..."
         repos = emptyList()
         expanded = null
-        val fmt = format
+        val fmt = formats
         scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val found = searchRepos(query)
-                    if (fmt == null) {
+                    if (fmt.isEmpty()) {
                         found.map { HfRepo(it.first, it.second, null) }
                     } else {
                         // Look into every repo's file list and keep the ones that hold the format.
                         found.map { (id, dl) ->
                             async {
                                 val files = runCatching { listGguf(id) }.getOrDefault(emptyList())
-                                HfRepo(id, dl, files.filter { matchesFormat(it.path, fmt) })
+                                HfRepo(id, dl, files.filter { f -> fmt.any { matchesFormat(f.path, it) } })
                             }
                         }.awaitAll().filter { !it.files.isNullOrEmpty() }
                     }
@@ -166,7 +239,7 @@ fun HuggingFaceCard() {
             busy = false
             result.onSuccess {
                 repos = it
-                status = if (it.isEmpty()) "Nothing found" + (fmt?.let { f -> " with $f" } ?: "") else "${it.size} repos"
+                status = if (it.isEmpty()) "Nothing found" + (if (fmt.isEmpty()) "" else " with " + fmt.joinToString()) else "${it.size} repos"
             }.onFailure { status = "Search failed: ${it.message}" }
         }
     }
@@ -197,9 +270,9 @@ fun HuggingFaceCard() {
                 modifier = Modifier.fillMaxWidth()
             )
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = format == null, onClick = { format = null }, label = { Text("any") })
+                FilterChip(selected = formats.isEmpty(), onClick = { formats = emptySet() }, label = { Text("any") })
                 HF_FORMATS.forEach { f ->
-                    FilterChip(selected = format == f, onClick = { format = if (format == f) null else f }, label = { Text(f) })
+                    FilterChip(selected = f in formats, onClick = { formats = if (f in formats) formats - f else formats + f }, label = { Text(f) })
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -207,28 +280,39 @@ fun HuggingFaceCard() {
                 Text(status, style = MaterialTheme.typography.bodySmall)
             }
             Text(
-                "With a format chosen, only repos that hold a file of that format are listed (each repo's file list is read, so it takes a few seconds). Downloads go to the Download folder; move them to /Models or the archive from there.",
+                "Several formats can be chosen; then only repos holding a file of one of them are listed (each repo's file list is read, so it takes a few seconds). Downloads run in Android's download manager and are moved into $modelsDir when finished.",
                 style = MaterialTheme.typography.bodySmall
             )
             repos.forEach { r ->
-                Column(Modifier.fillMaxWidth().clickable { openRepo(r) }.padding(vertical = 4.dp)) {
-                    Text(r.id, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "${r.downloads} downloads" + (r.files?.let { " · ${it.size} file(s)" + (format?.let { f -> " $f" } ?: "") } ?: ""),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { openRepo(r) }.padding(vertical = 4.dp)) {
+                        Text(r.id, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "${r.downloads} downloads" + (r.files?.let { " · ${groupModels(it).size} model(s)" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/${r.id}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }) { Text("Open") }
                 }
                 if (expanded == r.id) {
                     val files = r.files
                     if (files == null) Text("Loading files...", style = MaterialTheme.typography.bodySmall)
                     else if (files.isEmpty()) Text("No GGUF files", style = MaterialTheme.typography.bodySmall)
-                    else files.forEach { f ->
+                    else groupModels(files).forEach { m ->
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(f.path.substringAfterLast('/'), style = MaterialTheme.typography.bodySmall)
-                                Text(sizeText(f.bytes), style = MaterialTheme.typography.labelSmall)
+                                Text(m.name, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    sizeText(m.bytes) + if (m.parts.size > 1) " in ${m.parts.size} parts" else "",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                             }
-                            TextButton(onClick = { enqueue(context, r.id, f) }) { Text("Download") }
+                            TextButton(onClick = {
+                                m.parts.forEach { HfDownloads.enqueue(context, r.id, it, modelsDir) }
+                                Toast.makeText(context, "Download started: ${m.name}" + if (m.parts.size > 1) " (${m.parts.size} parts)" else "", Toast.LENGTH_SHORT).show()
+                            }) { Text(if (m.parts.size > 1) "Download all parts" else "Download") }
                         }
                     }
                 }
