@@ -393,6 +393,7 @@ fun ModelScreen(
                     }
                 }
             }
+            item(key = "hf_search") { HuggingFaceCard() }
             item(key = "remote_servers") { RemoteServersCard(viewModel) }
             item(key = "model_archive") {
                 ModelArchiveCard(
