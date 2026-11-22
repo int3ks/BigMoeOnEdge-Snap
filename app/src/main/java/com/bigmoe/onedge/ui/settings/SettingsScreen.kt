@@ -790,7 +790,7 @@ private fun SettingsContent(
             ) { viewModel.updateToolsHelpEnabled(it) }
             SwitchRow(
                 "Wiki",
-                "Your own knowledge: put .md or .txt files (a Notion export, notes, how-tos; subfolders are fine) into the wiki folder below and the model searches them offline, before any web search. German and English both work. Only the best four passages reach the model, so a big folder costs no extra prompt time; keep it focused, though, unrelated files crowd out the right passages.",
+                "Your own knowledge: import .md or .txt files or a .zip (a Notion export, notes, how-tos) into BigMoe/wiki below, or copy them there yourself (subfolders are fine), and the model searches them offline, before any web search. German and English both work. Only the best four passages reach the model, so a big folder costs no extra prompt time; keep it focused, though, unrelated files crowd out the right passages.",
                 settings.toolsWikiEnabled
             ) { viewModel.updateToolsWikiEnabled(it) }
             if (settings.toolsWikiEnabled) WikiFolderInfo()

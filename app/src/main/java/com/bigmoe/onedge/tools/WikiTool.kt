@@ -16,15 +16,16 @@ import java.io.File
 import kotlin.math.ln
 
 /**
- * The user's own knowledge: .md / .txt files in `<internal storage>/BigMoe/wiki` (without all-files access: the app's
- * external files folder), subfolders included. Searched with BM25 over an inverted index (term -> chunk ids and counts,
+ * The user's own knowledge: .md / .txt files in `<internal storage>/BigMoe/wiki`, subfolders included (needs all-files
+ * access; without it the wiki is empty, never the app's own storage). Searched with BM25 over an inverted index (term -> chunk ids and counts,
  * terms sorted so a word also finds longer words starting with it, e.g. "akku" -> "akkuverbrauch"). Only offsets are
  * kept for the chunks; their text is read from the file for the hits. Built on the first search, rebuilt when a file
  * changed, and dropped after [IDLE_MS] without a search so it does not hold RAM the expert cache could use.
  */
 class WikiIndex private constructor(private val context: Context) {
     class Hit(val file: String, val heading: String, val text: String)
-    class Stats(val dir: String, val files: Int, val chunks: Int)
+    class Stats(val dir: String, val files: Int, val chunks: Int, val access: Boolean)
+    class ImportResult(val files: Int, val skipped: Int, val errors: List<String>)
 
     private class Built(
         val signature: String,
@@ -44,14 +45,14 @@ class WikiIndex private constructor(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var idleJob: Job? = null
 
-    fun dir(): File {
-        val shared = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
-        val base = if (shared) File(Environment.getExternalStorageDirectory(), "BigMoe/wiki")
-        else File(context.getExternalFilesDir(null) ?: context.filesDir, "wiki")
-        return base.also { runCatching { it.mkdirs() } }
-    }
+    /** Always `<internal storage>/BigMoe/wiki`. */
+    fun dir(): File = File(Environment.getExternalStorageDirectory(), "BigMoe/wiki")
+        .also { if (hasAccess()) runCatching { it.mkdirs() } }
 
-    private fun files(): List<File> = dir().walkTopDown()
+    /** All-files access (Android 11+); below that the manifest's storage permission covers the folder. */
+    fun hasAccess(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+    private fun files(): List<File> = if (!hasAccess()) emptyList() else dir().walkTopDown()
         .onEnter { !it.name.startsWith(".") }
         .filter { f ->
             f.isFile && !f.name.startsWith(".") && f.length() in 1..MAX_FILE_BYTES &&
@@ -65,8 +66,68 @@ class WikiIndex private constructor(private val context: Context) {
     /** Files and chunks now (builds the index when needed). */
     fun stats(): Stats {
         val b = ensure()
-        return Stats(dir().absolutePath, b.files.size, b.chunkLen.size)
+        return Stats(dir().absolutePath, b.files.size, b.chunkLen.size, hasAccess())
     }
+
+    /**
+     * Copies picked files into the wiki folder: .md/.markdown/.txt by their name (a file of the same name is replaced);
+     * a .zip goes into a subfolder named after it, emptied first, with only its text files (folders kept, images and
+     * the rest left out). Everything else is skipped. The index is rebuilt on the next search.
+     */
+    fun import(resolver: android.content.ContentResolver, uris: List<android.net.Uri>): ImportResult {
+        if (!hasAccess()) return ImportResult(0, uris.size, listOf("No all-files access"))
+        val root = dir()
+        var files = 0; var skipped = 0
+        val errors = ArrayList<String>()
+        for (uri in uris) {
+            val name = displayName(resolver, uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+            try {
+                when {
+                    name.endsWith(".zip", true) -> {
+                        val target = File(root, safeName(name.dropLast(4)))
+                        target.deleteRecursively()
+                        target.mkdirs()
+                        val base = target.canonicalPath + File.separator
+                        resolver.openInputStream(uri)?.use { raw ->
+                            java.util.zip.ZipInputStream(raw.buffered()).use { zip ->
+                                while (true) {
+                                    val e = zip.nextEntry ?: break
+                                    if (e.isDirectory) continue
+                                    if (!isText(e.name)) { skipped++; continue }
+                                    val out = File(target, e.name.replace('\\', '/').trimStart('/'))
+                                    if (!out.canonicalPath.startsWith(base)) { skipped++; continue } // no paths out of the folder
+                                    out.parentFile?.mkdirs()
+                                    out.outputStream().use { zip.copyTo(it) }
+                                    files++
+                                }
+                            }
+                        } ?: errors.add(name)
+                    }
+                    isText(name) -> {
+                        val out = File(root, safeName(name))
+                        resolver.openInputStream(uri)?.use { input -> out.outputStream().use { input.copyTo(it) } }
+                            ?.let { files++ } ?: errors.add(name)
+                    }
+                    else -> skipped++
+                }
+            } catch (e: Exception) {
+                errors.add(name + ": " + (e.message ?: e.javaClass.simpleName))
+            }
+        }
+        release()
+        return ImportResult(files, skipped, errors)
+    }
+
+    private fun displayName(resolver: android.content.ContentResolver, uri: android.net.Uri): String? = runCatching {
+        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull()
+
+    private fun isText(name: String) = name.substringAfterLast('.', "").lowercase() in setOf("md", "markdown", "txt") &&
+        !name.substringAfterLast('/').startsWith(".")
+
+    private fun safeName(name: String) = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "import" }
 
     /** Drops the index; the next search reads the folder again. */
     fun release() { synchronized(this) { built = null } }
@@ -235,7 +296,8 @@ class WikiSearchTool(private val index: WikiIndex) : Tool {
     override suspend fun execute(arguments: JSONObject): String {
         val query = arguments.requireString("query")
         val (hits, stats) = withContext(Dispatchers.IO) { index.search(query) to index.stats() }
-        if (stats.files == 0) return "The wiki folder (${stats.dir}) is empty. Tell the user to put .md or .txt files there."
+        if (!stats.access) return "The wiki needs all-files access. Tell the user to allow it in Settings → Tools → Wiki."
+        if (stats.files == 0) return "The wiki folder (${stats.dir}) is empty. Tell the user to import .md, .txt or a .zip export in Settings → Tools → Wiki."
         if (hits.isEmpty()) return "No match for \"$query\" in the user's wiki. Try other keywords, in German and English."
         val sb = StringBuilder()
         for (h in hits) sb.append("[").append(h.file).append(" - ").append(h.heading).append("]\n").append(h.text.take(1800)).append("\n\n")
