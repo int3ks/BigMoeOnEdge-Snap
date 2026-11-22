@@ -257,7 +257,7 @@ class EngineController(
             // forced on where this build and device have it.
             val memoryOptions = if (useModelSpec) runCatching { memoryOptionsProvider(modelPath) }.getOrDefault(ModelMemoryOptions())
             else ModelMemoryOptions()
-            val requested = requestedGlobal.copy(
+            var requested = requestedGlobal.copy(
                 npuPrefill = when (memoryOptions.npu) {
                     null -> requestedGlobal.npuPrefill
                     true -> capabilities.npuPrefill
@@ -269,6 +269,9 @@ class EngineController(
                 cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb,
                 cacheDiscardPct = memoryOptions.discardPct ?: requestedGlobal.cacheDiscardPct
             )
+            // Row streaming does not combine with an NPU prefill (the engine refuses the pair): with the NPU on for this
+            // model the setting simply sits out.
+            if (requested.npuPrefill && requested.rowStream) requested = requested.copy(rowStream = false)
             val wantsSeparateDraft = requested.spec == SpecSource.MTP && !draftPath.isNullOrBlank()
             // A separate MTP sidecar must not disable streaming for the target MoE model. Keep the
             // normal auto policy: MoE target experts stream from storage; the independent sidecar

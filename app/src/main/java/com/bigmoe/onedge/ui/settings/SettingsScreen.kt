@@ -483,12 +483,6 @@ private fun SettingsContent(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(8.dp))
-                ChoiceSetting(
-                    "Auto: maximum (MiB)",
-                    Choices.CACHE_CEIL.map { it to if (it == 0) "no cap" else "$it MiB" },
-                    selected = settings.cacheCeilMb, enabled = cacheOn
-                ) { viewModel.updateCacheCeilMb(it) }
             }
             ChoiceSetting(
                 "Cold experts the system may drop",
@@ -504,8 +498,8 @@ private fun SettingsContent(
             Hint(denseBlurb(settings.denseWeights))
             SwitchRow(
                 "Stream row-gathered tables",
-                "A dense table the model only reads a few ROWS from per token (the token embedding) does not need to be in RAM: only the rows are read, from flash. Lossless - the output is identical. On a model where no table qualifies this does nothing. This is incompatible with NPU prefill.",
-                settings.rowStream, enabled = stream && !settings.npuPrefill
+                "A dense table the model only reads a few ROWS from per token (the token embedding) does not need to be in RAM: only the rows are read, from flash. Lossless - the output is identical. On a model where no table qualifies this does nothing. Not used while NPU prefill is on for the model (the two do not combine): a model's card can switch its NPU off.",
+                settings.rowStream, enabled = stream
             ) { viewModel.updateRowStream(it) }
             ChoiceSetting(
                 "Row-stream resident window",

@@ -55,7 +55,7 @@ object CacheGrow {
             return
         }
         val reserve = cfg.cacheFloorMb.coerceAtLeast(0)
-        val max = cfg.cacheCeilMb.takeIf { it > 0 } ?: Int.MAX_VALUE
+        val max = Int.MAX_VALUE // the engine clamps to the full expert set; free RAM and the reserve are the limit
         val swapRise = if (now.swapMb >= 0 && lastSwap >= 0) now.swapMb - lastSwap else 0L
         lastSwap = now.swapMb
         // The kernel dropped part of the grown cache: the engine's budget followed it down. Take that as the target.

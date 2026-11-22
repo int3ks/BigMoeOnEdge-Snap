@@ -2,6 +2,9 @@
 
 ## Snap fork
 
+- **Narrow screens:** with less than 600 dp width (a phone upright) Settings, Hugging Face and Log sit in a ⋮ menu of the top bar.
+- **Row-gathered tables no longer locked by NPU prefill:** the switch stays usable; a load with the NPU on for the model (global or its card) leaves row streaming out instead of failing.
+- **Auto cache: no maximum.** The setting is gone from the UI; free RAM, the reserve and the app's swap are the limit (the engine clamps to the full expert set).
 - **Expert cache Auto = a growing cache.** The old Auto (sized once at load) is gone; Auto is now a switch on the cache: the model opens with the cache set in Settings or on its card (the minimum), and `CacheGrow` raises the budget in 250 MiB steps (every 8 s, once the cache is full) while free RAM stays 500 MiB above the reserve ("keep this much RAM free", the old Auto floor) and none of the app lands in zram; under the reserve or with the app's swap growing it comes back down, during an answer too (the engine takes the request between two tokens, `Session::request_cache_budget_mb`), never under the minimum, never over the maximum (the old Auto ceiling). The engine offers everything above the minimum to the kernel (`cache_keep_mib`), so another app starting gets that part dropped at once. A stored old Auto becomes Auto from 3000 MiB.
 - **Settings: new group "Expert cache & RAM"** (cache, Auto, reserve, maximum, small-cache switch, cold experts, dense weights, row-gathered tables, model mapping); "MoE streaming & I/O" keeps the I/O settings. Cold experts gets a 5 % step and an explanation of when the kernel takes them. Settings blocks know `cacheGrow`, `cacheReserveMb`, `cacheMaxMb`, `cacheDiscardPct`.
 - **Top bar:** Settings before Hugging Face.
