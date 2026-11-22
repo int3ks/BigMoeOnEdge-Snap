@@ -427,7 +427,7 @@ private fun SettingsContent(
             )
             SwitchRow(
                 "Auto: CPU cores by temperature",
-                "Decode only, decided before each answer, no reload. The decode cores chosen above become the minimum (choose fewer to give Auto room). While the skin temperature is low, Honor's throttle step is calm and the last answer kept (almost) all its threads busy, one more core, the fastest one not chosen, is added. When it gets hot or Honor throttles, or an added core did not work, the last added core is taken away again. The title bar shows the temperature, the cores and how many of them worked (\"busy\"). Needs a device that reports its skin temperature.",
+                "Decode only, decided before each answer, no reload. The decode cores chosen above are the START value: a model opens with them, then Auto moves both ways. While the skin temperature is low, Honor's throttle step is calm and the last answer kept (almost) all its threads busy, one more core, the fastest one not in use, is added. When it gets hot or Honor throttles, or a core did not work, the slowest core in use is taken away (never below 2), also one of the cores chosen above. The title bar shows the temperature, the cores and how many of them worked (\"busy\"). Needs a device that reports its skin temperature.",
                 settings.autoCores
             ) { viewModel.updateAutoCores(it) }
             if (settings.autoCores) {

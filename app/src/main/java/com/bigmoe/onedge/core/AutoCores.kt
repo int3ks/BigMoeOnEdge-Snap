@@ -18,10 +18,12 @@ import org.json.JSONObject
 
 /**
  * Auto CPU cores by temperature (decode only, decided before each answer). The cores chosen in Settings are the
- * minimum. While the skin temperature is low, Honor's own throttle level is calm and the last answer used (almost)
- * all its threads ("cores_busy" of the engine's run summary), one more core, the fastest one not in the set, is
- * added. Hot (or throttling) or a core that did not work (cores_busy well under the thread count) takes the last
- * added one away again. Thread count and mask change between two answers (EngineController.tuneLive).
+ * START value (a model opens with them, so it does not begin slowly while the device is still cool); from there the
+ * set moves both ways. While the skin temperature is low, Honor's own throttle level is calm and the last answer used
+ * (almost) all its threads ("cores_busy" of the engine's run summary), one more core, the fastest one not in the set,
+ * is added. Hot (or throttling) or a core that did not work (cores_busy well under the thread count) takes the
+ * slowest core of the set away, never below [MIN_CORES]. Thread count and mask change between two answers
+ * (EngineController.tuneLive).
  *
  * Temperature as in SamTweak: PowerManager.getThermalHeadroom(0) is linear, 0 = SEVERE - 30 C, 1 = SEVERE
  * (43 C skin on Honor); Honor's actual throttle step is Settings.System "ThermalTempLevel" (3 and up = throttling).
@@ -30,6 +32,7 @@ object AutoCores {
     private const val SEVERE_C = 43f
     private const val POLL_MS = 2000L
     private const val HONOR_THROTTLING = 3
+    private const val MIN_CORES = 2
     private const val ADD_PAUSE_MS = 15_000L
     private const val BLOCK_AFTER_HEAT_MS = 60_000L
     private const val BLOCK_AFTER_WASTE_MS = 300_000L
@@ -44,7 +47,9 @@ object AutoCores {
     private var appContext: Context? = null
     private val lock = Mutex()
     private var model: ModelInfo? = null
-    private val extra = ArrayList<Int>()
+    /** The decode cores in use now (0 = not set yet) and the settings' mask they started from. */
+    private var current = 0L
+    private var lastBase = 0L
     private var lastChange = 0L
     private var blockAddUntil = 0L
 
@@ -81,21 +86,19 @@ object AutoCores {
         val info = engine.loadedModel()
         val s = tune
         if (info == null || RemoteServer.isRemotePath(info.path)) {
-            extra.clear(); model = null
+            current = 0L; model = null
             _reading.value = _reading.value.copy(cores = null, busy = null)
             return@withLock
         }
-        if (model !== info) { // a new load starts from the cores of the settings
-            model = info; extra.clear(); lastChange = 0L; blockAddUntil = 0L
-        }
         val baseMask = CpuTopology.effective(s.cpuMask)
         val prefillMask = CpuTopology.effective(s.cpuMaskPrefill)
+        if (model !== info || baseMask != lastBase) { // a new load, or other cores in Settings: start from the settings
+            model = info; lastBase = baseMask; current = baseMask; lastChange = 0L; blockAddUntil = 0L
+        }
         if (!s.autoCores) {
-            if (extra.isNotEmpty()) {
-                val before = ArrayList(extra)
-                extra.clear()
+            if (current != baseMask) {
                 val ok = engine.tuneLive(java.lang.Long.bitCount(baseMask), java.lang.Long.bitCount(prefillMask), null, decodeMask = baseMask, prefillMask = prefillMask)
-                if (!ok) extra.addAll(before) // busy: the next answer tries again
+                if (ok) current = baseMask // busy: the next answer tries again
             }
             _reading.value = _reading.value.copy(cores = null, busy = null)
             return@withLock
@@ -104,36 +107,38 @@ object AutoCores {
         val busy = engine.lastRunJson()
             ?.let { runCatching { JSONObject(it).optDouble("cores_busy", Double.NaN) }.getOrDefault(Double.NaN) }
             ?.takeIf { !it.isNaN() && it > 0.0 }
-        val base = java.lang.Long.bitCount(baseMask)
-        val threads = base + extra.size
+        val threads = java.lang.Long.bitCount(current)
         val now = SystemClock.elapsedRealtime()
         val hot = s.autoCoresHotTenths / 10f
         val cool = s.autoCoresCoolTenths / 10f
-        val before = ArrayList(extra)
-        var changed = false
+        val freq = CpuTopology.maxFreqKhz()
+        fun slowestFirst(mask: Long) = (0 until 64).filter { (mask shr it) and 1L == 1L }
+            .sortedWith(compareBy<Int> { freq.getOrElse(it) { 0L } }.thenByDescending { it })
+        var next = current
         when {
-            extra.isNotEmpty() && level >= HONOR_THROTTLING -> {
-                extra.clear(); changed = true; blockAddUntil = now + BLOCK_AFTER_HEAT_MS
+            level >= HONOR_THROTTLING && threads > MIN_CORES -> {
+                // Honor is throttling: shed two cores at once
+                repeat(minOf(2, threads - MIN_CORES)) { next = next and (1L shl slowestFirst(next).first()).inv() }
+                blockAddUntil = now + BLOCK_AFTER_HEAT_MS
             }
-            extra.isNotEmpty() && skin != null && skin >= hot -> {
-                extra.removeAt(extra.size - 1); changed = true; blockAddUntil = now + BLOCK_AFTER_HEAT_MS
+            skin != null && skin >= hot && threads > MIN_CORES -> {
+                next = next and (1L shl slowestFirst(next).first()).inv()
+                blockAddUntil = now + BLOCK_AFTER_HEAT_MS
             }
-            extra.isNotEmpty() && busy != null && busy < threads - 1.5 -> {
-                extra.removeAt(extra.size - 1); changed = true; blockAddUntil = now + BLOCK_AFTER_WASTE_MS
+            busy != null && busy < threads - 1.5 && threads > MIN_CORES -> {
+                next = next and (1L shl slowestFirst(next).first()).inv()
+                blockAddUntil = now + BLOCK_AFTER_WASTE_MS
             }
             skin != null && skin < cool && level < 2 && now >= blockAddUntil && now - lastChange >= ADD_PAUSE_MS &&
                 (busy == null || busy >= threads - 0.7) -> {
-                val next = CpuTopology.fastestFirst(engine.allowedCpus())
-                    .firstOrNull { (baseMask shr it) and 1L == 0L && it !in extra }
-                if (next != null) { extra.add(next); changed = true }
+                val add = CpuTopology.fastestFirst(engine.allowedCpus()).firstOrNull { (current shr it) and 1L == 0L }
+                if (add != null) next = next or (1L shl add)
             }
         }
-        var decodeMask = baseMask
-        for (c in extra) decodeMask = decodeMask or (1L shl c)
-        if (changed) {
-            val ok = engine.tuneLive(java.lang.Long.bitCount(decodeMask), java.lang.Long.bitCount(prefillMask), null, decodeMask = decodeMask, prefillMask = prefillMask)
-            if (ok) lastChange = now else { extra.clear(); extra.addAll(before) } // engine busy: nothing changed
+        if (next != current) {
+            val ok = engine.tuneLive(java.lang.Long.bitCount(next), java.lang.Long.bitCount(prefillMask), null, decodeMask = next, prefillMask = prefillMask)
+            if (ok) { current = next; lastChange = now } // busy: nothing changed, the next answer tries again
         }
-        _reading.value = Reading(skin, level, base + extra.size, busy)
+        _reading.value = Reading(skin, level, java.lang.Long.bitCount(current), busy)
     }
 }
