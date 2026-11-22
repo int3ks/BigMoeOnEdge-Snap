@@ -86,7 +86,6 @@ internal const val DEBOUNCE_MS = 500L
 private object Choices {
     // Finer where it matters: 250 MiB steps up to 2000, then 500 MiB steps up to 10000.
     val CACHE = listOf(0) + com.bigmoe.onedge.core.SettingChoices.CACHE_MB
-    val CACHE_CEIL = listOf(0) + (1000..10000 step 500).toList()
     val IO = com.bigmoe.onedge.core.SettingChoices.IO_LANES
     val TOPK = listOf(0, 6, 4, 3, 2)
     val PREFETCH = listOf(0, 1, 2, 4)
@@ -874,12 +873,6 @@ private fun SettingsContent(
 
             // ------------------------------------------------------------ diagnostics
             Section("Diagnostics")
-            SwitchRow(
-                "Metrics CSV",
-                "Optional per-token timings, faults, cache and memory snapshots. Adds profiling and file-I/O work, so leave off for normal use and enable when diagnosing a run. Takes effect the next time a model is loaded.",
-                settings.metricsCsv
-            ) { viewModel.updateMetricsCsv(it) }
-            OutlinedButton(onClick = { shareLatestCsv(context) }) { Text("Share latest metrics CSV") }
             Hint("Log: what llama.cpp and the engine print while loading and generating (timings, cache, I/O, errors). Off until you switch \"Record log\" on there. Filter it, copy it or share it as a file.")
             OutlinedButton(onClick = onOpenLog) { Text("Open log") }
             Divider()
@@ -1030,23 +1023,6 @@ private fun SettingsFoldout(
     }
 }
 
-private fun shareLatestCsv(context: android.content.Context) {
-    val dir = File(context.getExternalFilesDir(null), "metrics")
-    // Newest NON-EMPTY file: a model load opens a fresh session file that stays empty until something is generated, and
-    // picking that one shared a 0-byte CSV while the useful one sat right behind it.
-    val latest = dir.listFiles { f -> f.isFile && f.name.endsWith(".csv") && f.length() > 0L }?.maxByOrNull { it.lastModified() }
-    if (latest == null) {
-        android.widget.Toast.makeText(context, "No metrics CSV yet: load a model with Metrics CSV on and chat first.", android.widget.Toast.LENGTH_LONG).show()
-        return
-    }
-    val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", latest)
-    val send = Intent(Intent.ACTION_SEND).apply {
-        type = "text/csv"
-        putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    context.startActivity(Intent.createChooser(send, "Share metrics CSV").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-}
 
 @Composable
 internal fun Section(text: String) {

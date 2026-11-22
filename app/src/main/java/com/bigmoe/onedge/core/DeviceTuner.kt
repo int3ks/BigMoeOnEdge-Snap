@@ -1,6 +1,5 @@
 package com.bigmoe.onedge.core
 
-import com.bigmoe.onedge.data.local.datastore.CACHE_AUTO_MB
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -122,7 +121,7 @@ object DeviceTuner {
     fun valueOf(param: TuneParam, s: EngineSettings): Int = when (param) {
         TuneParam.DECODE_CORES -> java.lang.Long.bitCount(CpuTopology.effective(s.cpuMask))
         TuneParam.PREFILL_CORES -> java.lang.Long.bitCount(CpuTopology.effective(s.cpuMaskPrefill))
-        TuneParam.CACHE -> if (s.cacheMb == CACHE_AUTO_MB || s.cacheMb <= 0) 2000 else s.cacheMb
+        TuneParam.CACHE -> if (s.cacheMb <= 0) 2000 else s.cacheMb
         TuneParam.IO_LANES -> s.ioThreads
         TuneParam.UBATCH -> s.batchWidth
         TuneParam.NPU -> if (s.npuPrefill) 1 else 0

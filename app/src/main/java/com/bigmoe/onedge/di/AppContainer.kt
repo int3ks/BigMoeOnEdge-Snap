@@ -98,7 +98,6 @@ class AppContainer(private val context: Context) {
     val engineController: EngineController by lazy {
         EngineController(
             backendProvider = { NativeEngineBackend(EngineNativeBridge()) },
-            csvPathProvider = { newMetricsCsvPath() },
             loraProvider = { path -> modelManager.loraForModel(path) },
             kvCacheTypeProvider = { path -> modelManager.kvCacheTypeForModel(path) },
             specProvider = { path -> modelManager.specForModel(path) },
@@ -225,15 +224,6 @@ class AppContainer(private val context: Context) {
 
     val generationManager: com.bigmoe.onedge.core.GenerationManager by lazy {
         com.bigmoe.onedge.core.GenerationManager(context.applicationContext, chatRepository, agentController, engineController, toolManager)
-    }
-
-    /** `<external files>/metrics/session-<timestamp>.csv` (shared through FileProvider, see res/xml/file_paths.xml). */
-    private fun newMetricsCsvPath(): String? {
-        val base = context.applicationContext.getExternalFilesDir(null) ?: return null
-        val dir = File(base, "metrics")
-        if (!dir.isDirectory && !dir.mkdirs()) return null
-        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
-        return File(dir, "session-$stamp.csv").absolutePath
     }
 
     /** RAM Android reports as available right now, in MiB. */

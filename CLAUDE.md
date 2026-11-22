@@ -14,9 +14,8 @@ Last updated: 2026-11-11 (release v0.6.70).
 * **Save tokens** (weekly limit): skip unimportant steps, run tests only after bigger changes, read targeted excerpts, bundle changes into one push.
 * Device: **Honor MagicPad 3 Pro** (Snapdragon 8 Elite Gen 5, 16 GB RAM, Hexagon NPU), Android, mouse + keyboard.
   Models he uses: Qwen3.6-35B-A3B (Q4), Gemma 4 (26B, 12B, E4B), Mellum, LFM2-24B-A2B, Qwen3.5/3.6 with MTP.
-* Older docs in `docs/` (HANDOFF.md, STATUS.md, NEXT_CONVERSATION_PROMPT.md, …) are from the previous author of
-  the BigMoeOnEdge+ base and partly outdated (e.g. "talk Arabic" does not apply). CHANGELOG.md "Snap fork" section is
-  the authoritative history of this fork, newest first.
+* Old docs of the BigMoeOnEdge+ base and the 0.5.x era are in `docs/archive/` (outdated; read only for history).
+  CHANGELOG.md "Snap fork" section is the authoritative history of this fork, newest first.
 
 ## What the project is
 

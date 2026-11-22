@@ -124,7 +124,6 @@ class SettingsViewModel(
     fun updatePresencePenalty(v: Float) = launch { dataStore.updatePresencePenalty(v) }
     fun updateSeed(v: Int) = launch { dataStore.updateSeed(v) }
     fun updateCacheMb(v: Int) = launch { dataStore.updateCacheMb(v) }
-    fun updateCacheCeilMb(v: Int) = launch { dataStore.updateCacheCeilMb(v) }
     fun updateCacheGrow(v: Boolean) = launch { dataStore.updateCacheGrow(v) }
     fun updateCacheFloorMb(v: Int) = launch { dataStore.updateCacheFloorMb(v) }
     fun updateIoThreads(v: Int) = launch { dataStore.updateIoThreads(v) }
@@ -190,7 +189,6 @@ class SettingsViewModel(
     fun updateDraftMax(v: Int) = launch { dataStore.updateDraftMax(v) }
     fun updateMtpPMinPct(v: Int) = launch { dataStore.updateMtpPMinPct(v) }
     fun updateSeparateMtpDraftEnabled(v: Boolean) = launch { dataStore.updateSeparateMtpDraftEnabled(v) }
-    fun updateMetricsCsv(v: Boolean) = launch { dataStore.updateMetricsCsv(v) }
     fun updateKvSnapshots(v: Boolean) = launch { dataStore.updateKvSnapshots(v) }
     fun updateNpuPrefill(v: Boolean) = launch { dataStore.updateNpuPrefill(v) }
     fun updateNpuLoaders(v: Int) = launch { dataStore.updateNpuLoaders(v) }

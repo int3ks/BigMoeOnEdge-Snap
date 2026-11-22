@@ -81,7 +81,7 @@ class AppStorageReport(context: Context) {
                 cacheRest.sumOf { size(it) }, cacheRest.map { it.path }, true)
         }
         app.getExternalFilesDir(null)?.let { ext ->
-            add(File(ext, "metrics"), "Metrics CSV files", "Written while \"Metrics CSV\" is on (Settings → Diagnostics).", true)
+            add(File(ext, "metrics"), "Metrics CSV files", "Per-token CSVs of older versions (the setting is gone); safe to delete.", true)
             ext.listFiles().orEmpty().filter { it.name != "metrics" }.forEach { f ->
                 add(f, "Android/data …/files/${f.name}", "In the app's folder on shared storage.", false)
             }

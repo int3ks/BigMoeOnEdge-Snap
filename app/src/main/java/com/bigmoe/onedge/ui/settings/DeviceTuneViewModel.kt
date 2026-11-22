@@ -82,7 +82,7 @@ class DeviceTuneViewModel(
 
     /** The settings' values; an Auto cache as -1 (shown as "Auto"; the test starts it at 2000 MiB). */
     private fun currentValues(s: EngineSettings): Map<TuneParam, Int> = TuneParam.values().associateWith {
-        if (it == TuneParam.CACHE && s.cacheMb == com.bigmoe.onedge.data.local.datastore.CACHE_AUTO_MB) -1 else DeviceTuner.valueOf(it, s)
+        DeviceTuner.valueOf(it, s)
     }
 
     fun dismissMessage() = _ui.update { it.copy(message = null) }

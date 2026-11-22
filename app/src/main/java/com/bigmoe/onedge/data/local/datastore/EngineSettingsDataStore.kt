@@ -135,7 +135,6 @@ data class EngineSettings(
     val presencePenalty: Float = 0f,
     /** -1 = auto, 0 = off, otherwise a fixed budget in MiB. */
     val cacheMb: Int = 2000,
-    val cacheCeilMb: Int = 3000,
     /** Auto: the expert cache grows above cacheMb (the minimum) while RAM is free; cacheFloorMb is the reserve. */
     val cacheGrow: Boolean = false,
     val cacheFloorMb: Int = 1536,
@@ -167,7 +166,6 @@ data class EngineSettings(
     val separateMtpDraftEnabled: Boolean = false,
     // Optional diagnostics perform per-token formatting and memory snapshots; keep the
     // interactive decode path lean unless the user explicitly enables Metrics CSV.
-    val metricsCsv: Boolean = false,
     /** KV snapshots on disk: a chat switch, a reload or an app restart continues without a new prefill. */
     val kvSnapshots: Boolean = true,
     /** Enable optional Hexagon/NPU prefill; off by default so CPU-only APKs remain normal. */
@@ -288,7 +286,7 @@ data class EngineSettings(
         cacheMode = cacheMode,
         cacheMb = cacheMb.coerceAtLeast(0),
         cacheFloorMb = cacheFloorMb,
-        cacheCeilMb = cacheCeilMb,
+        cacheCeilMb = 0, // the old Auto ceiling; the growing cache has none
         ioThreads = ioThreads,
         oDirect = oDirect,
         overlap = overlap,
@@ -312,7 +310,7 @@ data class EngineSettings(
         spec = spec,
         draftMax = draftMax,
         mtpPMinPct = mtpPMinPct,
-        metricsCsv = metricsCsv,
+        metricsCsv = false, // per-token CSV retired: the performance log covers it
         npuPrefill = npuPrefill,
         npuLoaders = npuLoaders,
         npuMinTokens = npuMinTokens,
@@ -368,7 +366,6 @@ class EngineSettingsDataStore(private val context: Context) {
         val PRESENCE_PENALTY = floatPreferencesKey("presence_penalty")
         val SEED = intPreferencesKey("sampling_seed")
         val CACHE_MB = intPreferencesKey("cache_mb_v2")
-        val CACHE_CEIL_MB = intPreferencesKey("cache_ceil_mb")
         val CACHE_FLOOR_MB = intPreferencesKey("cache_floor_mb")
         val CACHE_GROW = booleanPreferencesKey("cache_grow")
         val IO_THREADS = intPreferencesKey("io_threads")
@@ -395,7 +392,6 @@ class EngineSettingsDataStore(private val context: Context) {
         val DRAFT_MAX = intPreferencesKey("draft_max")
         val MTP_P_MIN_PCT = intPreferencesKey("mtp_p_min_pct")
         val SEPARATE_MTP_DRAFT_ENABLED = booleanPreferencesKey("separate_mtp_draft_enabled")
-        val METRICS_CSV = booleanPreferencesKey("metrics_csv")
         val KV_SNAPSHOTS = booleanPreferencesKey("kv_snapshots")
         val NPU_PREFILL = booleanPreferencesKey("npu_prefill")
         val NPU_LOADERS = intPreferencesKey("npu_loaders")
@@ -470,7 +466,6 @@ class EngineSettingsDataStore(private val context: Context) {
             // The old Auto (sized once at load, stored as -1) became the growing cache, opening at 3000 MiB.
             cacheMb = (p[Keys.CACHE_MB] ?: d.cacheMb).let { if (it == CACHE_AUTO_MB) 3000 else it },
             cacheGrow = p[Keys.CACHE_GROW] ?: (p[Keys.CACHE_MB] == CACHE_AUTO_MB),
-            cacheCeilMb = p[Keys.CACHE_CEIL_MB] ?: d.cacheCeilMb,
             cacheFloorMb = p[Keys.CACHE_FLOOR_MB] ?: d.cacheFloorMb,
             ioThreads = p[Keys.IO_THREADS] ?: d.ioThreads,
             oDirect = p[Keys.O_DIRECT] ?: d.oDirect,
@@ -496,7 +491,6 @@ class EngineSettingsDataStore(private val context: Context) {
             draftMax = p[Keys.DRAFT_MAX] ?: d.draftMax,
             mtpPMinPct = p[Keys.MTP_P_MIN_PCT] ?: d.mtpPMinPct,
             separateMtpDraftEnabled = p[Keys.SEPARATE_MTP_DRAFT_ENABLED] ?: d.separateMtpDraftEnabled,
-            metricsCsv = p[Keys.METRICS_CSV] ?: d.metricsCsv,
             kvSnapshots = p[Keys.KV_SNAPSHOTS] ?: d.kvSnapshots,
             npuPrefill = p[Keys.NPU_PREFILL] ?: d.npuPrefill,
             npuLoaders = p[Keys.NPU_LOADERS] ?: d.npuLoaders,
@@ -640,7 +634,6 @@ class EngineSettingsDataStore(private val context: Context) {
     }
     suspend fun updateCacheMb(v: Int) = set(Keys.CACHE_MB, v.coerceAtLeast(0))
     suspend fun updateCacheGrow(v: Boolean) = set(Keys.CACHE_GROW, v)
-    suspend fun updateCacheCeilMb(v: Int) = set(Keys.CACHE_CEIL_MB, v.coerceAtLeast(0))
     suspend fun updateCacheFloorMb(v: Int) = set(Keys.CACHE_FLOOR_MB, v.coerceAtLeast(0))
     suspend fun updateIoThreads(v: Int) = set(Keys.IO_THREADS, v.coerceIn(1, 8))
     suspend fun updateODirect(v: Boolean) = set(Keys.O_DIRECT, v)
@@ -666,7 +659,6 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateDraftMax(v: Int) = set(Keys.DRAFT_MAX, v.coerceIn(1, 8))
     suspend fun updateMtpPMinPct(v: Int) = set(Keys.MTP_P_MIN_PCT, v.coerceIn(0, 100))
     suspend fun updateSeparateMtpDraftEnabled(v: Boolean) = set(Keys.SEPARATE_MTP_DRAFT_ENABLED, v)
-    suspend fun updateMetricsCsv(v: Boolean) = set(Keys.METRICS_CSV, v)
     suspend fun updateKvSnapshots(v: Boolean) = set(Keys.KV_SNAPSHOTS, v)
     suspend fun updateNpuPrefill(v: Boolean) = set(Keys.NPU_PREFILL, v)
     suspend fun updateNpuLoaders(v: Int) = set(Keys.NPU_LOADERS, v.coerceIn(1, 16))
