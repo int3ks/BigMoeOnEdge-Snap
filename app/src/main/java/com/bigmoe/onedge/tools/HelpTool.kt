@@ -52,10 +52,14 @@ class HelpIndex(private val open: () -> InputStream) {
         for (c in chunks) {
             var score = 0.0
             for (t in terms) {
-                val f = c.tf[t] ?: continue
-                val d = (df[t] ?: 0).toDouble()
-                val idf = ln(1.0 + (n - d + 0.5) / (d + 0.5))
-                score += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * c.len / avgLen))
+                fun add(term: String, f: Int, weight: Double) {
+                    val d = (df[term] ?: 0).toDouble()
+                    val idf = ln(1.0 + (n - d + 0.5) / (d + 0.5))
+                    score += weight * idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * c.len / avgLen))
+                }
+                c.tf[t]?.let { add(t, it, 1.0) }
+                // Longer words starting with it count half (compounds: "akku" -> "akkuverbrauch").
+                if (t.length >= 4) for ((k, f) in c.tf) if (k.length > t.length && k.startsWith(t)) add(k, f, 0.5)
             }
             if (score > 0.0) scored.add(Hit(c.source, c.heading, c.text, score))
         }
@@ -63,9 +67,9 @@ class HelpIndex(private val open: () -> InputStream) {
     }
 
     companion object {
-        private val WORD = Regex("[a-z0-9]+")
+        private val WORD = Regex("[\\p{L}\\p{N}]+")
 
-        /** Lower-case words of 2+ characters with a plural s removed (so "experts" finds "expert"). */
+        /** Lower-case words (any letters, umlauts included) of 2+ characters with a plural s removed ("experts" -> "expert"). */
         fun tokenize(text: String): List<String> = WORD.findAll(text.lowercase()).map { it.value }
             .filter { it.length >= 2 }
             .map { if (it.length > 3 && it.endsWith("s") && !it.endsWith("ss")) it.dropLast(1) else it }

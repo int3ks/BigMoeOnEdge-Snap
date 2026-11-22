@@ -844,6 +844,7 @@ class ChatViewModel(
 
     fun toggleToolUtilities() = updateToggles { it.copy(utilities = !it.utilities) }
     fun toggleToolHelp() = updateToggles { it.copy(help = !it.help) }
+    fun toggleToolWiki() = updateToggles { it.copy(wiki = !it.wiki) }
 
     fun toggleToolTermux() = updateToggles { it.copy(termux = !it.termux) }
 

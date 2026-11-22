@@ -206,6 +206,7 @@ class AppContainer(private val context: Context) {
             registerFileTools(this, workspace, artifactRepository)
             registerCodeTools(this, workspace, javaScriptRunner)
             registerUtilityTools(this, AndroidDeviceInfo(context.applicationContext))
+            registerTool(com.bigmoe.onedge.tools.WikiSearchTool(com.bigmoe.onedge.tools.WikiIndex.shared(context)))
             registerTool(com.bigmoe.onedge.tools.AppHelpTool(com.bigmoe.onedge.tools.HelpIndex { context.applicationContext.assets.open("help/help.json") }))
             registerTool(
                 com.bigmoe.onedge.tools.RunShellTool(termuxBridge, workspace, {

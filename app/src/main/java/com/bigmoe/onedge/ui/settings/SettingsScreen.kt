@@ -789,6 +789,12 @@ private fun SettingsContent(
                 settings.toolsHelpEnabled
             ) { viewModel.updateToolsHelpEnabled(it) }
             SwitchRow(
+                "Wiki",
+                "Your own knowledge: put .md or .txt files (a Notion export, notes, how-tos; subfolders are fine) into the wiki folder below and the model searches them offline, before any web search. German and English both work. Only the best four passages reach the model, so a big folder costs no extra prompt time; keep it focused, though, unrelated files crowd out the right passages.",
+                settings.toolsWikiEnabled
+            ) { viewModel.updateToolsWikiEnabled(it) }
+            if (settings.toolsWikiEnabled) WikiFolderInfo()
+            SwitchRow(
                 "Native UI components",
                 "Lets the AI answer with compact in-chat visuals when your request calls for one (compare, pros and cons, timeline, steps, key numbers, slides): comparison tables, navigable slide cards, lists, metrics, badges, progress bars, timelines, expandable sections, selectable cards and action buttons. Rendered directly with Jetpack Compose from a small JSON block — no HTML, CSS, JavaScript or WebView. Off by default: it adds about 450 tokens to the system prompt. Also under the wrench button in the chat.",
                 settings.interactiveUiEnabled

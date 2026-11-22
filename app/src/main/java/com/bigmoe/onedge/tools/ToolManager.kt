@@ -168,6 +168,12 @@ class ToolManager(
                     "first (query in English keywords) and answer from what it returns; do not guess."
             )
         }
+        if (selected.any { it.name == "wiki_search" }) {
+            b.append(
+                " The user keeps own notes and a wiki: when they could answer the question, call wiki_search (keywords in " +
+                    "German and English) before any web search."
+            )
+        }
         selected.firstOrNull { it.name == "run_shell" }?.let { shell ->
             b.append(agentShellHint(runCatching { shell.promptNote() }.getOrNull()))
         }
