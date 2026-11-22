@@ -1,7 +1,11 @@
 package com.bigmoe.onedge.core
 
 import android.os.SystemClock
+import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -13,15 +17,17 @@ import kotlinx.coroutines.launch
  * at MemoryWatch's 2 s pace, then moves the budget to match and stops the cache from growing back into it.
  */
 object CacheGrow {
-    /** Growth step, and the least a shrink takes back. */
-    private const val STEP_MB = 250
-    private const val SHRINK_MIN_MB = 500
-    /** Free RAM above the reserve needed before the cache may grow by a step. */
-    private const val HEADROOM_MB = 500
+    /** The kernel dropping the grown cache is told from the engine's budget lagging a step behind by this much. */
+    private const val DROP_TOLERANCE_MB = 250
     /** The app's swap growing by this much between two samples counts as pressure. */
     private const val SWAP_RISE_MB = 16
-    private const val GROW_EVERY_MS = 8_000L
-    private const val QUIET_AFTER_SHRINK_MS = 30_000L
+
+    /** Pace and sizes come from Settings (live): step, interval, headroom, least shrink, pause after a shrink. */
+    @Volatile private var tune = EngineSettings()
+
+    /** The expert cache now as (budget, resident) in MiB, sampled with the memory watch; null without a local model. */
+    private val _cache = MutableStateFlow<Pair<Int, Int>?>(null)
+    val cache: StateFlow<Pair<Int, Int>?> = _cache
 
     private var target = 0
     private var model: ModelInfo? = null
@@ -29,22 +35,30 @@ object CacheGrow {
     private var lastChange = 0L
     private var quietUntil = 0L
 
-    fun start(engine: EngineController, scope: CoroutineScope) {
+    fun start(engine: EngineController, scope: CoroutineScope, settings: Flow<EngineSettings>) {
+        scope.launch { settings.collect { tune = it } }
         scope.launch {
-            MemoryWatch.now.collect { now -> if (now != null) step(engine, now) }
+            MemoryWatch.now.collect { now ->
+                if (now == null) return@collect
+                val c = engine.cacheMib()?.takeIf { it.size >= 2 }
+                _cache.value = c?.let { it[0] to it[1] }
+                step(engine, now, c)
+            }
         }
     }
 
-    private suspend fun step(engine: EngineController, now: MemoryNow) {
+    private suspend fun step(engine: EngineController, now: MemoryNow, cacheMib: IntArray?) {
         val info = engine.loadedModel()
         val cfg = info?.config
         if (info == null || cfg == null || cfg.cacheMode != CacheMode.AUTO || cfg.cacheMb <= 0) {
             model = null
             return
         }
-        val (budget, resident) = engine.cacheMib()?.takeIf { it.size >= 2 }?.let { it[0] to it[1] } ?: return
+        val (budget, resident) = cacheMib?.let { it[0] to it[1] } ?: return
         if (budget <= 0) return
         val t = SystemClock.elapsedRealtime()
+        val tn = tune
+        val stepMb = tn.cacheGrowStepMb
         val min = cfg.cacheMb
         if (model !== info) { // a new load: start from what it opened with
             model = info
@@ -59,23 +73,23 @@ object CacheGrow {
         val swapRise = if (now.swapMb >= 0 && lastSwap >= 0) now.swapMb - lastSwap else 0L
         lastSwap = now.swapMb
         // The kernel dropped part of the grown cache: the engine's budget followed it down. Take that as the target.
-        if (budget < target - STEP_MB) target = maxOf(min, budget)
+        if (budget < target - maxOf(DROP_TOLERANCE_MB, stepMb)) target = maxOf(min, budget)
 
         if (now.freeMb < reserve || swapRise >= SWAP_RISE_MB) {
-            val next = maxOf(min, target - maxOf(SHRINK_MIN_MB, (reserve - now.freeMb).toInt()))
+            val next = maxOf(min, target - maxOf(tn.cacheShrinkMinMb, (reserve - now.freeMb).toInt()))
             if (next < target) {
                 target = next
                 engine.resizeCache(target)
                 lastChange = t
             }
-            quietUntil = t + QUIET_AFTER_SHRINK_MS
+            quietUntil = t + tn.cacheQuietSec * 1000L
             return
         }
         val full = resident >= budget * 9 / 10 // growing an unfilled cache buys nothing
-        if (t >= quietUntil && t - lastChange >= GROW_EVERY_MS && full && budget >= target - 64 &&
-            now.freeMb > reserve + HEADROOM_MB && swapRise <= 0 && target < max
+        if (t >= quietUntil && t - lastChange >= tn.cacheGrowEverySec * 1000L && full && budget >= target - 64 &&
+            now.freeMb > reserve + tn.cacheGrowHeadroomMb && swapRise <= 0 && target < max
         ) {
-            target = minOf(max, target + STEP_MB)
+            target = minOf(max, target + stepMb)
             engine.resizeCache(target)
             lastChange = t
         }

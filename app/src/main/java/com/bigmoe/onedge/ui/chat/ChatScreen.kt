@@ -272,10 +272,13 @@ fun ChatScreen(
                         // and its cache leave the tablet little room.
                         val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
                         val aliases by com.bigmoe.onedge.core.ModelAliases.map.collectAsState()
+                        val cacheNow by com.bigmoe.onedge.core.CacheGrow.cache.collectAsState()
                         if (modelName != null) {
                             Text(
                                 text = (aliases[modelName] ?: modelName) + (memoryNow?.let { m ->
-                                    " \u2022 ${m.freeMb} MiB free" + (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "") +
+                                    " \u2022 ${m.freeMb} MiB free" +
+                                        (cacheNow?.let { c -> " \u2022 ${c.first} MiB cache (${c.second} used)" } ?: "") +
+                                        (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "") +
                                         (if (m.faultsPerSec >= 0) " \u2022 ${m.faultsPerSec} faults/s" else "")
                                 } ?: ""),
                                 maxLines = if (headerExpanded) Int.MAX_VALUE else 1,

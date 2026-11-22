@@ -126,6 +126,11 @@ class SettingsViewModel(
     fun updateCacheMb(v: Int) = launch { dataStore.updateCacheMb(v) }
     fun updateCacheGrow(v: Boolean) = launch { dataStore.updateCacheGrow(v) }
     fun updateCacheFloorMb(v: Int) = launch { dataStore.updateCacheFloorMb(v) }
+    fun updateCacheGrowStepMb(v: Int) = launch { dataStore.updateCacheGrowStepMb(v) }
+    fun updateCacheGrowEverySec(v: Int) = launch { dataStore.updateCacheGrowEverySec(v) }
+    fun updateCacheGrowHeadroomMb(v: Int) = launch { dataStore.updateCacheGrowHeadroomMb(v) }
+    fun updateCacheShrinkMinMb(v: Int) = launch { dataStore.updateCacheShrinkMinMb(v) }
+    fun updateCacheQuietSec(v: Int) = launch { dataStore.updateCacheQuietSec(v) }
     fun updateIoThreads(v: Int) = launch { dataStore.updateIoThreads(v) }
     fun updateODirect(v: Boolean) = launch { dataStore.updateODirect(v) }
     fun updateOverlap(v: Boolean) = launch { dataStore.updateOverlap(v) }

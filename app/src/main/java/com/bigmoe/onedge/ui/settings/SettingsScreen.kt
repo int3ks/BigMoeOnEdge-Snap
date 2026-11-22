@@ -472,7 +472,7 @@ private fun SettingsContent(
             }
             SwitchRow(
                 "Auto: grow while RAM is free",
-                "The model opens with the cache above. While more than the reserve below is free and none of the app lands in zram, the cache grows in 250 MiB steps (every 8 s, once it is full). When free RAM falls under the reserve or the app's zram grows, it shrinks again, also during an answer, never under the cache above. Everything it grew by is offered to Android: starting another app makes the system drop that part at once instead of compressing or closing apps.",
+                "The model opens with the cache above. While more than the reserve below (plus the headroom) is free and none of the app lands in zram, the cache grows in steps (once it is full; step and pace are set below). When free RAM falls under the reserve or the app's zram grows, it shrinks again, also during an answer, never under the cache above. Everything it grew by is offered to Android: starting another app makes the system drop that part at once instead of compressing or closing apps.",
                 settings.cacheGrow, enabled = cacheOn
             ) { viewModel.updateCacheGrow(it) }
             if (settings.cacheGrow) {
@@ -485,6 +485,32 @@ private fun SettingsContent(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
+                ChoiceSetting(
+                    "Auto: growth step",
+                    listOf(50, 100, 150, 250, 500).map { it to "$it MiB" },
+                    selected = settings.cacheGrowStepMb, enabled = cacheOn
+                ) { viewModel.updateCacheGrowStepMb(it) }
+                ChoiceSetting(
+                    "Auto: time between growth steps",
+                    listOf(2, 4, 6, 8, 15).map { it to "$it s" },
+                    selected = settings.cacheGrowEverySec, enabled = cacheOn
+                ) { viewModel.updateCacheGrowEverySec(it) }
+                ChoiceSetting(
+                    "Auto: free RAM needed above the reserve to grow",
+                    listOf(150, 300, 500, 750, 1000).map { it to "$it MiB" },
+                    selected = settings.cacheGrowHeadroomMb, enabled = cacheOn
+                ) { viewModel.updateCacheGrowHeadroomMb(it) }
+                ChoiceSetting(
+                    "Auto: least a shrink takes back",
+                    listOf(100, 250, 500, 750).map { it to "$it MiB" },
+                    selected = settings.cacheShrinkMinMb, enabled = cacheOn
+                ) { viewModel.updateCacheShrinkMinMb(it) }
+                ChoiceSetting(
+                    "Auto: pause after a shrink",
+                    listOf(5, 15, 30, 60).map { it to "$it s" },
+                    selected = settings.cacheQuietSec, enabled = cacheOn
+                ) { viewModel.updateCacheQuietSec(it) }
+                Hint("These five apply at once, no reload. Faster growth (small step, short pace, low headroom) follows free RAM closely but moves memory more often; slower growth is calmer. A shrink takes back at least the amount above, more if free RAM is further under the reserve. The pause keeps the cache from growing right back into the pressure. The sampling pace is 2 s, so nothing reacts faster than that.")
             }
             ChoiceSetting(
                 "Cold experts the system may drop",

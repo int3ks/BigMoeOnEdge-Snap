@@ -138,6 +138,12 @@ data class EngineSettings(
     /** Auto: the expert cache grows above cacheMb (the minimum) while RAM is free; cacheFloorMb is the reserve. */
     val cacheGrow: Boolean = false,
     val cacheFloorMb: Int = 1536,
+    /** Auto growth tuning, applied live (no reload): growth step, least time between steps, free RAM needed above the reserve, least a shrink takes back, quiet time after a shrink. */
+    val cacheGrowStepMb: Int = 100,
+    val cacheGrowEverySec: Int = 4,
+    val cacheGrowHeadroomMb: Int = 300,
+    val cacheShrinkMinMb: Int = 250,
+    val cacheQuietSec: Int = 15,
     val ioThreads: Int = 4,
     val oDirect: Boolean = true,
     /** Enabled by default: hide expert flash-read latency behind CPU FFN compute when the hook exists. */
@@ -367,6 +373,11 @@ class EngineSettingsDataStore(private val context: Context) {
         val SEED = intPreferencesKey("sampling_seed")
         val CACHE_MB = intPreferencesKey("cache_mb_v2")
         val CACHE_FLOOR_MB = intPreferencesKey("cache_floor_mb")
+        val CACHE_GROW_STEP_MB = intPreferencesKey("cache_grow_step_mb")
+        val CACHE_GROW_EVERY_SEC = intPreferencesKey("cache_grow_every_sec")
+        val CACHE_GROW_HEADROOM_MB = intPreferencesKey("cache_grow_headroom_mb")
+        val CACHE_SHRINK_MIN_MB = intPreferencesKey("cache_shrink_min_mb")
+        val CACHE_QUIET_SEC = intPreferencesKey("cache_quiet_sec")
         val CACHE_GROW = booleanPreferencesKey("cache_grow")
         val IO_THREADS = intPreferencesKey("io_threads")
         val O_DIRECT = booleanPreferencesKey("o_direct")
@@ -467,6 +478,11 @@ class EngineSettingsDataStore(private val context: Context) {
             cacheMb = (p[Keys.CACHE_MB] ?: d.cacheMb).let { if (it == CACHE_AUTO_MB) 3000 else it },
             cacheGrow = p[Keys.CACHE_GROW] ?: (p[Keys.CACHE_MB] == CACHE_AUTO_MB),
             cacheFloorMb = p[Keys.CACHE_FLOOR_MB] ?: d.cacheFloorMb,
+            cacheGrowStepMb = p[Keys.CACHE_GROW_STEP_MB] ?: d.cacheGrowStepMb,
+            cacheGrowEverySec = p[Keys.CACHE_GROW_EVERY_SEC] ?: d.cacheGrowEverySec,
+            cacheGrowHeadroomMb = p[Keys.CACHE_GROW_HEADROOM_MB] ?: d.cacheGrowHeadroomMb,
+            cacheShrinkMinMb = p[Keys.CACHE_SHRINK_MIN_MB] ?: d.cacheShrinkMinMb,
+            cacheQuietSec = p[Keys.CACHE_QUIET_SEC] ?: d.cacheQuietSec,
             ioThreads = p[Keys.IO_THREADS] ?: d.ioThreads,
             oDirect = p[Keys.O_DIRECT] ?: d.oDirect,
             overlap = p[Keys.OVERLAP] ?: d.overlap,
@@ -635,6 +651,11 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateCacheMb(v: Int) = set(Keys.CACHE_MB, v.coerceAtLeast(0))
     suspend fun updateCacheGrow(v: Boolean) = set(Keys.CACHE_GROW, v)
     suspend fun updateCacheFloorMb(v: Int) = set(Keys.CACHE_FLOOR_MB, v.coerceAtLeast(0))
+    suspend fun updateCacheGrowStepMb(v: Int) = set(Keys.CACHE_GROW_STEP_MB, v.coerceIn(16, 2000))
+    suspend fun updateCacheGrowEverySec(v: Int) = set(Keys.CACHE_GROW_EVERY_SEC, v.coerceIn(2, 120))
+    suspend fun updateCacheGrowHeadroomMb(v: Int) = set(Keys.CACHE_GROW_HEADROOM_MB, v.coerceIn(0, 4000))
+    suspend fun updateCacheShrinkMinMb(v: Int) = set(Keys.CACHE_SHRINK_MIN_MB, v.coerceIn(16, 4000))
+    suspend fun updateCacheQuietSec(v: Int) = set(Keys.CACHE_QUIET_SEC, v.coerceIn(0, 600))
     suspend fun updateIoThreads(v: Int) = set(Keys.IO_THREADS, v.coerceIn(1, 8))
     suspend fun updateODirect(v: Boolean) = set(Keys.O_DIRECT, v)
     suspend fun updateOverlap(v: Boolean) = set(Keys.OVERLAP, v)
