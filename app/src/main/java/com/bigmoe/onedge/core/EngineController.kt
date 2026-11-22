@@ -177,10 +177,11 @@ class EngineController(
      * Live tuning of the loaded model between generations (the device tuner): compute threads for decode and prompt
      * graphs and, when given, the expert-cache budget, without a reload. False while a generation runs.
      */
-    suspend fun tuneLive(decodeThreads: Int, prefillThreads: Int, cacheMb: Int? = null): Boolean = withContext(ioDispatcher) {
+    suspend fun tuneLive(decodeThreads: Int, prefillThreads: Int, cacheMb: Int? = null, decodeMask: Long? = null, prefillMask: Long? = null): Boolean = withContext(ioDispatcher) {
         if (loadedModel() == null || isRemoteLoaded() || !generating.compareAndSet(false, true)) return@withContext false
         try {
             lifecycleMutex.withLock {
+                if (decodeMask != null && prefillMask != null) backend.setCpuMasks(decodeMask, prefillMask)
                 backend.setThreads(decodeThreads, prefillThreads)
                 if (cacheMb != null && cacheMb > 0) backend.setCacheBudget(cacheMb)
             }
@@ -504,6 +505,7 @@ class EngineController(
      * unwind. The flow always ends with exactly one [EngineEvent.Finished] (unless the collector cancels).
      */
     fun generate(request: GenerationRequest): Flow<EngineEvent> = flow {
+        AutoCores.beforeRun(this@EngineController) // Auto cores by temperature: the cores of this answer, before it starts
         val ready = _state.value as? EngineState.Ready
         if (ready == null) {
             emit(failed("No model is loaded. Load a model first."))
@@ -628,6 +630,7 @@ class EngineController(
      * in-app chat's state, so the next in-app turn replays its history (clear_kv), as it does after decide().
      */
     fun generateChat(lease: ApiLease, request: ChatGenRequest): Flow<ChatEvent> = flow {
+        AutoCores.beforeRun(this@EngineController)
         if (_state.value !is EngineState.Ready) {
             emit(chatFailed("No model is loaded. Load a model first.", lease.preempted))
             return@flow

@@ -425,6 +425,24 @@ private fun SettingsContent(
                 onDecode = viewModel::updateCpuMask,
                 onPrefill = viewModel::updateCpuMaskPrefill
             )
+            SwitchRow(
+                "Auto: CPU cores by temperature",
+                "Decode only, decided before each answer, no reload. The decode cores chosen above become the minimum (choose fewer to give Auto room). While the skin temperature is low, Honor's throttle step is calm and the last answer kept (almost) all its threads busy, one more core, the fastest one not chosen, is added. When it gets hot or Honor throttles, or an added core did not work, the last added core is taken away again. The title bar shows the temperature, the cores and how many of them worked (\"busy\"). Needs a device that reports its skin temperature.",
+                settings.autoCores
+            ) { viewModel.updateAutoCores(it) }
+            if (settings.autoCores) {
+                ChoiceSetting(
+                    "Auto cores: add a core below",
+                    listOf(340, 360, 380, 390, 400).map { it to String.format(java.util.Locale.US, "%.1f \u00b0C", it / 10f) },
+                    selected = settings.autoCoresCoolTenths
+                ) { viewModel.updateAutoCoresCoolTenths(it) }
+                ChoiceSetting(
+                    "Auto cores: take one away above",
+                    listOf(390, 400, 405, 410, 420).map { it to String.format(java.util.Locale.US, "%.1f \u00b0C", it / 10f) },
+                    selected = settings.autoCoresHotTenths
+                ) { viewModel.updateAutoCoresHotTenths(it) }
+                Hint("Skin temperature as SamTweak shows it: Honor starts to throttle around 41 to 43 \u00b0C. Between the two values nothing changes.")
+            }
             ChoiceSetting(
                 "Batch width (ubatch)",
                 Choices.BATCH_WIDTH.map { it to "$it tokens" },

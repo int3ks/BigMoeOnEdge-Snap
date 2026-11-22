@@ -39,6 +39,7 @@ class AppContainer(private val context: Context) {
     /** Performance log: loads, answers and crashes into the database (core/PerfLog.kt). */
     fun startPerfLog() {
         com.bigmoe.onedge.core.PerfLog.start(context, database.perfEventDao(), engineController.state, appScope)
+        com.bigmoe.onedge.core.AutoCores.start(context, appScope, settingsDataStore.settingsFlow)
         com.bigmoe.onedge.core.CacheGrow.start(engineController, appScope, settingsDataStore.settingsFlow)
     }
 

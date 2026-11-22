@@ -126,6 +126,9 @@ class SettingsViewModel(
     fun updateCacheMb(v: Int) = launch { dataStore.updateCacheMb(v) }
     fun updateCacheGrow(v: Boolean) = launch { dataStore.updateCacheGrow(v) }
     fun updateCacheFloorMb(v: Int) = launch { dataStore.updateCacheFloorMb(v) }
+    fun updateAutoCores(v: Boolean) = launch { dataStore.updateAutoCores(v) }
+    fun updateAutoCoresCoolTenths(v: Int) = launch { dataStore.updateAutoCoresCoolTenths(v) }
+    fun updateAutoCoresHotTenths(v: Int) = launch { dataStore.updateAutoCoresHotTenths(v) }
     fun updateCacheGrowStepMb(v: Int) = launch { dataStore.updateCacheGrowStepMb(v) }
     fun updateCacheGrowEverySec(v: Int) = launch { dataStore.updateCacheGrowEverySec(v) }
     fun updateCacheGrowHeadroomMb(v: Int) = launch { dataStore.updateCacheGrowHeadroomMb(v) }

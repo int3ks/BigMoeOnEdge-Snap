@@ -273,6 +273,7 @@ fun ChatScreen(
                         val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
                         val aliases by com.bigmoe.onedge.core.ModelAliases.map.collectAsState()
                         val cacheNow by com.bigmoe.onedge.core.CacheGrow.cache.collectAsState()
+                        val thermal by com.bigmoe.onedge.core.AutoCores.reading.collectAsState()
                         if (modelName != null) {
                             Text(
                                 text = (aliases[modelName] ?: modelName) + (memoryNow?.let { m ->
@@ -280,7 +281,11 @@ fun ChatScreen(
                                         (cacheNow?.let { c -> " \u2022 ${c.first} MiB cache (${c.second} used)" } ?: "") +
                                         (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "") +
                                         (if (m.faultsPerSec >= 0) " \u2022 ${m.faultsPerSec} faults/s" else "")
-                                } ?: ""),
+                                } ?: "") +
+                                    (thermal.skinC?.let { " \u2022 " + String.format(java.util.Locale.US, "%.1f", it) + " \u00b0C" } ?: "") +
+                                    (thermal.cores?.let { n ->
+                                        " \u2022 $n cores" + (thermal.busy?.let { b -> " (" + String.format(java.util.Locale.US, "%.1f", b) + " busy)" } ?: "")
+                                    } ?: ""),
                                 maxLines = if (headerExpanded) Int.MAX_VALUE else 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall,
