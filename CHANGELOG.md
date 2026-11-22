@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Fix: the translation list missed the page's texts.** A page change emptied the list in an effect, which runs after the new page has composed its texts, so a page that did not recompose showed nothing. Texts now carry when they were asked for, and the list keeps those from shortly before the page change on.
 - **Translation mode** (Settings → Language): while on, `t()` notes the texts of the current page and a translate button (bottom left) lists them with their current translation. Tapping one asks a local model for the translation (no model loaded: pick one, it is loaded first, as for the performance log's advice); the result can be edited and "Apply" writes it into the language file in use (`I18n.putTranslation`; with none, a template for the device language is made first) and shows it at once.
 - **Cleanup:** the per-token Metrics CSV is gone from the app (setting, share button, file path; the performance log covers what it was used for, the engine's CSV sink stays for the CLI); the old Auto ceiling setting and the dead CACHE_AUTO_MB branches of the device tuner are gone; 25 outdated docs (BigMoeOnEdge+ handoff, 0.5.x notes, old audits, copied upstream sources) moved to `docs/archive/`.
 - **Language: "Share … for translation"** sends the chosen (or the system language's) JSON file with a prompt to Gemini or any app: translate the values, keep keys and placeholders, answer with the whole file.

@@ -33,11 +33,18 @@ object I18n {
     /** Translation mode: [t] notes every text it is asked for, and a button offers them for translating. */
     val translateMode = mutableStateOf(false)
 
-    /** Texts [t] was asked for since [clearSeen] (the current page), oldest first. Plain memory: no recomposition. */
-    private val seen = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    /**
+     * Texts [t] was asked for, with when (uptime ms). Plain memory: no recomposition. A page composes its texts
+     * before any effect of that frame runs, so a page change cannot simply empty a list: [markPage] notes the time
+     * and [seenTexts] keeps what was asked for from shortly before it on.
+     */
+    private val seen = LinkedHashMap<String, Long>()
+    @Volatile private var pageAt = 0L
 
-    fun seenTexts(): List<String> = synchronized(seen) { seen.toList() }
-    fun clearSeen() = seen.clear()
+    fun seenTexts(): List<String> = synchronized(seen) {
+        seen.entries.filter { it.value >= pageAt - 1_500 }.sortedBy { it.value }.map { it.key }
+    }
+    fun markPage() { pageAt = android.os.SystemClock.uptimeMillis() }
     fun translationOf(en: String): String? = strings.value[en]
 
     fun setTranslateMode(context: Context, on: Boolean) {
@@ -131,7 +138,7 @@ object I18n {
     }.getOrNull()
 
     fun t(en: String, args: Array<out Any?>): String {
-        if (translateMode.value) seen.add(en)
+        if (translateMode.value) synchronized(seen) { seen[en] = android.os.SystemClock.uptimeMillis() }
         var s = strings.value[en] ?: en
         args.forEachIndexed { i, a -> s = s.replace("{$i}", a.toString()) }
         return s

@@ -59,7 +59,7 @@ import java.util.Locale
 @Composable
 fun TranslateOverlay(routeKey: String?, models: List<ModelFile>, onLoad: (String) -> Unit) {
     if (!I18n.translateMode.value) return
-    LaunchedEffect(routeKey) { I18n.clearSeen() }
+    LaunchedEffect(routeKey) { I18n.markPage() }
     var listOpen by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf<String?>(null) }
     Box(Modifier.fillMaxSize()) {
