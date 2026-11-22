@@ -281,6 +281,11 @@ public:
     // flight — call it between generations (e.g. from an app's memory-pressure callback). A no-op
     // when the cache is off. The only way the budget moves after init sizes it.
     void set_cache_budget_mb(int mib);
+    // Any thread, also while a generation runs: ask for a budget (MiB) the eval thread sets between two tokens,
+    // or the next generation at its start. For an app that grows and shrinks the cache with free RAM.
+    void request_cache_budget_mb(int mib);
+    // The cache's budget and resident bytes in MiB as of the last token or resize (0 before), any thread.
+    void cache_mib(int & budget, int & resident) const;
 
     // Compute threads for single-token (decode) and batched (prompt) graphs, for the target and the MTP draft
     // context, from the next graph on. PRECONDITION as above: between generations. Values below 1 are ignored.

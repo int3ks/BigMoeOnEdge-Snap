@@ -501,12 +501,16 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
                 m.cache_mb = 0;
                 cache_on = false;
                 break;
-            default: // auto: sized once from free RAM, mutually exclusive with cache_mb
-                m.cache_auto = true;
-                m.cache_mb = 0;
-                m.cache_floor_mb = std::max<int>(0, iv[I_CACHE_FLOOR_MB]);
-                m.cache_ceil_mb = std::max<int>(0, iv[I_CACHE_CEIL_MB]);
+            default: { // auto (Snap): a growing cache. It opens at cache_mb, the minimum; the app raises and lowers the
+                // budget with free RAM and its own swap (CacheGrow.kt). Reserve and maximum are the app's to apply.
+                const int mb = std::max<int>(0, iv[I_CACHE_MB]);
+                m.cache_auto = false;
+                m.cache_mb = mb;
+                m.cache_keep_mib = mb;
+                m.force_cache = iv[I_FORCE_CACHE] != 0;
+                cache_on = mb > 0;
                 break;
+            }
         }
         switch (iv[I_DENSE_MODE]) {
             case 0: m.dense_weights = bmoe::DenseWeightsMode::Mmap; break;
@@ -1089,6 +1093,28 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCacheBudget(JNIEnv *, jobject, jint mib) {
     std::shared_ptr<bmoe::Session> s = current_session();
     if (s && mib > 0) s->set_cache_budget_mb(mib);
+}
+
+// Growing cache: a budget the eval thread takes between two tokens, or the next generation at its start.
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeRequestCacheBudget(JNIEnv *, jobject, jint mib) {
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (s && mib > 0) s->request_cache_budget_mb(mib);
+}
+
+// [budget, resident] of the expert cache in MiB, null without a session.
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeCacheMib(JNIEnv * env, jobject) {
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (!s) return nullptr;
+    jint v[2] = {0, 0};
+    int b = 0, r = 0;
+    s->cache_mib(b, r);
+    v[0] = b;
+    v[1] = r;
+    jintArray a = env->NewIntArray(2);
+    if (a) env->SetIntArrayRegion(a, 0, 2, v);
+    return a;
 }
 
 // Cancelling a model load (bmoe/load_progress.h): true asks the running nativeLoadModel to give up at its next

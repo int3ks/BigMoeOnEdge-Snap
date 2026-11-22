@@ -80,6 +80,11 @@ struct MoeStreamConfig {
     // low hit rate, slow decode). A share keeps the hot rest ordinary memory, and the budget never
     // drops below it. 0 turns the discardable cache off.
     int cache_discard_pct = 25;
+    // Snap, growing cache: the minimum the app set (MiB, 0 = a fixed cache). The budget starts there and the app
+    // raises it while RAM is free (Session::request_cache_budget_mb); everything above the minimum, plus
+    // cache_discard_pct of the minimum, is offered to the kernel, so pressure drops the grown part first and at
+    // once, before anything is compressed or another app is killed. Needs cache_discard.
+    int cache_keep_mib = 0;
     // Debug: drop an offered entry just before a lookup takes it back, so every such lookup pays the
     // re-read on zeroed memory.
     bool cache_discard_drop = false;

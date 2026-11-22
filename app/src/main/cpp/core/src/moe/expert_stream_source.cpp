@@ -51,6 +51,14 @@ bool ExpertStreamSource::init(const std::vector<std::string> & shard_paths,
     // compute, is the newest an entry can be and still be in a kernel's or an I/O lane's hands.
     discard_wanted_ = cfg.cache_discard && cfg.cache_discard_pct > 0;
     discard_share_ = std::clamp(cfg.cache_discard_pct, 1, 100) / 100.0;
+    if (cfg.cache_keep_mib > 0 && cfg.cache_discard) {
+        // A growing cache offers what it grew by even with the cold share at 0: that part is what the app
+        // borrowed from free RAM, and the kernel takes it back first.
+        discard_wanted_ = true;
+        base_share_ = std::clamp(cfg.cache_discard_pct, 0, 100) / 100.0;
+        keep_bytes_ = (size_t) ((double) cfg.cache_keep_mib * 1024.0 * 1024.0 * (1.0 - base_share_));
+        discard_share_ = std::max(base_share_, 0.01);
+    }
     discard_drop_ = cfg.cache_discard_drop;
     discard_after_ = (uint32_t) std::max(0, cfg.route_ahead);
     overlap_ = cfg.overlap;
@@ -725,6 +733,10 @@ void ExpertStreamSource::maybe_sample_dense() {
 // gate). The only thing that moves the budget after init.
 void ExpertStreamSource::set_cache_budget(size_t bytes) {
     if (cache_max_ == 0) return; // initialised off (shared-slot mode); the LRU buffers do not exist
+    if (keep_bytes_ > 0) {
+        discard_share_ = share_for(std::min(bytes, total_expert_bytes_));
+        disc_.set_share(discard_share_);
+    }
     if (bytes > cache_max_) {
         // Growing evicts nothing, so it needs no quiesce — and must not do one: cancelling the
         // speculative reads in flight on every grow would quietly defeat --prefetch.

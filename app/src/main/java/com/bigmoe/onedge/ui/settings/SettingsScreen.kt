@@ -66,7 +66,6 @@ import com.bigmoe.onedge.core.DenseWeights
 import com.bigmoe.onedge.core.DecisionPrefixCache
 import com.bigmoe.onedge.core.EngineState
 import com.bigmoe.onedge.core.SpecSource
-import com.bigmoe.onedge.data.local.datastore.CACHE_AUTO_MB
 import com.bigmoe.onedge.data.local.datastore.EngineSettings
 import com.bigmoe.onedge.data.local.datastore.AppVisualStyle
 import com.bigmoe.onedge.data.local.datastore.WebSearchMode
@@ -84,7 +83,7 @@ internal const val DEBOUNCE_MS = 500L
 /** Same choice lists as the original BigMoeOnEdge Android app (AppSettings.*_CHOICES). */
 private object Choices {
     // Finer where it matters: 250 MiB steps up to 2000, then 500 MiB steps up to 10000.
-    val CACHE = listOf(CACHE_AUTO_MB, 0) + com.bigmoe.onedge.core.SettingChoices.CACHE_MB
+    val CACHE = listOf(0) + com.bigmoe.onedge.core.SettingChoices.CACHE_MB
     val CACHE_CEIL = listOf(0) + (1000..10000 step 500).toList()
     val IO = com.bigmoe.onedge.core.SettingChoices.IO_LANES
     val TOPK = listOf(0, 6, 4, 3, 2)
@@ -451,16 +450,16 @@ private fun SettingsContent(
             } // CPU · NPU group
             Spacer(Modifier.height(10.dp))
 
-            // ------------------------------------------------------------ streaming (engine)
-            PerformanceGroup("MoE streaming & I/O", "Expert cache, flash reads and memory residency") {
-            Hint("Engine settings are fixed when a model opens. After changing them, press Reload. MoE expert streaming is selected automatically for supported MoE models; dense models use the standard load path.")
+            // ------------------------------------------------------------ expert cache & RAM
+            PerformanceGroup("Expert cache & RAM", "Cache size, Auto growth, droppable share, dense weights, mapping") {
+            Hint("Fixed when a model opens: press Reload after changing them. Only the Auto cache moves while the model runs.")
             Spacer(Modifier.height(12.dp))
             ChoiceSetting(
                 "Expert cache (MiB)",
-                Choices.CACHE.map { it to (if (it == CACHE_AUTO_MB) "Auto" else if (it == 0) "off" else "$it MiB") },
+                Choices.CACHE.map { it to (if (it == 0) "off" else "$it MiB") },
                 selected = settings.cacheMb, enabled = stream
             ) { viewModel.updateCacheMb(it) }
-            Hint("A resident expert costs no read, so a bigger cache means less waiting on flash, paid for in RAM. Auto sizes it once at load. The smallest rungs sit below the engine's floor and only churn. Speed tip: every reply shows its cache hit rate (\"cache NN%\") in its stats line. A low rate means waiting on flash is what slows you down: give the cache more RAM, or run Auto settings with this model.")
+            Hint("A resident expert costs no read, so a bigger cache means less waiting on flash, paid for in RAM. With Auto this is the minimum the cache grows from. A model's card can set its own. Speed tip: every reply shows its cache hit rate (\"cache NN%\") in its stats line; a low rate means flash is what slows you down.")
             if (settings.cacheMb in 1 until 1500) {
                 SwitchRow(
                     "Allow a small expert cache (<1500 MiB)",
@@ -469,45 +468,34 @@ private fun SettingsContent(
                     enabled = stream
                 ) { viewModel.updateForceCache(it) }
             }
-            ChoiceSetting(
-                "Droppable cache share (experimental)",
-                Choices.DISCARD.map { it to if (it == 0) "off" else "coldest $it%" },
-                selected = settings.cacheDiscardPct, enabled = cacheOn
-            ) { viewModel.updateCacheDiscardPct(it) }
-            Hint("The coldest part of the expert cache is handed to Android to drop when memory runs short, instead of Android killing other apps (or swapping, where swap is on). A dropped expert is read again from flash. The rest of the cache is never offered, and the cache never shrinks below it. 100% is upstream's rule and was far too eager on the MagicPad without swap (the cache shrank, low hit rate). Offered memory counts as free in Android's numbers. Off = ordinary memory, as before 7.03.")
-            ChoiceSetting(
-                "Auto cache ceiling (MiB)",
-                Choices.CACHE_CEIL.map { it to if (it == 0) "no cap" else "$it MiB" },
-                selected = settings.cacheCeilMb, enabled = stream && settings.cacheMb == CACHE_AUTO_MB
-            ) { viewModel.updateCacheCeilMb(it) }
-            Hint("Caps what Auto may claim. The system counts our own mapped weights as free, so uncapped it can ask for more than exists. Speed tip (RAM): the expert cache, the context's KV memory and, for a model with a big n-gram table such as Qwen3.8 Flash Next, the pages of that table read from flash all compete for the same RAM. A smaller context and closed background apps leave more for the cache.")
-            if (settings.cacheMb == CACHE_AUTO_MB) {
+            SwitchRow(
+                "Auto: grow while RAM is free",
+                "The model opens with the cache above. While more than the reserve below is free and none of the app lands in zram, the cache grows in 250 MiB steps (every 8 s, once it is full). When free RAM falls under the reserve or the app's zram grows, it shrinks again, also during an answer, never under the cache above. Everything it grew by is offered to Android: starting another app makes the system drop that part at once instead of compressing or closing apps.",
+                settings.cacheGrow, enabled = cacheOn
+            ) { viewModel.updateCacheGrow(it) }
+            if (settings.cacheGrow) {
                 OutlinedTextField(
                     value = cacheFloorText,
                     onValueChange = { cacheFloorText = it.filter(Char::isDigit) },
-                    label = { Text("Auto: keep this much RAM free (MB)") },
+                    label = { Text("Auto: keep this much RAM free (MiB)") },
                     singleLine = true,
-                    enabled = stream,
+                    enabled = cacheOn,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
+                ChoiceSetting(
+                    "Auto: maximum (MiB)",
+                    Choices.CACHE_CEIL.map { it to if (it == 0) "no cap" else "$it MiB" },
+                    selected = settings.cacheCeilMb, enabled = cacheOn
+                ) { viewModel.updateCacheCeilMb(it) }
             }
-            ChoiceSetting("Parallel I/O lanes", Choices.IO.map { it to it.toString() }, settings.ioThreads, enabled = stream) {
-                viewModel.updateIoThreads(it)
-            }
-            Hint("Expert reads in flight at once. Helps only until the flash saturates. Speed tip: Auto settings tests every value from 1 to 8 on your device and picks the fastest.")
-            SwitchRow(
-                "Direct I/O (O_DIRECT)",
-                "Bypass the page cache, so the system keeps no second copy of what the cache already holds. Falls back where unsupported.",
-                settings.oDirect, enabled = stream
-            ) { viewModel.updateODirect(it) }
-            SwitchRow(
-                "I/O and compute overlap",
-                "Enabled by default. Issue expert reads asynchronously while the CPU computes the current layer, hiding flash latency. It only runs for streamed MoE models in an APK built with the expert-ready hook." +
-                    if (readyInfo != null && !readyInfo.overlapActive && settings.overlap && stream) " The loaded model reports overlap is not active." else "",
-                settings.overlap, enabled = stream
-            ) { viewModel.updateOverlap(it) }
+            ChoiceSetting(
+                "Cold experts the system may drop",
+                Choices.DISCARD.map { it to if (it == 0) "off" else "coldest $it%" },
+                selected = settings.cacheDiscardPct, enabled = cacheOn
+            ) { viewModel.updateCacheDiscardPct(it) }
+            Hint("This share of the cache, the experts unused the longest, is offered to Android (MADV_FREE). The app does not decide when: the kernel takes offered pages when free RAM falls under its own thresholds, before it compresses anything into zram or closes an app, and for free. A dropped expert is read from flash again when needed. The rest is ordinary memory: Android can only move it into zram. The cache shrinks with what the kernel takes and grows back once it stops, but never under the share that is not offered. With Auto the share counts on the minimum; what Auto grew by is always offered. Off = ordinary memory.")
             ChoiceSetting(
                 "Dense weights",
                 DenseWeights.values().map { it to denseLabel(it) },
@@ -532,6 +520,29 @@ private fun SettingsContent(
                 settings.releaseMmap,
                 enabled = stream && (settings.denseWeights == DenseWeights.ANONYMOUS || settings.denseWeights == DenseWeights.PINNED)
             ) { viewModel.updateReleaseMmap(it) }
+            Divider()
+            } // expert cache & RAM group
+            Spacer(Modifier.height(10.dp))
+
+            // ------------------------------------------------------------ streaming (engine)
+            PerformanceGroup("MoE streaming & I/O", "Flash reads, I/O lanes and overlap") {
+            Hint("Engine settings are fixed when a model opens. After changing them, press Reload. MoE expert streaming is selected automatically for supported MoE models; dense models use the standard load path.")
+            Spacer(Modifier.height(12.dp))
+            ChoiceSetting("Parallel I/O lanes", Choices.IO.map { it to it.toString() }, settings.ioThreads, enabled = stream) {
+                viewModel.updateIoThreads(it)
+            }
+            Hint("Expert reads in flight at once. Helps only until the flash saturates. Speed tip: Auto settings tests every value from 1 to 8 on your device and picks the fastest.")
+            SwitchRow(
+                "Direct I/O (O_DIRECT)",
+                "Bypass the page cache, so the system keeps no second copy of what the cache already holds. Falls back where unsupported.",
+                settings.oDirect, enabled = stream
+            ) { viewModel.updateODirect(it) }
+            SwitchRow(
+                "I/O and compute overlap",
+                "Enabled by default. Issue expert reads asynchronously while the CPU computes the current layer, hiding flash latency. It only runs for streamed MoE models in an APK built with the expert-ready hook." +
+                    if (readyInfo != null && !readyInfo.overlapActive && settings.overlap && stream) " The loaded model reports overlap is not active." else "",
+                settings.overlap, enabled = stream
+            ) { viewModel.updateOverlap(it) }
             SwitchRow(
                 "Start reads in two waves (experimental)",
                 "Publishes the first projection's expert reads before queuing the remaining projections, allowing I/O lanes to start earlier. Experimental; requires expert streaming, cache, and overlap. Leave off if it is slower on your device.",

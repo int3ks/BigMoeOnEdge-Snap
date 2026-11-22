@@ -396,6 +396,13 @@ int prefill_piece(const SessionConfig & cfg) {
 // All native state lives here, behind the pimpl. Built once by Session::open(); every
 // generate() reuses the loaded model, the live context and the warm expert cache.
 struct Session::Impl {
+    // Growing cache (MoeStreamConfig::cache_keep_mib): the budget the app asked for while a generation ran, taken
+    // by the eval thread between two tokens (-1 = none); and what the cache holds, for the app's controller.
+    std::atomic<int> pending_budget_mib{-1};
+    std::atomic<int> snap_budget_mib{0};
+    std::atomic<int> snap_resident_mib{0};
+    void publish_cache();
+    void take_budget_request();
     SessionConfig cfg;
     std::string arch;
     // A recipe read off the file's tensor shapes (bmoe/expert_layout.h) when the architecture is not
@@ -644,7 +651,32 @@ ThinkControl Session::think_control() const {
     return impl_->think_ctl;
 }
 void Session::set_cache_budget_mb(int mib) {
+    impl_->pending_budget_mib.store(-1, std::memory_order_relaxed);
     impl_->source.set_cache_budget((size_t) std::max(0, mib) * 1024ull * 1024ull);
+    impl_->publish_cache();
+}
+
+void Session::request_cache_budget_mb(int mib) {
+    if (mib > 0) impl_->pending_budget_mib.store(mib, std::memory_order_relaxed);
+}
+
+void Session::cache_mib(int & budget, int & resident) const {
+    // Before the first token or resize nothing was published: the cache as init left it (nothing runs yet).
+    if (impl_->snap_budget_mib.load(std::memory_order_relaxed) == 0) impl_->publish_cache();
+    budget = impl_->snap_budget_mib.load(std::memory_order_relaxed);
+    resident = impl_->snap_resident_mib.load(std::memory_order_relaxed);
+}
+
+void Session::Impl::publish_cache() {
+    snap_budget_mib.store((int) (source.cache_budget() >> 20), std::memory_order_relaxed);
+    snap_resident_mib.store((int) (source.cache_resident() >> 20), std::memory_order_relaxed);
+}
+
+// Between two tokens on the eval thread (nothing in flight, as for the cache brake): a budget the app asked for.
+void Session::Impl::take_budget_request() {
+    const int mib = pending_budget_mib.exchange(-1, std::memory_order_relaxed);
+    if (mib > 0) source.set_cache_budget((size_t) mib * 1024ull * 1024ull);
+    publish_cache();
 }
 
 void Session::set_threads(int n_threads, int n_threads_batch) {
@@ -1677,6 +1709,7 @@ RunResult Session::generate(const GenerateRequest & req,
     Impl & im = *impl_;
     const MoeStreamConfig & moe = im.cfg.moe;
     llama_context * ctx = im.ctx.get();
+    im.take_budget_request(); // a growing cache's request from while nothing ran
 
     // Before anything is written about what this run did, say what it was.
     if (sink && !im.info_sent) {
@@ -2624,6 +2657,7 @@ RunResult Session::generate(const GenerateRequest & req,
         }
 
         brake_cache();
+        im.take_budget_request();
 
         // verify_toks = [tok, drafts...]; after the rejected tail was rolled back the KV holds the first 1 + n_acc of
         // them, and the caller got the first n_emitted_here. The rest is KV content nobody was shown.

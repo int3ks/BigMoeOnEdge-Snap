@@ -14,6 +14,7 @@
 // next layer cannot overwrite them until this layer's matmul has been synchronized.
 #pragma once
 
+#include <algorithm>
 #include "bmoe/expert_source.h"
 #include "bmoe/config.h"
 #include "bmoe/decode_trace.h"
@@ -130,6 +131,7 @@ public:
         follow_.set_floor(floor_for(follow_.ceiling()));
     }
     size_t cache_budget() const { return cache_max_; }
+    size_t cache_resident() const { return (size_t) cresident_; }
     // The run's effective top-k: a batch of ids is that many per token, which is how load_layer tells
     // a wide graph (cache_prefill_cold) from a decode or a verify window. Before the first decode.
     void set_top_k(int k) { top_k_ = std::max(0, k); }
@@ -377,7 +379,14 @@ private:
     long long swept_ = 0;        // dropped offers retired from the LRU tail
     uint32_t offer_window_ = 0;  // generations an entry stays ordinary after its last use
     size_t drop_floor_ = 1;      // set_drop_floor
-    double discard_share_ = 1.0; // MoeStreamConfig::cache_discard_pct / 100
+    double discard_share_ = 1.0; // MoeStreamConfig::cache_discard_pct / 100; growing cache: share_for(budget)
+    size_t keep_bytes_ = 0;      // growing cache: what is never offered (minimum x (1 - cold share)); 0 = fixed
+    double base_share_ = 0.0;    // growing cache: cache_discard_pct / 100 of the minimum
+    // Growing cache: the share of a budget that may be offered, so that keep_bytes_ stays ordinary memory.
+    double share_for(size_t budget) const {
+        if (keep_bytes_ == 0 || budget == 0) return discard_share_;
+        return std::clamp(1.0 - (double) keep_bytes_ / (double) budget, std::max(base_share_, 0.01), 1.0);
+    }
     // A drop never takes the budget under the share that is never offered (nor under one token's cycle).
     size_t floor_for(size_t budget) const {
         return std::max(drop_floor_, (size_t) ((double) budget * (1.0 - discard_share_)));

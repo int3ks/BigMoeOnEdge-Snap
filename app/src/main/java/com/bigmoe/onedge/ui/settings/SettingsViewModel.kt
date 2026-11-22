@@ -125,6 +125,7 @@ class SettingsViewModel(
     fun updateSeed(v: Int) = launch { dataStore.updateSeed(v) }
     fun updateCacheMb(v: Int) = launch { dataStore.updateCacheMb(v) }
     fun updateCacheCeilMb(v: Int) = launch { dataStore.updateCacheCeilMb(v) }
+    fun updateCacheGrow(v: Boolean) = launch { dataStore.updateCacheGrow(v) }
     fun updateCacheFloorMb(v: Int) = launch { dataStore.updateCacheFloorMb(v) }
     fun updateIoThreads(v: Int) = launch { dataStore.updateIoThreads(v) }
     fun updateODirect(v: Boolean) = launch { dataStore.updateODirect(v) }

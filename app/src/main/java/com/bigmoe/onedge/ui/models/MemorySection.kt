@@ -48,11 +48,10 @@ internal fun MemorySection(
     val small = MaterialTheme.typography.bodySmall
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val npuOn = npuAvailable && (options.npu ?: settings.npuPrefill)
-    // The cache this model will load with: its own, else the global one (null = sized automatically at load).
+    // The cache this model opens with: its own, else the global one (with Auto: the minimum it grows from).
     val cacheMb: Long? = options.cacheMb?.toLong() ?: when (settings.cacheMode) {
-        CacheMode.FIXED -> settings.cacheMb.toLong()
+        CacheMode.FIXED, CacheMode.AUTO -> settings.cacheMb.toLong()
         CacheMode.OFF -> 0L
-        CacheMode.AUTO -> null
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -74,7 +73,7 @@ internal fun MemorySection(
             // The same values as Settings offers, plus "Default" (the global setting).
             val defaultLabel = "Default (" + when (settings.cacheMode) {
                 CacheMode.FIXED -> "${settings.cacheMb} MiB"
-                CacheMode.AUTO -> "Auto"
+                CacheMode.AUTO -> "${settings.cacheMb} MiB, grows"
                 CacheMode.OFF -> "off"
             } + ")"
             com.bigmoe.onedge.ui.settings.ChoiceSetting(

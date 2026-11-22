@@ -17,8 +17,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 enum class TopTab(val label: String, val icon: ImageVector) {
     CHATS("Chats", Icons.Default.ChatBubble),
     MODELS("Models", Icons.Default.Memory),
-    HUB("Hugging Face", Icons.Default.CloudDownload),
     SETTINGS("Settings", Icons.Default.Settings),
+    HUB("Hugging Face", Icons.Default.CloudDownload),
     LOG("Log", Icons.Default.Terminal)
 }
 

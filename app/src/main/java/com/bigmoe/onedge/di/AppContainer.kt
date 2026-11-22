@@ -39,6 +39,7 @@ class AppContainer(private val context: Context) {
     /** Performance log: loads, answers and crashes into the database (core/PerfLog.kt). */
     fun startPerfLog() {
         com.bigmoe.onedge.core.PerfLog.start(context, database.perfEventDao(), engineController.state, appScope)
+        com.bigmoe.onedge.core.CacheGrow.start(engineController, appScope)
     }
 
     /** True once when an old v1 database is detected before Room's intentional destructive upgrade. */

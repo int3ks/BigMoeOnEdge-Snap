@@ -139,7 +139,7 @@ object MemoryWatch {
                             val c = state.info.config
                             r.config = (if (state.info.npuPrefillReady) "NPU on" else "NPU off") + ", cache " + when (c.cacheMode) {
                                 CacheMode.FIXED -> "${c.cacheMb} MiB"
-                                CacheMode.AUTO -> "auto"
+                                CacheMode.AUTO -> "auto from ${c.cacheMb} MiB"
                                 CacheMode.OFF -> "off"
                             }
                             r.lastPersistAt = 0L // write the load figures now

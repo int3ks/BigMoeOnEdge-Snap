@@ -192,6 +192,27 @@ class EngineController(
         }
     }
 
+    /** [budget, resident] of the loaded model's expert cache in MiB; null when none or remote. */
+    fun cacheMib(): IntArray? = if (loadedModel() == null || isRemoteLoaded()) null else runCatching { backend.cacheMib() }.getOrNull()
+
+    /**
+     * A new expert-cache budget for the loaded model, without a reload. Between generations it is set at once (and
+     * frees RAM at once when it shrinks); while one runs the engine takes it between two tokens.
+     */
+    suspend fun resizeCache(mib: Int) = withContext(ioDispatcher) {
+        if (loadedModel() == null || isRemoteLoaded() || mib <= 0) return@withContext
+        if (generating.compareAndSet(false, true)) {
+            try {
+                if (lifecycleMutex.tryLock()) {
+                    try { backend.setCacheBudget(mib) } finally { lifecycleMutex.unlock() }
+                } else runCatching { backend.requestCacheBudget(mib) }
+            } catch (_: Throwable) {
+            } finally {
+                generating.set(false)
+            }
+        } else runCatching { backend.requestCacheBudget(mib) }
+    }
+
     /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */
     fun allowedCpus(): Long = try { backend.allowedCpus() } catch (_: Throwable) { 0L }
 
@@ -242,7 +263,9 @@ class EngineController(
                     true -> capabilities.npuPrefill
                     false -> false
                 },
-                cacheMode = if (memoryOptions.cacheMb != null) CacheMode.FIXED else requestedGlobal.cacheMode,
+                // A card's cache is the minimum when the global cache grows (Auto), else the fixed size.
+                cacheMode = if (memoryOptions.cacheMb != null && requestedGlobal.cacheMode != CacheMode.AUTO) CacheMode.FIXED
+                else requestedGlobal.cacheMode,
                 cacheMb = memoryOptions.cacheMb ?: requestedGlobal.cacheMb,
                 cacheDiscardPct = memoryOptions.discardPct ?: requestedGlobal.cacheDiscardPct
             )

@@ -59,6 +59,10 @@ object PerfAnalyzer {
                 if (!cfg.has(k) && k !in live) continue
                 val v = live[k] ?: cfg.get(k)
                 // The cache size only means something in FIXED mode.
+                if (k == "cacheMb" && cfg.optString("cacheMode") == "AUTO") {
+                    parts += "cacheMb=${cfg.opt("cacheMb")}+auto"
+                    continue
+                }
                 if (k == "cacheMb" && cfg.optString("cacheMode") != "FIXED") {
                     parts += "cache=${cfg.optString("cacheMode").lowercase()}"
                     continue

@@ -136,6 +136,8 @@ data class EngineSettings(
     /** -1 = auto, 0 = off, otherwise a fixed budget in MiB. */
     val cacheMb: Int = 2000,
     val cacheCeilMb: Int = 3000,
+    /** Auto: the expert cache grows above cacheMb (the minimum) while RAM is free; cacheFloorMb is the reserve. */
+    val cacheGrow: Boolean = false,
     val cacheFloorMb: Int = 1536,
     val ioThreads: Int = 4,
     val oDirect: Boolean = true,
@@ -252,8 +254,8 @@ data class EngineSettings(
 
     val cacheMode: CacheMode
         get() = when {
-            cacheMb == CACHE_AUTO_MB -> CacheMode.AUTO
             cacheMb <= CACHE_OFF_MB -> CacheMode.OFF
+            cacheGrow -> CacheMode.AUTO
             else -> CacheMode.FIXED
         }
 
@@ -368,6 +370,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val CACHE_MB = intPreferencesKey("cache_mb_v2")
         val CACHE_CEIL_MB = intPreferencesKey("cache_ceil_mb")
         val CACHE_FLOOR_MB = intPreferencesKey("cache_floor_mb")
+        val CACHE_GROW = booleanPreferencesKey("cache_grow")
         val IO_THREADS = intPreferencesKey("io_threads")
         val O_DIRECT = booleanPreferencesKey("o_direct")
         val OVERLAP = booleanPreferencesKey("overlap")
@@ -464,7 +467,9 @@ class EngineSettingsDataStore(private val context: Context) {
             frequencyPenalty = p[Keys.FREQUENCY_PENALTY] ?: d.frequencyPenalty,
             presencePenalty = p[Keys.PRESENCE_PENALTY] ?: d.presencePenalty,
             seed = p[Keys.SEED] ?: d.seed,
-            cacheMb = p[Keys.CACHE_MB] ?: d.cacheMb,
+            // The old Auto (sized once at load, stored as -1) became the growing cache, opening at 3000 MiB.
+            cacheMb = (p[Keys.CACHE_MB] ?: d.cacheMb).let { if (it == CACHE_AUTO_MB) 3000 else it },
+            cacheGrow = p[Keys.CACHE_GROW] ?: (p[Keys.CACHE_MB] == CACHE_AUTO_MB),
             cacheCeilMb = p[Keys.CACHE_CEIL_MB] ?: d.cacheCeilMb,
             cacheFloorMb = p[Keys.CACHE_FLOOR_MB] ?: d.cacheFloorMb,
             ioThreads = p[Keys.IO_THREADS] ?: d.ioThreads,
@@ -633,7 +638,8 @@ class EngineSettingsDataStore(private val context: Context) {
             p[Keys.PRESENCE_PENALTY] = preset.presencePenalty
         }
     }
-    suspend fun updateCacheMb(v: Int) = set(Keys.CACHE_MB, v.coerceAtLeast(CACHE_AUTO_MB))
+    suspend fun updateCacheMb(v: Int) = set(Keys.CACHE_MB, v.coerceAtLeast(0))
+    suspend fun updateCacheGrow(v: Boolean) = set(Keys.CACHE_GROW, v)
     suspend fun updateCacheCeilMb(v: Int) = set(Keys.CACHE_CEIL_MB, v.coerceAtLeast(0))
     suspend fun updateCacheFloorMb(v: Int) = set(Keys.CACHE_FLOOR_MB, v.coerceAtLeast(0))
     suspend fun updateIoThreads(v: Int) = set(Keys.IO_THREADS, v.coerceIn(1, 8))

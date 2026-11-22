@@ -90,8 +90,13 @@ object SettingsAdvice {
     )
 
     val KNOBS: List<Knob> = listOf(
-        int("cacheMb", "Expert cache (MiB)", "cacheMb/cacheMode", -1, 65536, "; -1 = auto from free RAM, 0 = off",
+        int("cacheMb", "Expert cache (MiB)", "cacheMb/cacheMode", 0, 65536, "; 0 = off; with cacheGrow the minimum",
             { it.cacheMb }, { ds, v -> ds.updateCacheMb(v) }),
+        bool("cacheGrow", "Expert cache grows while RAM is free (Auto)", "cacheMode AUTO", { it.cacheGrow }, { ds, v -> ds.updateCacheGrow(v) }),
+        int("cacheReserveMb", "Auto: RAM kept free", "cacheFloorMb", 0, 16384, "", { it.cacheFloorMb }, { ds, v -> ds.updateCacheFloorMb(v) }),
+        int("cacheMaxMb", "Auto: maximum cache", "cacheCeilMb", 0, 65536, "; 0 = no cap", { it.cacheCeilMb }, { ds, v -> ds.updateCacheCeilMb(v) }),
+        int("cacheDiscardPct", "Cold experts the system may drop (%)", "cacheDiscardPct", 0, 100, "",
+            { it.cacheDiscardPct }, { ds, v -> ds.updateCacheDiscardPct(v) }),
         bool("npuPrefill", "NPU prefill", "npuPrefill", { it.npuPrefill }, { ds, v -> ds.updateNpuPrefill(v) }),
         int("batchWidth", "Prompt batch width", "batchWidth", 32, 8192, "", { it.batchWidth }, { ds, v -> ds.updateBatchWidth(v) }),
         cores("decodeCores", "CPU cores (decode)", "nThreads / decodeCores", { it.cpuMask }, { ds, m -> ds.updateCpuMask(m) }),

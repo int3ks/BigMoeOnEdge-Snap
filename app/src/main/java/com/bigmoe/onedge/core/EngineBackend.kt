@@ -29,6 +29,12 @@ interface EngineBackend {
     /** Live, between generations: expert-cache budget of the loaded session in MiB. */
     fun setCacheBudget(mib: Int) {}
 
+    /** Any time: a budget (MiB) the engine sets between two tokens, or at the next generation's start. */
+    fun requestCacheBudget(mib: Int) {}
+
+    /** [budget, resident] of the expert cache in MiB, null when nothing is loaded. */
+    fun cacheMib(): IntArray? = null
+
     /** Asks a running [load] to give up (it then returns [EngineController.LOAD_CANCELLED]); false clears the request. */
     fun cancelLoad(requested: Boolean) {}
 
@@ -127,6 +133,10 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun setThreads(decode: Int, prefill: Int) = bridge.nativeSetThreads(decode, prefill)
 
     override fun setCacheBudget(mib: Int) = bridge.nativeSetCacheBudget(mib)
+
+    override fun requestCacheBudget(mib: Int) = bridge.nativeRequestCacheBudget(mib)
+
+    override fun cacheMib(): IntArray? = bridge.nativeCacheMib()
 
     override fun cancelLoad(requested: Boolean) = try { bridge.nativeCancelLoad(requested) } catch (_: Throwable) {}
 
