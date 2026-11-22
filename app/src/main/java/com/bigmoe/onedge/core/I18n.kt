@@ -9,7 +9,7 @@ import java.io.File
 import java.util.Locale
 
 /**
- * The app's texts in other languages, from JSON files anyone can write: `<internal storage>/BigMoe/language/*.json`
+ * The app's texts in other languages, from JSON files anyone can write: the JSON files in `<internal storage>/BigMoe/language`
  * (without all-files access the app's own external folder). The English text in the code is the key, so a missing
  * file or entry shows English. A file:
  *
