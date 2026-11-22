@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -74,8 +75,9 @@ fun TurnVariantBar(
                         .clickable { open = !open }
                         .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
+                    val aliases by com.bigmoe.onedge.core.ModelAliases.map.collectAsState()
                     Text(
-                        text = runInfo.model,
+                        text = aliases[runInfo.model] ?: runInfo.model,
                         style = MaterialTheme.typography.labelSmall,
                         color = secondary,
                         maxLines = if (open) 3 else 1,

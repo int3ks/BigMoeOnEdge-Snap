@@ -242,56 +242,23 @@ fun ChatMessageBubble(
         val canSpeak = !isUser && !isStreaming && text.isNotBlank()
         if (!isUser && (stats != null || canSpeak || (onCopy != null && !isStreaming) || (sources.isNotEmpty() && !isStreaming))) {
             Spacer(modifier = Modifier.height(4.dp))
+            var statsExpanded by remember { mutableStateOf(false) }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 if (onCopy != null && !isStreaming) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
-                            .clickable(onClick = onCopy)
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy message",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = "Copy",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                    }
+                    ActionIcon(Icons.Default.ContentCopy, "Copy message", MaterialTheme.colorScheme.secondary, onCopy)
                 }
                 if (canSpeak) ReadAloudChip(text)
-                if (stats != null) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = "Inference speed",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = stats,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                    }
+                if (stats != null && !statsExpanded) {
+                    StatsChip(stats, expanded = false, onToggle = { statsExpanded = true }, modifier = Modifier.weight(1f, fill = false))
                 }
+            }
+            if (stats != null && statsExpanded) {
+                Spacer(modifier = Modifier.height(4.dp))
+                StatsChip(stats, expanded = true, onToggle = { statsExpanded = false })
             }
             if (sources.isNotEmpty() && !isStreaming) {
                 Spacer(modifier = Modifier.height(2.dp))
@@ -570,25 +537,59 @@ private fun ReadAloudChip(text: String) {
     val speaking = speakingKey == key
     var issue by remember { mutableStateOf<com.bigmoe.onedge.speech.SpeechIssue?>(null) }
     issue?.let { com.bigmoe.onedge.speech.SpeechIssueDialog(it, onDismiss = { issue = null }) }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ActionIcon(
+        imageVector = if (speaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+        description = if (speaking) "Stop reading" else "Read aloud",
+        tint = if (speaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+        onClick = { com.bigmoe.onedge.speech.SpeechOutput.toggle(context, key, text) { issue = it } }
+    )
+}
+
+/** Small icon-only button under an answer (copy, read aloud): saves the width the labels took on a phone. */
+@Composable
+private fun ActionIcon(
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    tint: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
-            .clickable { com.bigmoe.onedge.speech.SpeechOutput.toggle(context, key, text) { issue = it } }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Icon(imageVector = imageVector, contentDescription = description, tint = tint, modifier = Modifier.size(14.dp))
+    }
+}
+
+/** The run statistics: one ellipsized line when collapsed, the full text when expanded; a tap toggles. */
+@Composable
+private fun StatsChip(stats: String, expanded: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .then(appSurfaceModifier(RoundedCornerShape(10.dp), MaterialTheme.colorScheme.surface))
+            .clickable(onClick = onToggle)
             .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Icon(
-            imageVector = if (speaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
-            contentDescription = if (speaking) "Stop reading" else "Read aloud",
-            tint = if (speaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+            imageVector = Icons.Default.Speed,
+            contentDescription = "Inference speed",
+            tint = MaterialTheme.colorScheme.secondary,
             modifier = Modifier.size(12.dp)
         )
         Text(
-            text = if (speaking) "Stop" else "Read aloud",
+            text = stats,
             style = MaterialTheme.typography.labelSmall,
-            color = if (speaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+            color = MaterialTheme.colorScheme.secondary,
+            maxLines = if (expanded) Int.MAX_VALUE else 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
         )
     }
 }

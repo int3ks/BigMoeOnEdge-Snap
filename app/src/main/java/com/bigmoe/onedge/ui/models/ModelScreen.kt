@@ -896,9 +896,9 @@ private fun ModelRow(
                 } else {
                     TextButton(onClick = onLoad, enabled = !busy) { Text("Load") }
                 }
-                // Rename renames the model itself, so it lives here and not beside the drafter.
+                // The display name (alias) of the model; the file is not renamed.
                 IconButton(onClick = { renameDialog = true }) {
-                    Icon(Icons.Default.Edit, contentDescription = "Rename model")
+                    Icon(Icons.Default.Edit, contentDescription = "Display name")
                 }
                 IconButton(onClick = onDelete, enabled = !busy) {
                     Icon(Icons.Default.Delete, contentDescription = "Remove model")
@@ -927,16 +927,14 @@ private fun ModelRow(
     if (renameDialog) {
         AlertDialog(
             onDismissRequest = { renameDialog = false },
-            title = { Text("Rename model") },
+            title = { Text("Display name") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true, label = { Text("New name") })
-                    if (model.name.contains(Regex("-\\d{5}-of-\\d{5}\\.gguf$", RegexOption.IGNORE_CASE))) {
-                        Text("This changes only the model display name. The original shard filenames stay unchanged so llama.cpp can discover every part.", style = MaterialTheme.typography.bodySmall)
-                    }
+                    OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true, label = { Text("Display name") })
+                    Text("Only how the model is shown; the file keeps its name. Leave empty to show the file name again.", style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = { renameDialog = false; onRename(renameText) }) { Text("Rename") } },
+            confirmButton = { TextButton(onClick = { renameDialog = false; onRename(renameText) }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { renameDialog = false }) { Text("Cancel") } }
         )
     }

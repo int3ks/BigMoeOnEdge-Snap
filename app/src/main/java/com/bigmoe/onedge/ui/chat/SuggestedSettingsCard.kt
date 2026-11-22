@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,7 +31,10 @@ fun SuggestedSettingsCard(
     onApply: (List<SettingsAdvice.Change>) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val suggestion = remember(text, settings) { SettingsAdvice.parse(text, settings) } ?: return
+    // Parsed once per answer: applying one change updates the settings, and the applied rows must stay visible (ticked)
+    // instead of vanishing from the list.
+    val suggestion = remember(text) { SettingsAdvice.parse(text, settings) } ?: return
+    val applied = remember(text) { mutableStateListOf<Int>() }
     Surface(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         shape = RoundedCornerShape(12.dp),
@@ -42,8 +49,18 @@ fun SuggestedSettingsCard(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            suggestion.changes.forEach { c ->
-                Text("${c.knob.label}: ${c.knob.show(c.current)} → ${c.knob.show(c.value.toString())}", style = MaterialTheme.typography.bodyMedium)
+            suggestion.changes.forEachIndexed { i, c ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${c.knob.label}: ${c.knob.show(c.current)} → ${c.knob.show(c.value.toString())}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = { applied.add(i); onApply(listOf(c)) },
+                        enabled = i !in applied
+                    ) { Text(if (i in applied) "Applied" else "Apply") }
+                }
             }
             suggestion.ignored.forEach { Text("Left out: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             if (suggestion.changes.isNotEmpty()) {
@@ -52,7 +69,13 @@ fun SuggestedSettingsCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Button(onClick = { onApply(suggestion.changes) }) { Text("Apply") }
+                val open = suggestion.changes.filterIndexed { i, _ -> i !in applied }
+                if (suggestion.changes.size > 1) {
+                    Button(
+                        onClick = { suggestion.changes.indices.filter { it !in applied }.also { applied.addAll(it) }; onApply(open) },
+                        enabled = open.isNotEmpty()
+                    ) { Text(if (open.isEmpty()) "All applied" else "Apply all") }
+                }
             }
         }
     }

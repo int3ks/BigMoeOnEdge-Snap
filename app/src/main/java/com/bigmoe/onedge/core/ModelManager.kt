@@ -330,8 +330,35 @@ class ModelManager(
             } else null
         }
         val used = modelOptions()
+        val aliases = aliasesByPath()
+        publishAliases(aliases)
         (internal + external).distinctBy { it.path }
+            .map { m -> aliases[m.path]?.let { m.copy(displayNameOverride = it) } ?: m }
             .sortedWith(compareByDescending<ModelFile> { lastUsed(used, it.path) }.thenBy { it.name.lowercase() })
+    }
+
+    /** Display names the user gave models: path -> alias. They only change how a model is shown, never the file. */
+    private val aliasesFile: File get() = File(modelsDir, ".model-aliases.properties")
+    private fun aliasProps(): java.util.Properties = java.util.Properties().also { props ->
+        try { aliasesFile.inputStream().use(props::load) } catch (_: Exception) { }
+    }
+    private fun aliasesByPath(): Map<String, String> = aliasProps().let { props ->
+        props.stringPropertyNames().mapNotNull { k ->
+            val path = decodePath(k).takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            props.getProperty(k)?.takeIf { it.isNotBlank() }?.let { path to it }
+        }.toMap()
+    }
+    private fun publishAliases(byPath: Map<String, String>) {
+        ModelAliases.publish(byPath.entries.associate { (path, alias) -> File(path).name to alias })
+    }
+
+    /** Sets (or, when blank, removes) the display name of the model at [path]. */
+    suspend fun setAlias(path: String, alias: String) = withContext(io) {
+        val key = encodePath(canonicalPath(path))
+        val props = aliasProps()
+        if (alias.isBlank()) props.remove(key) else props.setProperty(key, alias.trim())
+        aliasesFile.outputStream().use { props.store(it, "BigMoeOnEdge model display names") }
+        publishAliases(aliasesByPath())
     }
 
     suspend fun listDrafts(): List<ModelFile> = withContext(io) {

@@ -746,14 +746,15 @@ class ModelViewModel(
         }
     }
 
+    /** Gives the model a display name (blank = back to the file name); the file itself is never renamed. */
     fun rename(path: String, name: String) {
         viewModelScope.launch {
             try {
-                val renamed = modelManager.rename(path, name)
-                _uiState.update { it.copy(message = "Renamed to ${renamed.name}") }
+                modelManager.setAlias(path, name)
+                _uiState.update { it.copy(message = if (name.isBlank()) "Display name reset" else "Display name set") }
                 refresh()
             } catch (e: Exception) {
-                _uiState.update { it.copy(message = e.message ?: "Rename failed") }
+                _uiState.update { it.copy(message = e.message ?: "Could not save the display name") }
             }
         }
     }

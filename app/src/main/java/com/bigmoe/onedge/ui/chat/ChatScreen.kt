@@ -257,21 +257,28 @@ fun ChatScreen(
                     containerColor = if (AppTheme.visualStyle == AppVisualStyle.SOLID) MaterialTheme.colorScheme.surface else Color.Transparent
                 ),
                 title = {
-                    Column {
-                        Text(uiState.currentSession?.title ?: "New chat", maxLines = 1)
+                    // A tap unfolds the title and the model line (long names are cut off otherwise); tap again to fold.
+                    var headerExpanded by remember { mutableStateOf(false) }
+                    Column(Modifier.clickable { headerExpanded = !headerExpanded }) {
+                        Text(
+                            uiState.currentSession?.title ?: "New chat",
+                            maxLines = if (headerExpanded) Int.MAX_VALUE else 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
                         // One model: the loaded one (it answers the next message), else the last one this chat used.
                         val modelName = (uiState.engineState as? EngineState.Ready)?.info?.name
                             ?: uiState.currentSession?.modelNames?.lastOrNull()
                         // Free RAM next to the model name (sampled every 2 s): the figure to watch when a big model
                         // and its cache leave the tablet little room.
                         val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
+                        val aliases by com.bigmoe.onedge.core.ModelAliases.map.collectAsState()
                         if (modelName != null) {
                             Text(
-                                text = modelName + (memoryNow?.let { m ->
+                                text = (aliases[modelName] ?: modelName) + (memoryNow?.let { m ->
                                     " \u2022 ${m.freeMb} MiB free" + (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "") +
                                         (if (m.faultsPerSec >= 0) " \u2022 ${m.faultsPerSec} faults/s" else "")
                                 } ?: ""),
-                                maxLines = 1,
+                                maxLines = if (headerExpanded) Int.MAX_VALUE else 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.secondary
