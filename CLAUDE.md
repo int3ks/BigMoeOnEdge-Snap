@@ -52,6 +52,12 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
   engine ports, replay, load progress, auto settings, settings export). Read it before touching one of those areas.
 * Open ideas, upstream-watch state, unit-test state: `docs/OPEN_IDEAS.md`.
 
+## UI texts
+
+* Every user-visible text goes through `t("English text")` (`core/I18n.kt`, JSON language files); settings helpers
+  translate their literals themselves. After adding texts run `python3 scripts/extract-strings.py` (writes
+  `assets/language/english.json`, the template source). No `$` templates in such texts: use `{0}`.
+
 ## Upstream policy (since 2026-11-09, after v0.6.59)
 
 * The UI is considered good as it is and is developed here. **No more UI/app features from BigMoeOnEdge+.**

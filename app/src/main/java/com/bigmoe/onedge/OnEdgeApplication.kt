@@ -14,6 +14,7 @@ class OnEdgeApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.bigmoe.onedge.core.I18n.apply(this)
         // Configure FastRPC search paths before EngineNativeBridge loads the native library.
         // The ordinary CPU build contains no DSP skeleton assets; setup then safely no-ops.
         HexagonRuntimeSetup.prepare(this)

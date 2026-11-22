@@ -1,5 +1,7 @@
 package com.bigmoe.onedge.ui.settings
 
+import com.bigmoe.onedge.core.t
+
 import com.bigmoe.onedge.ui.theme.AppCard
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
@@ -238,6 +240,7 @@ private fun SettingsContent(
         androidx.compose.animation.AnimatedVisibility(visible = appearanceExpanded, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             // ------------------------------------------------------------ appearance
+            LanguageSettings()
             val custom = PaletteStore.parse(settings.customPalettesJson)
             val selectedCustom = custom.firstOrNull { it.id == settings.themeId }
             Text("Surface style", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -920,8 +923,8 @@ private fun PerformanceGroup(
             modifier = Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
             content = {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(t(title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(t(subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(2.dp))
                 content()
             }
@@ -1015,8 +1018,8 @@ private fun SettingsFoldout(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(t(title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(t(subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -1047,13 +1050,13 @@ private fun shareLatestCsv(context: android.content.Context) {
 
 @Composable
 internal fun Section(text: String) {
-    Text(text = text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    Text(text = t(text), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(8.dp))
 }
 
 @Composable
 internal fun Hint(text: String) {
-    Text(text = text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text = t(text), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -1073,7 +1076,7 @@ internal fun SwitchRow(
 ) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge,
+            Text(t(label), style = MaterialTheme.typography.bodyLarge,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             Hint(description)
         }
@@ -1090,10 +1093,10 @@ internal fun <T> ChoiceSetting(
     onSelect: (T) -> Unit
 ) {
     var open by remember { mutableStateOf(false) }
-    val current = options.firstOrNull { it.first == selected }?.second ?: selected.toString()
+    val current = options.firstOrNull { it.first == selected }?.second?.let { t(it) } ?: selected.toString()
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(
-            label, style = MaterialTheme.typography.labelMedium,
+            t(label), style = MaterialTheme.typography.labelMedium,
             color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
         androidx.compose.foundation.layout.Box {
@@ -1103,7 +1106,7 @@ internal fun <T> ChoiceSetting(
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEach { (value, text) ->
-                    DropdownMenuItem(text = { Text(text) }, onClick = { open = false; onSelect(value) })
+                    DropdownMenuItem(text = { Text(t(text)) }, onClick = { open = false; onSelect(value) })
                 }
             }
         }

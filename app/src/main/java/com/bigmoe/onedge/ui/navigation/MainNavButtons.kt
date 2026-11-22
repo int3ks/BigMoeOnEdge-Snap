@@ -47,7 +47,7 @@ fun MainNavButtons(current: TopTab, modelsButton: (@Composable () -> Unit)? = nu
             IconButton(onClick = { nav.open(tab) }) {
                 Icon(
                     imageVector = tab.icon,
-                    contentDescription = tab.label,
+                    contentDescription = com.bigmoe.onedge.core.t(tab.label),
                     tint = if (tab == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -66,7 +66,7 @@ fun MainNavButtons(current: TopTab, modelsButton: (@Composable () -> Unit)? = nu
             androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 TopTab.values().filter { it in inMenu }.forEach { tab ->
                     androidx.compose.material3.DropdownMenuItem(
-                        text = { androidx.compose.material3.Text(tab.label) },
+                        text = { androidx.compose.material3.Text(com.bigmoe.onedge.core.t(tab.label)) },
                         leadingIcon = {
                             Icon(
                                 tab.icon, contentDescription = null,

@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **App language from JSON files** (`core/I18n.kt`): Settings → Appearance → Language offers System and every `*.json` in `<internal storage>/BigMoe/language` (without all-files access: the app's external files folder). A file is `{"name", "lang", "strings": {English: translation}}`; the English text in the code is the key, a missing file or entry shows English, `{0}`… take filled-in values. System picks the file whose `lang` is the device language. "Create a template for <language>" (shown when the device language is not English and has no file) writes every known text with its English value. Texts reach the translation through `t("…")` or the settings helpers (Hint, Section, SwitchRow, ChoiceSetting with its options, group and foldout titles) and the top bar; `scripts/extract-strings.py` collects them into `assets/language/english.json` (358 so far). The rest of the app follows screen by screen.
 - **Narrow screens:** with less than 600 dp width (a phone upright) Settings, Hugging Face and Log sit in a ⋮ menu of the top bar.
 - **Row-gathered tables no longer locked by NPU prefill:** the switch stays usable; a load with the NPU on for the model (global or its card) leaves row streaming out instead of failing.
 - **Auto cache: no maximum.** The setting is gone from the UI; free RAM, the reserve and the app's swap are the limit (the engine clamps to the full expert set).
