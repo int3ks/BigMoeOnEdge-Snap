@@ -26,6 +26,41 @@ object I18n {
     /** The texts in force; a Compose state, so changing the language redraws what reads it. */
     private val strings = mutableStateOf<Map<String, String>>(emptyMap())
 
+    /** The file the texts come from; null = English. Where "Apply" of the translation mode writes. */
+    @Volatile var activeFile: File? = null
+        private set
+
+    /** Translation mode: [t] notes every text it is asked for, and a button offers them for translating. */
+    val translateMode = mutableStateOf(false)
+
+    /** Texts [t] was asked for since [clearSeen] (the current page), oldest first. Plain memory: no recomposition. */
+    private val seen = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    fun seenTexts(): List<String> = synchronized(seen) { seen.toList() }
+    fun clearSeen() = seen.clear()
+    fun translationOf(en: String): String? = strings.value[en]
+
+    fun setTranslateMode(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("translate_mode", on).apply()
+        translateMode.value = on
+    }
+
+    /**
+     * Writes [value] for [en] into the active language file (none: a template for the device language is made
+     * first) and shows it at once. Returns the file, or null when there is no language to write to (English).
+     */
+    fun putTranslation(context: Context, en: String, value: String): File? = runCatching {
+        val file = activeFile ?: templateLanguage(context)?.let { writeTemplate(context, it) }?.also { apply(context) }
+            ?: return null
+        val o = JSONObject(file.readText())
+        val st = o.optJSONObject("strings") ?: JSONObject().also { o.put("strings", it) }
+        st.put(en, value)
+        file.writeText(o.toString(2))
+        strings.value = strings.value + (en to value)
+        activeFile = file
+        file
+    }.getOrNull()
+
     class Language(val file: File, val name: String, val lang: String)
 
     fun dir(context: Context): File {
@@ -63,6 +98,8 @@ object I18n {
             if (sys == "en") null else langs.firstOrNull { it.lang.equals(sys, ignoreCase = true) }
         } else langs.firstOrNull { it.file.name == c }
         strings.value = pick?.let { load(it.file) } ?: emptyMap()
+        activeFile = pick?.file
+        translateMode.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("translate_mode", false)
     }
 
     private fun load(f: File): Map<String, String> = runCatching {
@@ -94,6 +131,7 @@ object I18n {
     }.getOrNull()
 
     fun t(en: String, args: Array<out Any?>): String {
+        if (translateMode.value) seen.add(en)
         var s = strings.value[en] ?: en
         args.forEachIndexed { i, a -> s = s.replace("{$i}", a.toString()) }
         return s

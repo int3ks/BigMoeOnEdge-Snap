@@ -44,6 +44,11 @@ internal fun LanguageSettings() {
             Text(t("Share {0} for translation", toShare.file.name))
         }
     }
+    SwitchRow(
+        "Translation mode",
+        "A button on every page lists the texts shown there. Tap one: a local model translates it (pick and load one if none is loaded), you can edit the result, and Apply writes it into the language in use (a template for the device language is made first if there is none). Turn off when done.",
+        I18n.translateMode.value
+    ) { I18n.setTranslateMode(context, it) }
     val missing = remember(refresh) { I18n.templateLanguage(context) }
     if (missing != null) {
         OutlinedButton(onClick = {

@@ -413,6 +413,13 @@ fun AppNavigation(
                 }
             }
         }
+        // Translation mode (Settings → Language): a button that translates the texts of the current page.
+        val translateModels by modelViewModel.uiState.collectAsState()
+        com.bigmoe.onedge.ui.settings.TranslateOverlay(
+            routeKey = backStack?.destination?.route + "|" + backStack?.arguments?.toString(),
+            models = translateModels.models,
+            onLoad = { path -> modelViewModel.requestLoad(path) }
+        )
     }
     }
 }
