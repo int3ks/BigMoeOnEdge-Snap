@@ -216,6 +216,8 @@ data class EngineSettings(
     val toolsCodeEnabled: Boolean = false,
     /** Offline helpers: date/time, calculator, unit converter, random numbers, device status. */
     val toolsUtilitiesEnabled: Boolean = false,
+    /** The app_help tool: the model looks up how this app and its engine work in the bundled documentation. */
+    val toolsHelpEnabled: Boolean = false,
     /** The model may call the HTTP tools and MCP servers listed in [externalToolsJson]. */
     val toolsExternalEnabled: Boolean = false,
     /** The external-tools list as JSON (see ExternalToolsJson). Headers may hold API keys, stored like the search key. */
@@ -435,6 +437,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val TOOLS_FILES = booleanPreferencesKey("tools_files")
         val TOOLS_CODE = booleanPreferencesKey("tools_code")
         val TOOLS_UTILITIES = booleanPreferencesKey("tools_utilities")
+        val TOOLS_HELP = booleanPreferencesKey("tools_help")
         val TOOLS_EXTERNAL = booleanPreferencesKey("tools_external")
         val EXTERNAL_TOOLS_JSON = stringPreferencesKey("external_tools_json")
         val TOOL_RESULT_CHARS = intPreferencesKey("tool_result_chars")
@@ -543,6 +546,7 @@ class EngineSettingsDataStore(private val context: Context) {
             toolsFilesEnabled = p[Keys.TOOLS_FILES] ?: d.toolsFilesEnabled,
             toolsCodeEnabled = p[Keys.TOOLS_CODE] ?: d.toolsCodeEnabled,
             toolsUtilitiesEnabled = p[Keys.TOOLS_UTILITIES] ?: d.toolsUtilitiesEnabled,
+            toolsHelpEnabled = p[Keys.TOOLS_HELP] ?: d.toolsHelpEnabled,
             toolsExternalEnabled = p[Keys.TOOLS_EXTERNAL] ?: d.toolsExternalEnabled,
             externalToolsJson = p[Keys.EXTERNAL_TOOLS_JSON] ?: d.externalToolsJson,
             toolResultChars = p[Keys.TOOL_RESULT_CHARS] ?: d.toolResultChars,
@@ -736,6 +740,7 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateToolsFilesEnabled(v: Boolean) = set(Keys.TOOLS_FILES, v)
     suspend fun updateToolsCodeEnabled(v: Boolean) = set(Keys.TOOLS_CODE, v)
     suspend fun updateToolsUtilitiesEnabled(v: Boolean) = set(Keys.TOOLS_UTILITIES, v)
+    suspend fun updateToolsHelpEnabled(v: Boolean) = set(Keys.TOOLS_HELP, v)
     suspend fun updateToolsExternalEnabled(v: Boolean) = set(Keys.TOOLS_EXTERNAL, v)
     suspend fun updateExternalToolsJson(v: String) = set(Keys.EXTERNAL_TOOLS_JSON, v)
     suspend fun updateToolResultChars(v: Int) = set(Keys.TOOL_RESULT_CHARS, v.coerceIn(500, 20_000))

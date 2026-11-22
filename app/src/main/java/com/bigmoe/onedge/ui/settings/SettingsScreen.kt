@@ -784,6 +784,11 @@ private fun SettingsContent(
                 settings.toolsUtilitiesEnabled
             ) { viewModel.updateToolsUtilitiesEnabled(it) }
             SwitchRow(
+                "Help",
+                "Lets the model look up how this app and its engine work (settings, expert cache, tools, NPU, API server) in the documentation, change log and setting texts bundled in the app, offline. Ask it things like \"how does the cold experts drop work?\". The model searches with English keywords and answers in your language; it works best with larger models that call tools reliably.",
+                settings.toolsHelpEnabled
+            ) { viewModel.updateToolsHelpEnabled(it) }
+            SwitchRow(
                 "Native UI components",
                 "Lets the AI answer with compact in-chat visuals when your request calls for one (compare, pros and cons, timeline, steps, key numbers, slides): comparison tables, navigable slide cards, lists, metrics, badges, progress bars, timelines, expandable sections, selectable cards and action buttons. Rendered directly with Jetpack Compose from a small JSON block — no HTML, CSS, JavaScript or WebView. Off by default: it adds about 450 tokens to the system prompt. Also under the wrench button in the chat.",
                 settings.interactiveUiEnabled

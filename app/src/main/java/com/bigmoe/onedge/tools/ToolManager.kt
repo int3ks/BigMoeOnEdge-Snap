@@ -162,6 +162,12 @@ class ToolManager(
                     "get_datetime whenever the answer depends on today's date or the time, and convert_units for unit conversions."
             )
         }
+        if (selected.any { it.name == "app_help" }) {
+            b.append(
+                " For any question about this app (BigMoeOnEdge), its settings, features or inference engine, call app_help " +
+                    "first (query in English keywords) and answer from what it returns; do not guess."
+            )
+        }
         selected.firstOrNull { it.name == "run_shell" }?.let { shell ->
             b.append(agentShellHint(runCatching { shell.promptNote() }.getOrNull()))
         }

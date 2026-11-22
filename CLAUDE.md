@@ -56,6 +56,8 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
 * Every user-visible text goes through `t("English text")` (`core/I18n.kt`, JSON language files); settings helpers
   translate their literals themselves. After adding texts run `python3 scripts/extract-strings.py` (writes
   `assets/language/english.json`, the template source). No `$` templates in such texts: use `{0}`.
+* The Help tool searches `assets/help/help.json`: after changing docs/, the CHANGELOG or UI texts run
+  `python3 scripts/build-help-index.py` (after extract-strings) and commit the result.
 
 ## Upstream policy (since 2026-11-09, after v0.6.59)
 

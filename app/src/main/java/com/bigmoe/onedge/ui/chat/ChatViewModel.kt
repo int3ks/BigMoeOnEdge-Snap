@@ -843,6 +843,7 @@ class ChatViewModel(
     fun toggleToolCode() = updateToggles { it.copy(code = !it.code) }
 
     fun toggleToolUtilities() = updateToggles { it.copy(utilities = !it.utilities) }
+    fun toggleToolHelp() = updateToggles { it.copy(help = !it.help) }
 
     fun toggleToolTermux() = updateToggles { it.copy(termux = !it.termux) }
 

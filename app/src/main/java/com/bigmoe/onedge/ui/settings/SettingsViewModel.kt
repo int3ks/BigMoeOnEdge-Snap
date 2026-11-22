@@ -97,6 +97,7 @@ class SettingsViewModel(
     fun updateToolsFilesEnabled(v: Boolean) = launch { dataStore.updateToolsFilesEnabled(v) }
     fun updateToolsCodeEnabled(v: Boolean) = launch { dataStore.updateToolsCodeEnabled(v) }
     fun updateToolsUtilitiesEnabled(v: Boolean) = launch { dataStore.updateToolsUtilitiesEnabled(v) }
+    fun updateToolsHelpEnabled(v: Boolean) = launch { dataStore.updateToolsHelpEnabled(v) }
     fun updateToolsExternalEnabled(v: Boolean) = launch { dataStore.updateToolsExternalEnabled(v) }
     fun updateExternalToolsJson(v: String) = launch { dataStore.updateExternalToolsJson(v) }
     fun updateToolResultChars(v: Int) = launch { dataStore.updateToolResultChars(v) }

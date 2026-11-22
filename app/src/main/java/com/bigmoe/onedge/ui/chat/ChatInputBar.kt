@@ -97,10 +97,12 @@ fun ChatInputBar(
     toolsCodeEnabled: Boolean,
     toolsUtilitiesEnabled: Boolean,
     toolsTermuxEnabled: Boolean = false,
+    toolsHelpEnabled: Boolean = false,
     onToggleToolFiles: () -> Unit,
     onToggleToolCode: () -> Unit,
     onToggleToolUtilities: () -> Unit,
     onToggleToolTermux: () -> Unit = {},
+    onToggleToolHelp: () -> Unit = {},
     toolsExternalEnabled: Boolean = false,
     onToggleToolExternal: () -> Unit = {},
     nativeUiEnabled: Boolean = false,
@@ -370,7 +372,7 @@ fun ChatInputBar(
                     Box {
                         ToggleIcon(
                             icon = Icons.Default.Build,
-                            on = toolsFilesEnabled || toolsCodeEnabled || toolsUtilitiesEnabled || toolsTermuxEnabled || toolsExternalEnabled || nativeUiEnabled,
+                            on = toolsFilesEnabled || toolsCodeEnabled || toolsUtilitiesEnabled || toolsTermuxEnabled || toolsHelpEnabled || toolsExternalEnabled || nativeUiEnabled,
                             description = "Tool access",
                             onClick = { toolsMenu = true }
                         )
@@ -390,6 +392,11 @@ fun ChatInputBar(
                                 label = "Utilities",
                                 checked = toolsUtilitiesEnabled,
                                 onCheckedChange = onToggleToolUtilities
+                            )
+                            ToolToggleRow(
+                                label = "Help",
+                                checked = toolsHelpEnabled,
+                                onCheckedChange = onToggleToolHelp
                             )
                             ToolToggleRow(
                                 label = "Termux",
