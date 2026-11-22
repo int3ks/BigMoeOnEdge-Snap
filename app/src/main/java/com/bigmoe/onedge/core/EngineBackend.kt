@@ -47,6 +47,9 @@ interface EngineBackend {
     /** Tokens of the running chat the context holds (0 = nothing to snapshot). */
     fun kvTokens(): Int = 0
 
+    /** Drops the context the engine holds (the next turn replays); false while generating. */
+    fun forgetKv(): Boolean = false
+
     /** How far a running [load] has got (step * 1000 + permille, see [LoadStep]); 0 = nothing reported. */
     fun loadProgress(): Int = 0
 
@@ -145,6 +148,8 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun loadKv(prefix: String): Int = try { bridge.nativeLoadKv(encodeUtf8(prefix)) } catch (_: Throwable) { 0 }
 
     override fun kvTokens(): Int = try { bridge.nativeKvTokens() } catch (_: Throwable) { 0 }
+
+    override fun forgetKv(): Boolean = try { bridge.nativeForgetKv() } catch (_: Throwable) { false }
 
     override fun modelInfo(): Map<String, String> =
         decodeUtf8(bridge.nativeModelInfo()).lineSequence()

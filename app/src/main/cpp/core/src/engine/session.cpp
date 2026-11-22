@@ -2951,6 +2951,18 @@ int Session::kv_tokens_held() const {
     return (im.chat_on && !im.kv_has_media) ? (int) im.kv_tokens.size() : 0;
 }
 
+bool Session::forget_kv() {
+    Impl & im = *impl_;
+    if (!im.ctx) return false;
+    im.clear_memory(im.ctx.get());
+    if (im.ctx_dft) llama_memory_clear(llama_get_memory(im.ctx_dft.get()), true);
+    im.forget_kv_tokens();
+    im.chat_history.clear();
+    im.kv_has_media = false;
+    std::fprintf(stderr, "bmoe: context dropped on request (chat KV forgotten)\n");
+    return true;
+}
+
 Session::KvSnapshotResult Session::save_kv(const std::string & prefix) {
     KvSnapshotResult r;
     Impl & im = *impl_;

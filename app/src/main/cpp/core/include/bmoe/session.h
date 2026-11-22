@@ -321,6 +321,10 @@ public:
     KvSnapshotResult load_kv(const std::string & prefix);
     // Tokens of the running chat the context holds (0 outside chat mode or after an image turn).
     int kv_tokens_held() const;
+    // Drops whatever the context holds (KV, recurrent state, checkpoints, draft context) and ends the
+    // engine-held conversation, as load_kv() does before it reads: the next turn replays with a full
+    // prefill. False when no model is loaded. Never call it while generate() runs.
+    bool forget_kv();
 
 private:
     Session();

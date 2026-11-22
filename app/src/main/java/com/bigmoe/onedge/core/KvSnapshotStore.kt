@@ -38,6 +38,19 @@ class KvSnapshotStore(private val root: File, private val budgetBytes: Long = DE
 
     fun totalBytes(): Long = files().sumOf { it.length() }
 
+    /** Deletes [sessionId]'s snapshots of every model setup; how many snapshot sets were removed. */
+    fun deleteSession(sessionId: String): Int {
+        var removed = 0
+        root.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
+            val prefix = prefix(dir.name, sessionId)
+            if (EXTENSIONS.any { File(prefix + it).exists() } || File("$prefix.aux.tmp").exists()) removed++
+            delete(prefix)
+            File("$prefix.aux.tmp").delete()
+            if (dir.list().isNullOrEmpty()) dir.delete()
+        }
+        return removed
+    }
+
     fun clear() {
         root.deleteRecursively()
     }

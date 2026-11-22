@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -309,6 +310,13 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // Forget this chat's saved KV (snapshots and the held context): the next message prefills anew.
+                    IconButton(
+                        onClick = { viewModel.forgetChatKv() },
+                        enabled = uiState.currentSession != null && !uiState.isGenerating
+                    ) {
+                        Icon(imageVector = Icons.Default.DeleteSweep, contentDescription = "Forget saved KV of this chat")
+                    }
                     IconButton(onClick = { showFilesSheet = true }) {
                         Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "Chat files")
                     }

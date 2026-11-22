@@ -166,6 +166,8 @@ static void remember_run(const bmoe::RunSummary & s) {
         j += buf;
         first = false;
     };
+    num("n_generated", (double) s.n_generated);
+    num("decode_tps", s.tokens_per_second);
     num("n_prompt_total", s.n_prompt_total);
     num("n_reused", s.n_reused);
     num("kv_reuse", s.kv_reuse);
@@ -1156,6 +1158,16 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeKvTokens(JNIEnv *, jobject)
     if (!gen_lk.owns_lock()) return 0;
     std::shared_ptr<bmoe::Session> s = current_session();
     return s ? (jint) s->kv_tokens_held() : 0;
+}
+
+// Drops the context the engine holds (Session::forget_kv); the next turn replays with a full prefill. False while
+// a generation runs (busy is a no, not a wait) or when no model is loaded.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeForgetKv(JNIEnv *, jobject) {
+    std::unique_lock<std::mutex> gen_lk(g_generate_mu, std::try_to_lock);
+    if (!gen_lk.owns_lock()) return JNI_FALSE;
+    std::shared_ptr<bmoe::Session> s = current_session();
+    return (s && s->forget_kv()) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jlong JNICALL

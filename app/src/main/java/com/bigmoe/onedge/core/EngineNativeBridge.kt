@@ -124,6 +124,9 @@ class EngineNativeBridge {
     /** Tokens of the running chat the context holds; 0 while generating or when there is nothing to snapshot. */
     external fun nativeKvTokens(): Int
 
+    /** Drops the context the engine holds; the next turn replays with a full prefill. False while generating. */
+    external fun nativeForgetKv(): Boolean
+
     /** The CPU cores Android lets this app use (bit i = cpu i); 0 when it cannot be read. */
     external fun nativeAllowedCpus(): Long
 

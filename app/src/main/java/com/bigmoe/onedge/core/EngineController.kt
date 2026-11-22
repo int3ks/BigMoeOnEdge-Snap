@@ -123,6 +123,28 @@ class EngineController(
     }
 
     /**
+     * Chat button "forget saved KV": deletes [chatId]'s snapshots on disk (every model setup) and drops the context the
+     * engine holds, whichever chat it is, so the next turn of [chatId] replays its history with a full prefill and
+     * nothing of the old state can come back. Null while a generation runs (nothing done); otherwise how many
+     * snapshots were deleted.
+     */
+    suspend fun forgetChatKv(chatId: String): Int? = withContext(ioDispatcher) {
+        if (!generating.compareAndSet(false, true)) return@withContext null
+        try {
+            lifecycleMutex.withLock {
+                val removed = kvSnapshotStore?.let { runCatching { it.deleteSession(chatId) }.getOrDefault(0) } ?: 0
+                if (_state.value is EngineState.Ready && !isRemoteLoaded()) backend.forgetKv()
+                kvSessionId = null
+                kvDirty = false
+                engineStateKey = null
+                removed
+            }
+        } finally {
+            generating.set(false)
+        }
+    }
+
+    /**
      * Cancels the running model load (Models page). The engine gives up at its next check - within a moment while it
      * reads the model or the weights, after the step for the NPU step - and [loadModel] then returns [LOAD_CANCELLED]
      * with the state Unloaded. Does nothing when no load runs.

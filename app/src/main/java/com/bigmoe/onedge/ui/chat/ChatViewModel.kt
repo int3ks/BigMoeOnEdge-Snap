@@ -403,6 +403,23 @@ class ChatViewModel(
         }
     }
 
+    /** Chat button: forget this chat's saved KV (snapshots on disk and the context the engine holds). */
+    fun forgetChatKv() {
+        val id = _uiState.value.currentSession?.id ?: return
+        viewModelScope.launch {
+            val removed = engineController.forgetChatKv(id)
+            _uiState.update {
+                it.copy(
+                    notice = when (removed) {
+                        null -> "The model is busy. Try again when the answer has finished."
+                        0 -> "No saved KV for this chat. The context was cleared; the next message is prefilled anew."
+                        else -> "Saved KV of this chat deleted ($removed). The next message is prefilled anew."
+                    }
+                )
+            }
+        }
+    }
+
     /** Writes the settings an answer suggested (a `bmoe-settings` block) after the user tapped Apply. */
     fun applySuggestedSettings(changes: List<com.bigmoe.onedge.core.SettingsAdvice.Change>) {
         viewModelScope.launch {

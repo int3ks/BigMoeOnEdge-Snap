@@ -427,18 +427,18 @@ private fun SettingsContent(
             )
             SwitchRow(
                 "Auto: CPU cores by temperature",
-                "Decode only, decided before each answer, no reload. The decode cores chosen above are the START value: a model opens with them, then Auto moves both ways. While the skin temperature is low, Honor's throttle step is calm and the last answer kept (almost) all its threads busy, one more core, the fastest one not in use, is added. When it gets hot or Honor throttles, or a core did not work, the slowest core in use is taken away (never below 2), also one of the cores chosen above. The title bar shows the temperature, the cores and how many of them worked (\"busy\"). Needs a device that reports its skin temperature.",
+                "Decode only, decided before each answer, no reload. The decode cores chosen above are the MINIMUM: a model opens with them and Auto adds cores on top. While the skin temperature is below the add value and Honor's throttle step is calm, one more core, the fastest one not in use, is added; if the next answer (48 tokens or more) is slower than before, it is taken back and Auto waits 5 minutes before the next try. Above the take-away value an added core goes again. Only when Honor itself throttles does Auto go below the chosen cores (never below 2); they come back when it stops. The title bar shows the temperature and the cores in use. Needs a device that reports its skin temperature.",
                 settings.autoCores
             ) { viewModel.updateAutoCores(it) }
             if (settings.autoCores) {
                 ChoiceSetting(
                     "Auto cores: add a core below",
-                    listOf(340, 360, 380, 390, 400).map { it to String.format(java.util.Locale.US, "%.1f \u00b0C", it / 10f) },
+                    listOf(340, 360, 380, 390, 400, 410, 420).map { it to String.format(java.util.Locale.US, "%.1f \u00b0C", it / 10f) },
                     selected = settings.autoCoresCoolTenths
                 ) { viewModel.updateAutoCoresCoolTenths(it) }
                 ChoiceSetting(
                     "Auto cores: take one away above",
-                    listOf(390, 400, 405, 410, 420).map { it to String.format(java.util.Locale.US, "%.1f \u00b0C", it / 10f) },
+                    listOf(390, 400, 405, 410, 420, 430, 440).map { it to String.format(java.util.Locale.US, "%.1f \u00b0C", it / 10f) },
                     selected = settings.autoCoresHotTenths
                 ) { viewModel.updateAutoCoresHotTenths(it) }
                 Hint("Skin temperature as SamTweak shows it: Honor starts to throttle around 41 to 43 \u00b0C. Between the two values nothing changes.")
