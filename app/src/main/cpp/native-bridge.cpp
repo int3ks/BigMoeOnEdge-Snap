@@ -48,9 +48,9 @@
 
 // ---- CPU cores chosen in Settings ---------------------------------------------------------------------------
 // Bit i = cpu i, one mask for decode (single-token graphs) and one for prefill (batched graphs); 0 = let Android
-// place the threads. ggml creates each graph's compute threads from the calling thread (a disposable pool, default
-// empty cpumask), so they inherit its affinity: llama.cpp's graph-compute hook sets the calling thread to the
-// decode or prefill cores right before every graph, and ScopedCpuMask restores the thread's own affinity afterwards.
+// place the threads. The session keeps persistent compute threads (Session::set_cpu_masks) placed on these cores;
+// the calling thread computes too: llama.cpp's graph-compute hook sets it to the decode or prefill cores right
+// before every graph, and ScopedCpuMask restores the thread's own affinity afterwards.
 static std::atomic<unsigned long long> g_decode_mask{0};
 static std::atomic<unsigned long long> g_prefill_mask{0};
 
@@ -616,6 +616,8 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
         if (!csv) LOGW("could not open metrics CSV at %s", csv_path.c_str());
     }
 
+    // The cores of its persistent compute threads, built at its first generation.
+    opened->set_cpu_masks(g_decode_mask.load(), g_prefill_mask.load());
     {
         std::lock_guard<std::mutex> lk(g_session_mu);
         g_session = std::shared_ptr<bmoe::Session>(std::move(opened));
@@ -1081,6 +1083,9 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCpuMasks(JNIEnv *, jobje
     // Installed once and left in place: with both masks 0 it does nothing.
     static std::once_flag hook_once;
     std::call_once(hook_once, [] { llama_set_graph_compute_hook(&on_graph_compute); });
+    // The session's persistent compute threads move to these cores at the start of its next generation.
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (s) s->set_cpu_masks(static_cast<unsigned long long>(decode), static_cast<unsigned long long>(prefill));
 }
 
 // Live tuning between generations (the device tuner): compute threads and the expert-cache budget of the loaded

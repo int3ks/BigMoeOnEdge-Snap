@@ -290,6 +290,9 @@ public:
     // Compute threads for single-token (decode) and batched (prompt) graphs, for the target and the MTP draft
     // context, from the next graph on. PRECONDITION as above: between generations. Values below 1 are ignored.
     void set_threads(int n_threads, int n_threads_batch);
+    // CPU cores (bit i = cpu i, 0 = inherit the calling thread's) of the persistent compute threads for decode and
+    // batched graphs. Thread-safe at any time: the threads are rebuilt at the start of the next generation.
+    void set_cpu_masks(unsigned long long decode_mask, unsigned long long prefill_mask);
 
     // Score a fixed text under teacher forcing. Clears the KV; leaves no conversation state behind.
     PplResult perplexity(const PplRequest & req);

@@ -25,6 +25,10 @@
 
 #include "llama.h"
 #include "ggml.h"
+#include "ggml-cpu.h" // ggml_threadpool_new/free: persistent compute threads
+#if defined(__linux__)
+#include <sched.h>
+#endif
 
 // llama.cpp's `common` layer (NOT the stable public API): chat-template rendering and
 // reasoning parsing. See the note in the root CMakeLists / docs/seam.md.
@@ -462,6 +466,18 @@ struct Session::Impl {
     // both sources, because the verify half of the loop does not care who drafted.
     std::unique_ptr<llama_context, void (*)(llama_context *)> ctx_dft{nullptr, llama_free};
     common_speculative_ptr mtp;
+
+    // Persistent ggml compute threads for decode and batched graphs (one pool when both match), shared by the
+    // target and the draft context, which never compute at the same time. Without them ggml creates and joins its
+    // worker threads for every graph, several times per token: the scheduler never sees a lasting load on them and
+    // the CPU governor keeps the clocks low (seen: 1.2 of 3.5 GHz while decoding, t/s varying up to 3x).
+    ggml_threadpool_t tp = nullptr;
+    ggml_threadpool_t tp_batch = nullptr;
+    int tp_threads = 0, tp_threads_batch = 0;
+    unsigned long long tp_mask = 0, tp_mask_batch = 0;
+    std::atomic<unsigned long long> want_mask{0}, want_mask_batch{0};
+    void sync_threadpools();
+    void free_threadpools();
     // Serves both roles on the speculative path, never both at once: a prefill chunk (up to
     // n_batch tokens, logits on the last) and a verify pass (1 + draft_max tokens, logits on all).
     llama_batch mtp_batch{};
@@ -618,6 +634,7 @@ struct Session::Impl {
         ctx_dft.reset();
         model_dft.reset();
         ctx.reset();
+        free_threadpools(); // after both contexts that used them
         hook.reset();
         model.reset();
         mapping_placeholders.release();
@@ -686,6 +703,55 @@ void Session::set_threads(int n_threads, int n_threads_batch) {
     im.cfg.n_threads_batch = n_threads_batch;
     if (im.ctx) llama_set_n_threads(im.ctx.get(), n_threads, n_threads_batch);
     if (im.ctx_dft) llama_set_n_threads(im.ctx_dft.get(), n_threads, n_threads_batch);
+}
+
+void Session::set_cpu_masks(unsigned long long decode_mask, unsigned long long prefill_mask) {
+    impl_->want_mask.store(decode_mask, std::memory_order_relaxed);
+    impl_->want_mask_batch.store(prefill_mask, std::memory_order_relaxed);
+}
+
+// A pool of n threads on `mask` (limited to the cores this process may use); nothing allowed = inherit.
+static ggml_threadpool_t new_threadpool(int n, unsigned long long mask) {
+    ggml_threadpool_params p = ggml_threadpool_params_default(n);
+#if defined(__linux__)
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (sched_getaffinity(0, sizeof(set), &set) == 0) {
+        unsigned long long allowed = 0;
+        for (int i = 0; i < 64 && i < CPU_SETSIZE; i++)
+            if (CPU_ISSET(i, &set)) allowed |= 1ULL << i;
+        mask &= allowed;
+    }
+#endif
+    for (int i = 0; i < 64 && i < GGML_MAX_N_THREADS; i++) p.cpumask[i] = ((mask >> i) & 1ULL) != 0;
+    return ggml_threadpool_new(&p);
+}
+
+void Session::Impl::free_threadpools() {
+    if (ctx) llama_detach_threadpool(ctx.get());
+    if (ctx_dft) llama_detach_threadpool(ctx_dft.get());
+    if (tp_batch && tp_batch != tp) ggml_threadpool_free(tp_batch);
+    if (tp) ggml_threadpool_free(tp);
+    tp = tp_batch = nullptr;
+    tp_threads = tp_threads_batch = 0;
+}
+
+// Before a generation (no graph in flight): (re)builds the pools when the thread counts or cores changed.
+void Session::Impl::sync_threadpools() {
+    if (!ctx) return;
+    const int n = std::max(1, cfg.n_threads);
+    const int nb = std::max(1, cfg.n_threads_batch);
+    const unsigned long long m = want_mask.load(std::memory_order_relaxed);
+    const unsigned long long mb = want_mask_batch.load(std::memory_order_relaxed);
+    if (tp && n == tp_threads && nb == tp_threads_batch && m == tp_mask && mb == tp_mask_batch) return;
+    free_threadpools();
+    tp = new_threadpool(n, m);
+    tp_batch = (nb == n && mb == m) ? tp : new_threadpool(nb, mb);
+    tp_threads = n; tp_threads_batch = nb; tp_mask = m; tp_mask_batch = mb;
+    llama_attach_threadpool(ctx.get(), tp, tp_batch);
+    if (ctx_dft) llama_attach_threadpool(ctx_dft.get(), tp, tp_batch);
+    std::fprintf(stderr, "bmoe: persistent compute threads: decode %d (cores 0x%llx), prefill %d (cores 0x%llx)%s\n",
+                 n, m, nb, mb, tp_batch == tp ? ", one pool" : "");
 }
 // Teacher-forced perplexity. See PplRequest for why the batch is labelled decode.
 PplResult Session::perplexity(const PplRequest & req) {
@@ -1710,6 +1776,7 @@ RunResult Session::generate(const GenerateRequest & req,
     const MoeStreamConfig & moe = im.cfg.moe;
     llama_context * ctx = im.ctx.get();
     im.take_budget_request(); // a growing cache's request from while nothing ran
+    im.sync_threadpools();    // compute threads that live across graphs (new thread counts or cores take effect)
 
     // Before anything is written about what this run did, say what it was.
     if (sink && !im.info_sent) {
