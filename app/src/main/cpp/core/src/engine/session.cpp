@@ -28,6 +28,7 @@
 #include "ggml-cpu.h" // ggml_threadpool_new/free: persistent compute threads
 #if defined(__linux__)
 #include <sched.h>
+#include <unistd.h>
 #endif
 
 // llama.cpp's `common` layer (NOT the stable public API): chat-template rendering and
@@ -717,12 +718,15 @@ void Session::set_cpu_masks(unsigned long long decode_mask, unsigned long long p
 // without this pool there (they inherit its cores). Left to the scheduler, Android stacked two compute threads on one core while another
 // chosen core idled (Galaxy S25 Ultra: two threads at 50 % each for seconds); every barrier then waits for
 // the descheduled one while the rest spin, and decode fell from about 6 to about 1.2 t/s.
+// The allowed cores come from the process's main thread, not the calling one: creating a strict pool pins the
+// caller to that pool's one core, so the prefill pool built right after the decode pool saw that single core and
+// put all its threads there (7.38 with different decode and prefill cores: five threads on cpu4).
 static ggml_threadpool_t new_threadpool(int n, unsigned long long mask) {
     ggml_threadpool_params p = ggml_threadpool_params_default(n);
 #if defined(__linux__)
     cpu_set_t set;
     CPU_ZERO(&set);
-    if (sched_getaffinity(0, sizeof(set), &set) == 0) {
+    if (sched_getaffinity(getpid(), sizeof(set), &set) == 0) {
         unsigned long long allowed = 0;
         for (int i = 0; i < 64 && i < CPU_SETSIZE; i++)
             if (CPU_ISSET(i, &set)) allowed |= 1ULL << i;
