@@ -26,8 +26,9 @@ val bmoeCiCmakeArguments: List<String> = if (
 // A build made with a feature the phone lacks crashes on load (SIGILL), so the default stays the safe baseline.
 val bmoeArmArch: String? = providers.gradleProperty("bmoeArmArch").orNull?.trim()?.takeIf { it.isNotEmpty() }
 
-// android:appCategory written into the manifest (see AndroidManifest.xml). Default "undefined" (no hint): as a "game"
-// the app got its decode clocks pinned to ~2 GHz by Samsung after a few seconds. -PbmoeAppCategory=game to compare.
+// android:appCategory (see AndroidManifest.xml). Default "undefined" = no attribute at all (it is no valid value): as a
+// "game" the app got its decode clocks pinned to ~2 GHz by Samsung after a few seconds. -PbmoeAppCategory=game merges
+// src/appCategory/AndroidManifest.xml into the build types to compare.
 val bmoeAppCategory: String = (providers.gradleProperty("bmoeAppCategory").orNull ?: "undefined").trim().lowercase().also {
     val allowed = setOf("accessibility", "audio", "game", "image", "maps", "news", "productivity", "social", "video", "undefined")
     require(it in allowed) { "bmoeAppCategory must be one of $allowed, got '$it'" }
@@ -154,6 +155,12 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+
+    // A named app category only: the overlay manifest adds android:appCategory (main declares none).
+    if (bmoeAppCategory != "undefined") {
+        sourceSets.getByName("debug").manifest.srcFile("src/appCategory/AndroidManifest.xml")
+        sourceSets.getByName("release").manifest.srcFile("src/appCategory/AndroidManifest.xml")
     }
 
     compileOptions {

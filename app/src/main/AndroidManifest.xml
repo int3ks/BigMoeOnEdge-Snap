@@ -40,14 +40,13 @@
          (BigMoeOnEdge 0.29.0) declares "game": some vendor performance layers read it to pick a CPU
          governor profile (measured there on OxygenOS: foreground CPU ceiling 1.9/1.65 GHz -> 3.32/3.80 GHz).
          The effect is vendor specific: neutral on stock Android, and Samsung's game service has been
-         reported to throttle apps it classifies this way. A manifest attribute is fixed at install time,
-         so it is a build-time choice, filled from the Gradle property bmoeAppCategory (default "undefined"
-         since 7.36: on a Galaxy S25 Ultra the "game" app's decode clocks were pinned to ~2 GHz (min = max)
-         after ~6 s of load; build with -PbmoeAppCategory=game to compare). Measure per device. -->
+         reported to throttle apps it classifies this way. Since 7.36 the app declares no category: on a
+         Galaxy S25 Ultra the "game" app's decode clocks were pinned to ~2 GHz (min = max) after ~6 s of
+         load. -PbmoeAppCategory=game (or another category) adds it again from src/appCategory/ for a
+         comparison; "undefined" is no valid value, so no category means no attribute. Measure per device. -->
     <application
         android:name=".OnEdgeApplication"
         android:allowBackup="false"
-        android:appCategory="${bmoeAppCategory}"
         android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
