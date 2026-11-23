@@ -49,10 +49,8 @@
 // ---- CPU cores chosen in Settings ---------------------------------------------------------------------------
 // Bit i = cpu i, one mask for decode (single-token graphs) and one for prefill (batched graphs); 0 = let Android
 // place the threads. The session keeps persistent compute threads (Session::set_cpu_masks) placed on these cores;
-// the calling thread computes too: llama.cpp's graph-compute hook sets it to the decode or prefill cores right
-// before every graph (the whole set: the pool's workers hold one core each and leave the caller the free one; a
-// graph without the pool makes workers that inherit the caller's cores), and ScopedCpuMask restores the thread's own
-// affinity afterwards.
+// the calling thread computes too: llama.cpp's graph-compute hook places it right before every graph (see
+// on_graph_compute), and ScopedCpuMask restores the thread's own affinity afterwards.
 static std::atomic<unsigned long long> g_decode_mask{0};
 static std::atomic<unsigned long long> g_prefill_mask{0};
 
@@ -80,10 +78,23 @@ static void place_thread(unsigned long long want) {
     sched_setaffinity(0, sizeof(set), &set);
 }
 
-// Called by llama.cpp before every graph compute, on the computing thread.
-static void on_graph_compute(bool batched) {
+// Called by llama.cpp before every graph compute, on the computing thread. A graph of the session's pool: the pool's
+// n-1 workers hold the lowest n-1 of the cores one each (strict, Session's new_threadpool), so the caller goes on the
+// n-th, the one they leave free. On the whole set it wandered onto a worker's core while that one stayed idle
+// (Galaxy S25 Ultra, 7.39: that worker fell from about 250 % to 125-210 % per 3 s, the answer stuttered). A graph
+// without the pool (ggml makes its workers there, inheriting the caller's cores) or fewer cores than threads: the
+// whole set.
+static void on_graph_compute(bool batched, int n_threads, bool pooled) {
     const unsigned long long want = batched ? g_prefill_mask.load() : g_decode_mask.load();
-    if (want != 0) place_thread(want);
+    if (want == 0) return;
+    const unsigned long long use = want & allowed_cpu_mask();
+    if (pooled && n_threads > 1 && __builtin_popcountll(use) >= n_threads) {
+        unsigned long long rest = use;
+        for (int i = 1; i < n_threads; i++) rest &= rest - 1; // drop the workers' n-1 lowest cores
+        place_thread(rest & (~rest + 1));                     // the lowest core left
+        return;
+    }
+    place_thread(want);
 }
 
 // Restores the calling thread's affinity when a JNI call ends, so a pooled Java thread does not keep the engine's

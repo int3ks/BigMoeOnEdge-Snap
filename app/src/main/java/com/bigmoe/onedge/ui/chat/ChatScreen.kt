@@ -920,7 +920,8 @@ private fun chatHeaderModelLine(modelName: String?): String? {
             (if (m.swapMb >= 0) " • ${m.swapMb} MiB in zram" else "") +
             (if (m.faultsPerSec >= 0) " • ${m.faultsPerSec} faults/s" else "")
     } ?: "") +
-        (thermal.skinC?.let { " • " + String.format(java.util.Locale.US, "%.1f", it) + " °C" } ?: "") +
+        (thermal.headroom?.let { " • heat ${(it * 100).toInt()} %" } ?: "") +
+        (if (thermal.status > 0) " (throttle ${thermal.status})" else "") +
         (thermal.cores?.let { n ->
             " • $n cores" + (thermal.busy?.let { b -> " (" + String.format(java.util.Locale.US, "%.1f", b) + " busy)" } ?: "")
         } ?: "")

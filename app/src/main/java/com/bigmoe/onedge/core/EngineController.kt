@@ -527,7 +527,7 @@ class EngineController(
      * unwind. The flow always ends with exactly one [EngineEvent.Finished] (unless the collector cancels).
      */
     fun generate(request: GenerationRequest): Flow<EngineEvent> = flow {
-        AutoCores.beforeRun(this@EngineController) // Auto cores by temperature: the cores of this answer, before it starts
+        AutoCores.beforeRun(this@EngineController) // Auto cores by throttling: the cores of this answer, before it starts
         val ready = _state.value as? EngineState.Ready
         if (ready == null) {
             emit(failed("No model is loaded. Load a model first."))

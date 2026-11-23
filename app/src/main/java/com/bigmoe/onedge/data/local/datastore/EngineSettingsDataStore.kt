@@ -141,8 +141,6 @@ data class EngineSettings(
     /** Auto growth tuning, applied live (no reload): growth step, least time between steps, free RAM needed above the reserve, least a shrink takes back, quiet time after a shrink. */
     /** Auto cores: the cores above are the minimum; more are added while cool and removed when hot (tenths of a degree C). */
     val autoCores: Boolean = false,
-    val autoCoresCoolTenths: Int = 380,
-    val autoCoresHotTenths: Int = 405,
     val cacheGrowStepMb: Int = 100,
     val cacheGrowEverySec: Int = 4,
     val cacheGrowHeadroomMb: Int = 300,
@@ -383,8 +381,6 @@ class EngineSettingsDataStore(private val context: Context) {
         val CACHE_FLOOR_MB = intPreferencesKey("cache_floor_mb")
         val CACHE_GROW_STEP_MB = intPreferencesKey("cache_grow_step_mb")
         val AUTO_CORES = booleanPreferencesKey("auto_cores")
-        val AUTO_CORES_COOL = intPreferencesKey("auto_cores_cool_tenths")
-        val AUTO_CORES_HOT = intPreferencesKey("auto_cores_hot_tenths")
         val CACHE_GROW_EVERY_SEC = intPreferencesKey("cache_grow_every_sec")
         val CACHE_GROW_HEADROOM_MB = intPreferencesKey("cache_grow_headroom_mb")
         val CACHE_SHRINK_MIN_MB = intPreferencesKey("cache_shrink_min_mb")
@@ -493,8 +489,6 @@ class EngineSettingsDataStore(private val context: Context) {
             cacheFloorMb = p[Keys.CACHE_FLOOR_MB] ?: d.cacheFloorMb,
             cacheGrowStepMb = p[Keys.CACHE_GROW_STEP_MB] ?: d.cacheGrowStepMb,
             autoCores = p[Keys.AUTO_CORES] ?: d.autoCores,
-            autoCoresCoolTenths = p[Keys.AUTO_CORES_COOL] ?: d.autoCoresCoolTenths,
-            autoCoresHotTenths = p[Keys.AUTO_CORES_HOT] ?: d.autoCoresHotTenths,
             cacheGrowEverySec = p[Keys.CACHE_GROW_EVERY_SEC] ?: d.cacheGrowEverySec,
             cacheGrowHeadroomMb = p[Keys.CACHE_GROW_HEADROOM_MB] ?: d.cacheGrowHeadroomMb,
             cacheShrinkMinMb = p[Keys.CACHE_SHRINK_MIN_MB] ?: d.cacheShrinkMinMb,
@@ -670,8 +664,6 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateCacheGrow(v: Boolean) = set(Keys.CACHE_GROW, v)
     suspend fun updateCacheFloorMb(v: Int) = set(Keys.CACHE_FLOOR_MB, v.coerceAtLeast(0))
     suspend fun updateAutoCores(v: Boolean) = set(Keys.AUTO_CORES, v)
-    suspend fun updateAutoCoresCoolTenths(v: Int) = set(Keys.AUTO_CORES_COOL, v.coerceIn(250, 450))
-    suspend fun updateAutoCoresHotTenths(v: Int) = set(Keys.AUTO_CORES_HOT, v.coerceIn(250, 460))
     suspend fun updateCacheGrowStepMb(v: Int) = set(Keys.CACHE_GROW_STEP_MB, v.coerceIn(16, 2000))
     suspend fun updateCacheGrowEverySec(v: Int) = set(Keys.CACHE_GROW_EVERY_SEC, v.coerceIn(2, 120))
     suspend fun updateCacheGrowHeadroomMb(v: Int) = set(Keys.CACHE_GROW_HEADROOM_MB, v.coerceIn(0, 4000))
