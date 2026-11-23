@@ -99,12 +99,14 @@ fun ChatInputBar(
     toolsTermuxEnabled: Boolean = false,
     toolsHelpEnabled: Boolean = false,
     toolsWikiEnabled: Boolean = false,
+    toolsAskUserEnabled: Boolean = false,
     onToggleToolFiles: () -> Unit,
     onToggleToolCode: () -> Unit,
     onToggleToolUtilities: () -> Unit,
     onToggleToolTermux: () -> Unit = {},
     onToggleToolHelp: () -> Unit = {},
     onToggleToolWiki: () -> Unit = {},
+    onToggleToolAskUser: () -> Unit = {},
     toolsExternalEnabled: Boolean = false,
     onToggleToolExternal: () -> Unit = {},
     nativeUiEnabled: Boolean = false,
@@ -374,7 +376,7 @@ fun ChatInputBar(
                     Box {
                         ToggleIcon(
                             icon = Icons.Default.Build,
-                            on = toolsFilesEnabled || toolsCodeEnabled || toolsUtilitiesEnabled || toolsTermuxEnabled || toolsHelpEnabled || toolsWikiEnabled || toolsExternalEnabled || nativeUiEnabled,
+                            on = toolsFilesEnabled || toolsCodeEnabled || toolsUtilitiesEnabled || toolsTermuxEnabled || toolsHelpEnabled || toolsWikiEnabled || toolsAskUserEnabled || toolsExternalEnabled || nativeUiEnabled,
                             description = "Tool access",
                             onClick = { toolsMenu = true }
                         )
@@ -404,6 +406,11 @@ fun ChatInputBar(
                                 label = "Wiki",
                                 checked = toolsWikiEnabled,
                                 onCheckedChange = onToggleToolWiki
+                            )
+                            ToolToggleRow(
+                                label = com.bigmoe.onedge.core.t("Ask user"),
+                                checked = toolsAskUserEnabled,
+                                onCheckedChange = onToggleToolAskUser
                             )
                             ToolToggleRow(
                                 label = "Termux",

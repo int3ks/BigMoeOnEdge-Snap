@@ -111,6 +111,8 @@ data class ChatUiState(
     val pendingAttachments: List<PendingAttachment> = emptyList(),
     /** Set while a tool waits for the user's approval (edit with diff, delete, overwrite). */
     val pendingConfirmation: ConfirmationRequest? = null,
+    /** Set while the model's ask_user question waits for the user's answer. */
+    val pendingQuestion: com.bigmoe.onedge.tools.UserQuestion? = null,
     /** Attachments and AI-made files of the open chat (the screen groups them under their messages). */
     val attachments: List<AttachmentDomainModel> = emptyList(),
     val artifacts: List<ArtifactDomainModel> = emptyList(),
@@ -297,7 +299,8 @@ class ChatViewModel(
                         toolQuietMs = if (sameChat && g.active) g.toolQuietMs else 0L,
                         toolCancelling = sameChat && g.active && g.toolCancelling,
                         notice = if (sameChat) g.notice ?: it.notice else it.notice,
-                        pendingConfirmation = if (sameChat) g.pendingConfirmation else null
+                        pendingConfirmation = if (sameChat) g.pendingConfirmation else null,
+                        pendingQuestion = if (sameChat) g.pendingQuestion else null
                     )
                 }
             }
@@ -373,7 +376,8 @@ class ChatViewModel(
                     toolLimitMs = if (same && g.active) g.toolLimitMs else null,
                     toolQuietMs = if (same && g.active) g.toolQuietMs else 0L,
                     toolCancelling = same && g.active && g.toolCancelling,
-                    pendingConfirmation = if (same) g.pendingConfirmation else null
+                    pendingConfirmation = if (same) g.pendingConfirmation else null,
+                    pendingQuestion = if (same) g.pendingQuestion else null
                 ) }
             }
             .launchIn(viewModelScope)
@@ -854,6 +858,11 @@ class ChatViewModel(
         generationManager.resolveConfirmation(approved)
     }
 
+    /** Answer of the ask_user card (option or own text); null = dismissed. */
+    fun resolveQuestion(answer: String?) {
+        generationManager.resolveQuestion(answer)
+    }
+
     // The switches under the input belong to the open chat (see updateToggles); Settings sets the defaults.
     fun toggleToolFiles() = updateToggles { it.copy(files = !it.files) }
 
@@ -862,6 +871,7 @@ class ChatViewModel(
     fun toggleToolUtilities() = updateToggles { it.copy(utilities = !it.utilities) }
     fun toggleToolHelp() = updateToggles { it.copy(help = !it.help) }
     fun toggleToolWiki() = updateToggles { it.copy(wiki = !it.wiki) }
+    fun toggleToolAskUser() = updateToggles { it.copy(askUser = !it.askUser) }
 
     fun toggleToolTermux() = updateToggles { it.copy(termux = !it.termux) }
 

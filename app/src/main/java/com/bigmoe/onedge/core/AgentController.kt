@@ -14,6 +14,7 @@ import com.bigmoe.onedge.tools.CODE_TOOL_NAMES
 import com.bigmoe.onedge.tools.FILE_TOOL_NAMES
 import com.bigmoe.onedge.tools.HELP_TOOL_NAMES
 import com.bigmoe.onedge.tools.WIKI_TOOL_NAMES
+import com.bigmoe.onedge.tools.ASK_USER_TOOL_NAMES
 import com.bigmoe.onedge.tools.TERMUX_TOOL_NAMES
 import com.bigmoe.onedge.tools.ToolContext
 import com.bigmoe.onedge.tools.ToolManager
@@ -616,6 +617,7 @@ ${request.prompt}""".trim()
             if (settings.toolsTermuxEnabled) names.addAll(TERMUX_TOOL_NAMES)
             if (settings.toolsHelpEnabled) names.addAll(HELP_TOOL_NAMES)
             if (settings.toolsWikiEnabled) names.addAll(WIKI_TOOL_NAMES)
+            if (settings.toolsAskUserEnabled) names.addAll(ASK_USER_TOOL_NAMES)
             if (settings.isWebSearchEnabled) {
                 names.addAll(WEB_PAGE_TOOL_NAMES)
                 // Image search is independently switchable so it can be removed from the model's tool list.

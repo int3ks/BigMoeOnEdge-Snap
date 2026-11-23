@@ -501,6 +501,14 @@ fun ChatScreen(
                                         LiveStatusLine(uiState.liveTiming.copy(decodeTokensPerSecond = 0.0))
                                     }
                                 }
+                                // ask_user: the model waits for the answer to its question.
+                                uiState.pendingQuestion?.let { q ->
+                                    AskUserCard(
+                                        question = q,
+                                        onAnswer = { viewModel.resolveQuestion(it) },
+                                        onDismiss = { viewModel.resolveQuestion(null) }
+                                    )
+                                }
                               }
                             }
                         }
@@ -581,12 +589,14 @@ fun ChatScreen(
                 toolsTermuxEnabled = uiState.settings.toolsTermuxEnabled,
                 toolsHelpEnabled = uiState.settings.toolsHelpEnabled,
                 toolsWikiEnabled = uiState.settings.toolsWikiEnabled,
+                toolsAskUserEnabled = uiState.settings.toolsAskUserEnabled,
                 onToggleToolFiles = viewModel::toggleToolFiles,
                 onToggleToolCode = viewModel::toggleToolCode,
                 onToggleToolUtilities = viewModel::toggleToolUtilities,
                 onToggleToolTermux = viewModel::toggleToolTermux,
                 onToggleToolHelp = viewModel::toggleToolHelp,
                 onToggleToolWiki = viewModel::toggleToolWiki,
+                onToggleToolAskUser = viewModel::toggleToolAskUser,
                 toolsExternalEnabled = uiState.settings.toolsExternalEnabled,
                 onToggleToolExternal = viewModel::toggleToolExternal,
                 nativeUiEnabled = uiState.settings.interactiveUiEnabled,

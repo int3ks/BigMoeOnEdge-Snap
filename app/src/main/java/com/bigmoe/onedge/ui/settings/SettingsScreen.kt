@@ -782,6 +782,11 @@ private fun SettingsContent(
             ) { viewModel.updateToolsWikiEnabled(it) }
             if (settings.toolsWikiEnabled) WikiFolderInfo()
             SwitchRow(
+                "Ask user",
+                "Lets the model ask you a question in the middle of an answer when it needs your decision (which way, which file, which style): a card with 2 to 4 answer buttons and a field for your own answer. The answer waits for you; Dismiss lets the model go on without it. Also under the wrench button in the chat.",
+                settings.toolsAskUserEnabled
+            ) { viewModel.updateToolsAskUserEnabled(it) }
+            SwitchRow(
                 "Native UI components",
                 "Lets the AI answer with compact in-chat visuals when your request calls for one (compare, pros and cons, timeline, steps, key numbers, slides): comparison tables, navigable slide cards, lists, metrics, badges, progress bars, timelines, expandable sections, selectable cards and action buttons. Rendered directly with Jetpack Compose from a small JSON block — no HTML, CSS, JavaScript or WebView. Off by default: it adds about 450 tokens to the system prompt. Also under the wrench button in the chat.",
                 settings.interactiveUiEnabled

@@ -34,6 +34,10 @@ class ToolManager(
     @Volatile
     var confirmationHandler: ConfirmationHandler? = null
 
+    /** The chat's question card for ask_user. Without one, ask_user tells the model it cannot ask. */
+    @Volatile
+    var questionHandler: UserQuestionHandler? = null
+
     /**
      * Settings → Agent → Approval "Allow everything": calls that would ask (edits, deletes, Termux commands) run
      * without the dialog. Set per run from the settings; off by default.
@@ -172,6 +176,13 @@ class ToolManager(
             b.append(
                 " The user keeps own notes and a wiki: when they could answer the question, call wiki_search (keywords in " +
                     "German and English) before any web search."
+            )
+        }
+        if (selected.any { it.name == "ask_user" }) {
+            b.append(
+                " Call ask_user only when the request is ambiguous in a way that matters or you need a decision or fact " +
+                    "only the user has; do not ask about what you can decide, look up or work out yourself, and never ask " +
+                    "the same thing twice."
             )
         }
         selected.firstOrNull { it.name == "run_shell" }?.let { shell ->

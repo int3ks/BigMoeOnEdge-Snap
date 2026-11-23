@@ -6,6 +6,8 @@ import com.bigmoe.onedge.data.repository.ChatSessionDomainModel
 import com.bigmoe.onedge.tools.ConfirmationHandler
 import com.bigmoe.onedge.tools.ConfirmationRequest
 import com.bigmoe.onedge.tools.ToolManager
+import com.bigmoe.onedge.tools.UserQuestion
+import com.bigmoe.onedge.tools.UserQuestionHandler
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -34,6 +36,8 @@ class GenerationManager(
         val liveStatus: String? = null,
         val notice: String? = null,
         val pendingConfirmation: ConfirmationRequest? = null,
+        /** ask_user waits for the user: the chat shows the question card. */
+        val pendingQuestion: UserQuestion? = null,
         /** When the first generated token was seen and the count then: the live rate starts there, after the prefill. */
         val decodeStartAt: Long? = null,
         val decodeStartTokens: Int = 0,
@@ -92,6 +96,7 @@ class GenerationManager(
     private var lastAssistantMessageId: String? = null
 
     private var confirmation: CompletableDeferred<Boolean>? = null
+    private var question: CompletableDeferred<String?>? = null
 
     init {
         toolManager.confirmationHandler = ConfirmationHandler { request ->
@@ -112,6 +117,15 @@ class GenerationManager(
                         lastOutputAt = if (approved) System.currentTimeMillis() else lastOutputAt
                     )
                 }
+            }
+        }
+        toolManager.questionHandler = UserQuestionHandler { q ->
+            val answer = CompletableDeferred<String?>()
+            question = answer
+            update { copy(pendingQuestion = q, liveStatus = "Waiting for your answer…", liveDetail = null) }
+            try { answer.await() } finally {
+                question = null
+                update { copy(pendingQuestion = null) }
             }
         }
         scope.launch(Dispatchers.IO) { repository.clearTransientGenerationStates() }
@@ -186,7 +200,7 @@ class GenerationManager(
                                         val label = toolManager.describeCall(event.name, event.arguments) + "…"
                                         copy(
                                             // The approval request may already be up (it races this event): keep its line.
-                                            liveStatus = if (pendingConfirmation != null) liveStatus else label,
+                                            liveStatus = if (pendingConfirmation != null || pendingQuestion != null) liveStatus else label,
                                             toolLabel = label,
                                             liveDetail = null, liveOutput = null, toolRunning = true,
                                             toolStartedAt = now, toolElapsedMs = 0L, lastOutputAt = now, toolQuietMs = 0L,
@@ -266,7 +280,7 @@ class GenerationManager(
                         copy(
                             active = false, elapsedMs = elapsed, toolRunning = false, toolStartedAt = null, liveDetail = null,
                             liveOutput = null, toolLimitMs = null, lastOutputAt = null, toolQuietMs = 0L, toolCancelling = false,
-                            pendingConfirmation = null
+                            pendingConfirmation = null, pendingQuestion = null
                         )
                     }
                     // Tools release what they held for the run (Termux's wake lock); not awaited, it may take a moment.
@@ -318,7 +332,9 @@ class GenerationManager(
     }
 
     fun resolveConfirmation(approved: Boolean) { confirmation?.complete(approved) }
-    fun stop() { if (generationJob?.isActive == true) agentController.requestStop(); confirmation?.complete(false) }
+    /** Answer of the ask_user card: the chosen option or the user's own text; null = dismissed. */
+    fun resolveQuestion(answer: String?) { question?.complete(answer) }
+    fun stop() { if (generationJob?.isActive == true) agentController.requestStop(); confirmation?.complete(false); question?.complete(null) }
 
     /**
      * The cancel button next to a running tool: ends only that tool; the model gets an error and decides how to go on
@@ -326,6 +342,8 @@ class GenerationManager(
      */
     fun cancelTool() {
         if (generationJob?.isActive != true) return
+        // A pending ask_user question: cancel = dismiss it, the model gets "dismissed" and goes on.
+        question?.let { it.complete(null); return }
         update { copy(toolCancelling = true, liveStatus = "Stopping…") }
         confirmation?.complete(false) // still waiting for approval: this call is declined, the model decides
         agentController.cancelRunningTools()

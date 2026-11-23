@@ -29,26 +29,27 @@ data class ChatToggles(
     /** The chat's own system prompt (a [SystemPromptProfile] id); empty = whatever the default is. */
     val promptId: String = "",
     val help: Boolean = false,
-    val wiki: Boolean = false
+    val wiki: Boolean = false,
+    val askUser: Boolean = false
 ) {
     fun applyTo(s: EngineSettings): EngineSettings {
         // A deleted profile falls back to the default, like a chat that never chose one.
         val prompt = SystemPromptProfile.pick(s.systemPrompts, promptId.ifBlank { s.defaultSystemPromptId })
         return s.copy(
             thinkingEnabled = thinking, isWebSearchEnabled = webSearch, toolsFilesEnabled = files,
-            toolsCodeEnabled = code, toolsUtilitiesEnabled = utilities, toolsTermuxEnabled = termux, toolsHelpEnabled = help, toolsWikiEnabled = wiki,
+            toolsCodeEnabled = code, toolsUtilitiesEnabled = utilities, toolsTermuxEnabled = termux, toolsHelpEnabled = help, toolsWikiEnabled = wiki, toolsAskUserEnabled = askUser,
             systemPrompt = prompt?.prompt ?: s.systemPrompt, systemPromptId = prompt?.id ?: s.systemPromptId
         )
     }
 
     fun encode(): String = JSONObject()
         .put("thinking", thinking).put("webSearch", webSearch).put("files", files)
-        .put("code", code).put("utilities", utilities).put("termux", termux).put("prompt", promptId).put("help", help).put("wiki", wiki).toString()
+        .put("code", code).put("utilities", utilities).put("termux", termux).put("prompt", promptId).put("help", help).put("wiki", wiki).put("askUser", askUser).toString()
 
     companion object {
         fun from(s: EngineSettings) = ChatToggles(
             s.thinkingEnabled, s.isWebSearchEnabled, s.toolsFilesEnabled, s.toolsCodeEnabled, s.toolsUtilitiesEnabled, s.toolsTermuxEnabled,
-            help = s.toolsHelpEnabled, wiki = s.toolsWikiEnabled
+            help = s.toolsHelpEnabled, wiki = s.toolsWikiEnabled, askUser = s.toolsAskUserEnabled
         )
 
         /** null for anything unreadable; a switch missing in an older entry takes [fallback]'s value. */
@@ -61,7 +62,8 @@ data class ChatToggles(
                     o.optBoolean("thinking", d.thinking), o.optBoolean("webSearch", d.webSearch),
                     o.optBoolean("files", d.files), o.optBoolean("code", d.code),
                     o.optBoolean("utilities", d.utilities), o.optBoolean("termux", d.termux),
-                    o.optString("prompt", ""), o.optBoolean("help", d.help), o.optBoolean("wiki", d.wiki)
+                    o.optString("prompt", ""), o.optBoolean("help", d.help), o.optBoolean("wiki", d.wiki),
+                    o.optBoolean("askUser", d.askUser)
                 )
             }.getOrNull()
         }
