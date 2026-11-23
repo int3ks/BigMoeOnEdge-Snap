@@ -107,6 +107,10 @@ class EngineNativeBridge {
     /** Expert-cache budget of the loaded session in MiB (evicts down to it now). Only between generations. */
     external fun nativeSetCacheBudget(mib: Int)
     external fun nativeRequestCacheBudget(mib: Int)
+    /** Any time: thread counts and cores the engine takes between two tokens, or at the next generation's start. */
+    external fun nativeRequestCores(decode: Int, prefill: Int, decodeMask: Long, prefillMask: Long)
+    /** [tokens emitted, decode ns, core requests taken] summed over all answers of the loaded session; null without. */
+    external fun nativeLiveDecode(): LongArray?
     external fun nativeCacheMib(): IntArray?
 
     /** Asks a running [nativeLoadModel] to give up (true), or clears the request before a load (false). Never blocks. */

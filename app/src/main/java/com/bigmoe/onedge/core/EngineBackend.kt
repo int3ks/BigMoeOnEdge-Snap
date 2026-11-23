@@ -32,6 +32,12 @@ interface EngineBackend {
     /** Any time: a budget (MiB) the engine sets between two tokens, or at the next generation's start. */
     fun requestCacheBudget(mib: Int) {}
 
+    /** Any time: thread counts and cores the engine takes between two tokens, or at the next generation's start. */
+    fun requestCores(decode: Int, prefill: Int, decodeMask: Long, prefillMask: Long) {}
+
+    /** [tokens emitted, decode ns, core requests taken] of the loaded session; null when unknown. */
+    fun liveDecode(): LongArray? = null
+
     /** [budget, resident] of the expert cache in MiB, null when nothing is loaded. */
     fun cacheMib(): IntArray? = null
 
@@ -138,6 +144,11 @@ class NativeEngineBackend(private val bridge: EngineNativeBridge) : EngineBacken
     override fun setCacheBudget(mib: Int) = bridge.nativeSetCacheBudget(mib)
 
     override fun requestCacheBudget(mib: Int) = bridge.nativeRequestCacheBudget(mib)
+
+    override fun requestCores(decode: Int, prefill: Int, decodeMask: Long, prefillMask: Long) =
+        bridge.nativeRequestCores(decode, prefill, decodeMask, prefillMask)
+
+    override fun liveDecode(): LongArray? = bridge.nativeLiveDecode()
 
     override fun cacheMib(): IntArray? = bridge.nativeCacheMib()
 

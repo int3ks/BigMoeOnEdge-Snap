@@ -293,6 +293,16 @@ public:
     // CPU cores (bit i = cpu i, 0 = inherit the calling thread's) of the persistent compute threads for decode and
     // batched graphs. Thread-safe at any time: the threads are rebuilt at the start of the next generation.
     void set_cpu_masks(unsigned long long decode_mask, unsigned long long prefill_mask);
+    // Any thread, also while a generation runs: thread counts and cores as set_threads + set_cpu_masks, taken by the
+    // eval thread between two tokens (the compute threads are rebuilt there), or by the next generation at its start.
+    // A later request replaces one not taken yet; set_threads drops it.
+    void request_cores(int n_threads, int n_threads_batch, unsigned long long decode_mask,
+                       unsigned long long prefill_mask);
+    // Called on the eval thread with the new decode and prefill cores when a request_cores is taken.
+    void set_cores_callback(std::function<void(unsigned long long, unsigned long long)> cb);
+    // Any thread: tokens emitted and decode wall time (ns, prefill excluded) summed over all generations, and how
+    // many request_cores were taken. Two readings give the decode speed in between.
+    void live_decode(long long & tokens, long long & decode_ns, int & cores_taken) const;
 
     // Score a fixed text under teacher forcing. Clears the KV; leaves no conversation state behind.
     PplResult perplexity(const PplRequest & req);

@@ -44,6 +44,8 @@
 #include <algorithm>
 #include <sys/resource.h>
 #include <atomic>
+#include <functional>
+#include <mutex>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -479,6 +481,19 @@ struct Session::Impl {
     std::atomic<unsigned long long> want_mask{0}, want_mask_batch{0};
     void sync_threadpools();
     void free_threadpools();
+    // Cores the app asked for at any time (Session::request_cores), taken by the eval thread between two tokens or
+    // at the start of a generation; the callback tells the app's graph hook the new cores.
+    std::mutex core_req_mu;
+    bool core_req = false;
+    int core_req_n = 0, core_req_nb = 0;
+    unsigned long long core_req_mask = 0, core_req_mask_b = 0;
+    std::function<void(unsigned long long, unsigned long long)> on_cores;
+    bool take_core_request();
+    // Live decode speed for the app's Auto cores: tokens emitted and decode wall time over all generations, and
+    // the core requests taken. live_mark is the eval thread's own: the end of the last counted token group.
+    std::atomic<long long> live_tokens{0}, live_decode_ns{0};
+    std::atomic<int> cores_taken{0};
+    std::chrono::steady_clock::time_point live_mark{};
     // Serves both roles on the speculative path, never both at once: a prefill chunk (up to
     // n_batch tokens, logits on the last) and a verify pass (1 + draft_max tokens, logits on all).
     llama_batch mtp_batch{};
@@ -700,6 +715,10 @@ void Session::Impl::take_budget_request() {
 void Session::set_threads(int n_threads, int n_threads_batch) {
     auto & im = *impl_;
     if (n_threads < 1 || n_threads_batch < 1) return;
+    {
+        std::lock_guard<std::mutex> lk(im.core_req_mu);
+        im.core_req = false; // a direct setting replaces a request not taken yet
+    }
     im.cfg.n_threads = n_threads;
     im.cfg.n_threads_batch = n_threads_batch;
     if (im.ctx) llama_set_n_threads(im.ctx.get(), n_threads, n_threads_batch);
@@ -709,6 +728,53 @@ void Session::set_threads(int n_threads, int n_threads_batch) {
 void Session::set_cpu_masks(unsigned long long decode_mask, unsigned long long prefill_mask) {
     impl_->want_mask.store(decode_mask, std::memory_order_relaxed);
     impl_->want_mask_batch.store(prefill_mask, std::memory_order_relaxed);
+}
+
+void Session::request_cores(int n_threads, int n_threads_batch, unsigned long long decode_mask,
+                            unsigned long long prefill_mask) {
+    if (n_threads < 1 || n_threads_batch < 1) return;
+    auto & im = *impl_;
+    std::lock_guard<std::mutex> lk(im.core_req_mu);
+    im.core_req = true;
+    im.core_req_n = n_threads;
+    im.core_req_nb = n_threads_batch;
+    im.core_req_mask = decode_mask;
+    im.core_req_mask_b = prefill_mask;
+}
+
+void Session::set_cores_callback(std::function<void(unsigned long long, unsigned long long)> cb) {
+    std::lock_guard<std::mutex> lk(impl_->core_req_mu);
+    impl_->on_cores = std::move(cb);
+}
+
+void Session::live_decode(long long & tokens, long long & decode_ns, int & cores_taken) const {
+    tokens = impl_->live_tokens.load(std::memory_order_relaxed);
+    decode_ns = impl_->live_decode_ns.load(std::memory_order_relaxed);
+    cores_taken = impl_->cores_taken.load(std::memory_order_relaxed);
+}
+
+// On the eval thread with no graph in flight (between two tokens, or before a generation): a core request from the
+// app. Sets the thread counts and the cores; the caller rebuilds the compute threads (sync_threadpools).
+bool Session::Impl::take_core_request() {
+    int n, nb;
+    unsigned long long m, mb;
+    std::function<void(unsigned long long, unsigned long long)> cb;
+    {
+        std::lock_guard<std::mutex> lk(core_req_mu);
+        if (!core_req) return false;
+        core_req = false;
+        n = core_req_n; nb = core_req_nb; m = core_req_mask; mb = core_req_mask_b;
+        cb = on_cores;
+    }
+    cfg.n_threads = n;
+    cfg.n_threads_batch = nb;
+    if (ctx) llama_set_n_threads(ctx.get(), n, nb);
+    if (ctx_dft) llama_set_n_threads(ctx_dft.get(), n, nb);
+    want_mask.store(m, std::memory_order_relaxed);
+    want_mask_batch.store(mb, std::memory_order_relaxed);
+    if (cb) cb(m, mb);
+    cores_taken.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
 // A pool of n threads on `mask` (limited to the cores this process may use); nothing allowed = inherit.
@@ -1787,6 +1853,7 @@ RunResult Session::generate(const GenerateRequest & req,
     const MoeStreamConfig & moe = im.cfg.moe;
     llama_context * ctx = im.ctx.get();
     im.take_budget_request(); // a growing cache's request from while nothing ran
+    im.take_core_request();   // Auto cores' request from while nothing ran
     im.sync_threadpools();    // compute threads that live across graphs (new thread counts or cores take effect)
 
     // Before anything is written about what this run did, say what it was.
@@ -2491,6 +2558,7 @@ RunResult Session::generate(const GenerateRequest & req,
                      "sampled pages were no longer in RAM; cache %zu -> %zu MiB\n",
                      last_compute_s * 1000.0, ref * 1000.0, lost * 100.0, budget >> 20, next >> 20);
     };
+    im.live_mark = clock_t_::now(); // decode time counts from here (the prefill is done)
     while (n_gen < n_predict) {
         if (llama_vocab_is_eog(im.vocab, tok)) {
             natural_end = true;
@@ -2734,8 +2802,19 @@ RunResult Session::generate(const GenerateRequest & req,
             if (stop_hit) break;
         }
 
+        {
+            const auto t_live = clock_t_::now();
+            im.live_decode_ns.fetch_add(
+                (long long) std::chrono::duration_cast<std::chrono::nanoseconds>(t_live - im.live_mark).count(),
+                std::memory_order_relaxed);
+            im.live_mark = t_live;
+            im.live_tokens.fetch_add((long long) n_emitted_here, std::memory_order_relaxed);
+        }
         brake_cache();
         im.take_budget_request();
+        // Auto cores asked for other cores while this answer runs: nothing is in flight here, so the threads and
+        // the compute pools change before the next token (the same as at the start of a generation).
+        if (im.take_core_request()) im.sync_threadpools();
 
         // verify_toks = [tok, drafts...]; after the rejected tail was rolled back the KV holds the first 1 + n_acc of
         // them, and the caller got the first n_emitted_here. The rest is KV content nobody was shown.

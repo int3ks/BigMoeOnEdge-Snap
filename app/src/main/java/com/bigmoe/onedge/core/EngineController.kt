@@ -236,6 +236,22 @@ class EngineController(
         } else runCatching { backend.requestCacheBudget(mib) }
     }
 
+    /**
+     * Auto cores, also while an answer runs: the engine takes the thread counts and cores between two tokens (or at
+     * the next answer's start). False without a local model.
+     */
+    fun requestCores(decodeMask: Long, prefillMask: Long): Boolean {
+        if (loadedModel() == null || isRemoteLoaded()) return false
+        return runCatching {
+            backend.requestCores(java.lang.Long.bitCount(decodeMask), java.lang.Long.bitCount(prefillMask), decodeMask, prefillMask)
+        }.isSuccess
+    }
+
+    /** [tokens emitted, decode ns, core requests taken] of the loaded model, summed over its answers; null when none. */
+    fun liveDecode(): LongArray? =
+        if (loadedModel() == null || isRemoteLoaded()) null
+        else runCatching { backend.liveDecode() }.getOrNull()?.takeIf { it.size >= 3 }
+
     /** CPU cores Android lets the app use (bit i = cpu i), 0 when unknown. */
     fun allowedCpus(): Long = try { backend.allowedCpus() } catch (_: Throwable) { 0L }
 

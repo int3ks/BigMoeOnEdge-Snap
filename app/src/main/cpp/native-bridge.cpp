@@ -631,6 +631,11 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
 
     // The cores of its persistent compute threads, built at its first generation.
     opened->set_cpu_masks(g_decode_mask.load(), g_prefill_mask.load());
+    // Cores Auto changes while an answer runs (request_cores): the graph hook places the caller by the new ones.
+    opened->set_cores_callback([](unsigned long long d, unsigned long long p) {
+        g_decode_mask.store(d);
+        g_prefill_mask.store(p);
+    });
     {
         std::lock_guard<std::mutex> lk(g_session_mu);
         g_session = std::shared_ptr<bmoe::Session>(std::move(opened));
@@ -1113,6 +1118,30 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCacheBudget(JNIEnv *, jobject, jint mib) {
     std::shared_ptr<bmoe::Session> s = current_session();
     if (s && mib > 0) s->set_cache_budget_mb(mib);
+}
+
+// Auto cores: thread counts and cores the eval thread takes between two tokens (also while an answer runs), or the
+// next generation at its start. The graph hook's masks follow when it takes them (set_cores_callback).
+extern "C" JNIEXPORT void JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeRequestCores(JNIEnv *, jobject, jint decode, jint prefill,
+                                                                   jlong decode_mask, jlong prefill_mask) {
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (s) s->request_cores(decode, prefill, static_cast<unsigned long long>(decode_mask),
+                            static_cast<unsigned long long>(prefill_mask));
+}
+
+// [tokens emitted, decode ns, core requests taken] of the loaded session (summed over all answers), null without one.
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLiveDecode(JNIEnv * env, jobject) {
+    std::shared_ptr<bmoe::Session> s = current_session();
+    if (!s) return nullptr;
+    long long tok = 0, ns = 0;
+    int taken = 0;
+    s->live_decode(tok, ns, taken);
+    jlong v[3] = {(jlong) tok, (jlong) ns, (jlong) taken};
+    jlongArray arr = env->NewLongArray(3);
+    if (arr) env->SetLongArrayRegion(arr, 0, 3, v);
+    return arr;
 }
 
 // Growing cache: a budget the eval thread takes between two tokens, or the next generation at its start.

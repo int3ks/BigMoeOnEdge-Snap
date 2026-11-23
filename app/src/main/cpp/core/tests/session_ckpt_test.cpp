@@ -405,6 +405,46 @@ static void ckpt_stops_device() {
     check(dev == std::vector<int64_t>({12, 524, 572, 576}), "device prefill stops only at the preamble, the piece width and the 4-token tail");
 }
 
+// Auto cores while an answer runs: request_cores from the token callback is taken between two tokens (thread
+// counts and compute pools change mid-decode); the answer stays the same and the live counters add up.
+static void live_cores_path(const char * path, bool moe, bool spec) {
+    const std::string tag = std::string("live cores ") + (moe ? "stream" : "mmap") + (spec ? "+ngram" : "") + ": ";
+    auto ref = open_session(path, 4, moe, spec);
+    auto s = open_session(path, 4, moe, spec);
+    if (!ref || !s) { check(false, tag + "opens"); return; }
+    GenerateRequest r;
+    r.chat_messages_json = R1;
+    r.n_predict = 24;
+    r.think = false;
+    const RunResult want = ref->generate(r);
+    int cb_masks = 0;
+    s->set_cores_callback([&](unsigned long long, unsigned long long) { ++cb_masks; });
+    long long t0 = 0, ns0 = 0;
+    int k0 = 0;
+    s->live_decode(t0, ns0, k0);
+    Session * sp = s.get();
+    const RunResult got = s->generate(r, [&](const TokenMetrics & m) {
+        // Early steps: a tiny random model may end its answer after a few tokens.
+        if (m.step == 1) sp->request_cores(3, 3, 0, 0);
+        if (m.step == 2) sp->request_cores(1, 2, 0, 0);
+    }, nullptr);
+    long long t1 = 0, ns1 = 0;
+    int k1 = 0;
+    s->live_decode(t1, ns1, k1);
+    check(got.ok && got.generated_text == want.generated_text, tag + "same answer with the threads changed twice mid-decode");
+    std::printf("    generated %d, requests taken %d\n", got.summary.n_generated, k1 - k0);
+    check(got.summary.n_generated >= 2 && k1 - k0 == 2 && cb_masks == 2,
+          tag + "both requests taken during the answer, the callback told each");
+    check(t1 - t0 == got.summary.n_generated && ns1 > ns0, tag + "live counters: every emitted token and decode time counted");
+    // A request made between answers waits for the next one; set_threads drops it.
+    s->request_cores(2, 2, 0, 0);
+    s->set_threads(2, 2);
+    s->generate(r);
+    int k2 = 0;
+    s->live_decode(t1, ns1, k2);
+    check(k2 == k1, tag + "set_threads drops a request not taken yet");
+}
+
 int main(int argc, char ** argv) {
     ckpt_stops_device();
     if (argc < 2) {
@@ -428,6 +468,9 @@ int main(int argc, char ** argv) {
     snapshot_path(argv[1], 0, true, false);
     cancel_load_path(argv[1]);
     regen_after_snapshot(argv[1], /*moe*/ true);
+    live_cores_path(argv[1], /*moe*/ true, /*spec*/ false);
+    live_cores_path(argv[1], /*moe*/ true, /*spec*/ true);
+    if (argc > 2) live_cores_path(argv[2], /*moe*/ false, /*spec*/ true);
     if (argc > 3) swa_path(argv[3]);
     if (failures) {
         std::printf("\n%d check(s) FAILED\n", failures);
