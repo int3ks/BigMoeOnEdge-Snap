@@ -49,8 +49,10 @@
 // ---- CPU cores chosen in Settings ---------------------------------------------------------------------------
 // Bit i = cpu i, one mask for decode (single-token graphs) and one for prefill (batched graphs); 0 = let Android
 // place the threads. The session keeps persistent compute threads (Session::set_cpu_masks) placed on these cores;
-// the calling thread computes too: llama.cpp's graph-compute hook puts it on its own core of the decode or prefill
-// cores (caller_core) right before every graph, and ScopedCpuMask restores the thread's own affinity afterwards.
+// the calling thread computes too: llama.cpp's graph-compute hook sets it to the decode or prefill cores right
+// before every graph (the whole set: the pool's workers hold one core each and leave the caller the free one; a
+// graph without the pool makes workers that inherit the caller's cores), and ScopedCpuMask restores the thread's own
+// affinity afterwards.
 static std::atomic<unsigned long long> g_decode_mask{0};
 static std::atomic<unsigned long long> g_prefill_mask{0};
 
@@ -78,25 +80,10 @@ static void place_thread(unsigned long long want) {
     sched_setaffinity(0, sizeof(set), &set);
 }
 
-// Compute threads of the loaded session (decode, batched graphs): which core of a mask the calling thread takes.
-static std::atomic<int> g_threads_decode{0};
-static std::atomic<int> g_threads_batch{0};
-
-// The calling thread's core in a session's pool: the pool's workers hold the mask's lowest n-1 cores (strict
-// placement, Session's new_threadpool), the caller computes on the n-th. With fewer cores than threads the pool
-// is not strict and the caller takes the whole mask.
-static unsigned long long caller_core(unsigned long long mask, int n) {
-    if (n < 1 || __builtin_popcountll(mask) < n) return mask;
-    for (int i = 0; i < 64; i++) {
-        if (((mask >> i) & 1ULL) && --n == 0) return 1ULL << i;
-    }
-    return mask;
-}
-
 // Called by llama.cpp before every graph compute, on the computing thread.
 static void on_graph_compute(bool batched) {
     const unsigned long long want = batched ? g_prefill_mask.load() : g_decode_mask.load();
-    if (want != 0) place_thread(caller_core(want, batched ? g_threads_batch.load() : g_threads_decode.load()));
+    if (want != 0) place_thread(want);
 }
 
 // Restores the calling thread's affinity when a JNI call ends, so a pooled Java thread does not keep the engine's
@@ -591,8 +578,6 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeLoadModel(
 #ifdef BMOE_PIN_FAST_CORES
     g_n_threads.store(cfg.n_threads > 0 ? cfg.n_threads : 4);
 #endif
-    g_threads_decode.store(cfg.n_threads);
-    g_threads_batch.store(cfg.n_threads_batch);
     LOGI("Opening Session: n_ctx=%d n_batch=%d ubatch=%d threads=%d streaming=%d cache_mode=%d cache_mb=%d "
          "dense=%d overlap=%d drop=%d topk_override=%d spec=%d",
          cfg.n_ctx, cfg.n_batch, cfg.n_ubatch, cfg.n_threads, streaming ? 1 : 0, static_cast<int>(iv[I_CACHE_MODE]),
@@ -1110,11 +1095,7 @@ Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetCpuMasks(JNIEnv *, jobje
 extern "C" JNIEXPORT void JNICALL
 Java_com_bigmoe_onedge_core_EngineNativeBridge_nativeSetThreads(JNIEnv *, jobject, jint decode, jint prefill) {
     std::shared_ptr<bmoe::Session> s = current_session();
-    if (s) {
-        s->set_threads(decode, prefill);
-        g_threads_decode.store(decode);
-        g_threads_batch.store(prefill);
-    }
+    if (s) s->set_threads(decode, prefill);
 }
 
 extern "C" JNIEXPORT void JNICALL

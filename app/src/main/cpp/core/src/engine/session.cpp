@@ -711,9 +711,10 @@ void Session::set_cpu_masks(unsigned long long decode_mask, unsigned long long p
 }
 
 // A pool of n threads on `mask` (limited to the cores this process may use); nothing allowed = inherit.
-// With at least n cores every thread gets one core of its own (strict): ggml gives the n-1 workers the
-// mask's lowest n-1 cores and the calling thread the n-th (the graph-compute hook in native-bridge.cpp pins
-// the caller there). Left to the scheduler, Android stacked two compute threads on one core while another
+// With at least n cores every worker gets one core of its own (strict): ggml gives the n-1 workers the
+// mask's lowest n-1 cores, which leaves the calling thread (set to the whole mask by the graph-compute hook in
+// native-bridge.cpp) the free one. Pinning the caller to that one core instead stacked the workers of any graph
+// without this pool there (they inherit its cores). Left to the scheduler, Android stacked two compute threads on one core while another
 // chosen core idled (Galaxy S25 Ultra: two threads at 50 % each for seconds); every barrier then waits for
 // the descheduled one while the rest spin, and decode fell from about 6 to about 1.2 t/s.
 static ggml_threadpool_t new_threadpool(int n, unsigned long long mask) {
