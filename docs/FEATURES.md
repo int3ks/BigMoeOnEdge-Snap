@@ -10,6 +10,7 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
 * **ask_user** (`tools/AskUserTool.kt`, `ui/chat/AskUserCard.kt`): the model asks a question with 2–4 option buttons
   plus free text; `ToolManager.questionHandler` → `GenerationManager.pendingQuestion`, the run waits for
   `resolveQuestion` (null = dismissed; also tool cancel and Stop). Switch `toolsAskUserEnabled`, per chat `askUser`.
+  While on, `AgentController.askForWeb` asks before the first web access of a message unless the model asked first.
 * **Guess ahead** (MTP / n-gram) works with any temperature (verify by drawing). Mode is **per model** on its card
   (`.model-options.properties` `<model>.spec`, `EngineController.specProvider`); default mode and tuning in
   Settings → Guess ahead.

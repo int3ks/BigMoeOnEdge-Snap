@@ -164,6 +164,31 @@ class AgentController(
             settings, toolsEnabled, toolManager.getToolsDescriptionPrompt(enabledNames), alwaysSearch
         )
 
+        // With ask_user on, the user is always asked at least once before the web is used for this message: if the
+        // model has not asked anything yet, the app asks whether it may (the user can also write an own answer).
+        val askBeforeWeb = "ask_user" in enabledNames
+        var askedThisTurn = false
+        var webDenied = false
+        /** null = the web may be used; [WEB_NO] = the user said no (or dismissed); else the user's own answer. */
+        suspend fun askForWeb(name: String, args: String): String? {
+            if (!askBeforeWeb) return null
+            if (webDenied) return WEB_NO
+            if (askedThisTurn) return null
+            val handler = toolManager.questionHandler ?: return null
+            askedThisTurn = true
+            val o = runCatching { org.json.JSONObject(args) }.getOrNull()
+            val target = (o?.optString("query")?.ifBlank { null } ?: o?.optString("url").orEmpty()).take(200)
+            val question = if (name == "web_search" || name == "image_search") t("May I search the web for \"{0}\"?", target)
+            else t("May I open this web page? {0}", target)
+            val yes = t("Yes, use the web")
+            val no = t("No, answer without the web")
+            return when (val answer = handler.ask(com.bigmoe.onedge.tools.UserQuestion(question, listOf(yes, no)))) {
+                yes -> null
+                null, no -> { webDenied = true; WEB_NO }
+                else -> answer
+            }
+        }
+
         val turns = historyToTurns(request.history).toMutableList()
         var lastEngineMsgId: String? = request.history.lastOrNull()?.id
         var prompt = request.prompt
@@ -181,28 +206,42 @@ class AgentController(
             val generatedQuery = generateSearchQuery(request, turns)
             val query = searchQueryFrom(generatedQuery).ifBlank { searchQueryFrom(request.prompt) }
             val args = org.json.JSONObject().put("query", query).toString()
-            val searchStarted = System.currentTimeMillis()
-            emit(AgentEvent.ToolStarted("web_search", args))
-            val result = toolManager.executeToolCall("web_search", args)
-            val searchMs = System.currentTimeMillis() - searchStarted
-            emit(AgentEvent.ToolsFinished(listOf("web_search"), searchMs))
-            val wrapped = ToolProtocol.wrapResult("web_search", "Query: $query\n$result")
-            // Stored as a TOOL message right after the user's message; replay merges the two user-side turns
-            // with the same "\n\n" join used below, so a replayed chat looks exactly like the live one.
-            val id = sink.save(NewMessage(MessageRole.TOOL, wrapped, toolMs = searchMs))
-            emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
-            prompt = prompt + "\n\n" + wrapped
-            if (settings.imageSearchEnabled && settings.autoImageSearchAfterWebSearch && !stopRequested) {
-                val imageArgs = org.json.JSONObject().put("query", query).toString()
-                val imageStarted = System.currentTimeMillis()
-                emit(AgentEvent.ToolStarted("image_search", imageArgs))
-                val imageResult = toolManager.executeToolCall("image_search", imageArgs)
-                val imageMs = System.currentTimeMillis() - imageStarted
-                emit(AgentEvent.ToolsFinished(listOf("image_search"), imageMs))
-                val imageWrapped = ToolProtocol.wrapResult("image_search", "Query: $query\n$imageResult")
-                val imageId = sink.save(NewMessage(MessageRole.TOOL, imageWrapped, toolMs = imageMs))
-                emit(AgentEvent.MessageSaved(imageId, MessageRole.TOOL))
-                prompt = prompt + "\n\n" + imageWrapped
+            val webAnswer = askForWeb("web_search", args)
+            if (webAnswer != null) {
+                // Not allowed: no search; the model learns why and what the user said instead.
+                val note = if (webAnswer == WEB_NO) "The user was asked and does not want a web search for this message: " +
+                    "answer from your own knowledge, without web results."
+                else "Before the web search the user was asked whether to search for \"$query\" and answered: \"$webAnswer\". " +
+                    "No search was run; act on that answer."
+                val wrapped = ToolProtocol.wrapResult("ask_user", note)
+                val id = sink.save(NewMessage(MessageRole.TOOL, wrapped))
+                emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
+                prompt = prompt + "\n\n" + wrapped
+            }
+            if (webAnswer == null) {
+                val searchStarted = System.currentTimeMillis()
+                emit(AgentEvent.ToolStarted("web_search", args))
+                val result = toolManager.executeToolCall("web_search", args)
+                val searchMs = System.currentTimeMillis() - searchStarted
+                emit(AgentEvent.ToolsFinished(listOf("web_search"), searchMs))
+                val wrapped = ToolProtocol.wrapResult("web_search", "Query: $query\n$result")
+                // Stored as a TOOL message right after the user's message; replay merges the two user-side turns
+                // with the same "\n\n" join used below, so a replayed chat looks exactly like the live one.
+                val id = sink.save(NewMessage(MessageRole.TOOL, wrapped, toolMs = searchMs))
+                emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
+                prompt = prompt + "\n\n" + wrapped
+                if (settings.imageSearchEnabled && settings.autoImageSearchAfterWebSearch && !stopRequested) {
+                    val imageArgs = org.json.JSONObject().put("query", query).toString()
+                    val imageStarted = System.currentTimeMillis()
+                    emit(AgentEvent.ToolStarted("image_search", imageArgs))
+                    val imageResult = toolManager.executeToolCall("image_search", imageArgs)
+                    val imageMs = System.currentTimeMillis() - imageStarted
+                    emit(AgentEvent.ToolsFinished(listOf("image_search"), imageMs))
+                    val imageWrapped = ToolProtocol.wrapResult("image_search", "Query: $query\n$imageResult")
+                    val imageId = sink.save(NewMessage(MessageRole.TOOL, imageWrapped, toolMs = imageMs))
+                    emit(AgentEvent.MessageSaved(imageId, MessageRole.TOOL))
+                    prompt = prompt + "\n\n" + imageWrapped
+                }
             }
             if (stopRequested) { // Stop pressed while searching: nothing is running in the engine to cancel
                 emit(AgentEvent.Notice(NOTE_STOPPED))
@@ -397,7 +436,22 @@ class AgentController(
                 onOutput = { text -> live.trySend(AgentEvent.ToolOutput(text)) },
                 onProgress = { text -> live.trySend(AgentEvent.ToolProgress(text)) }
             )
+            // ask_user on and nothing asked yet: the first web call of the message waits for the user's permission,
+            // unless the model asks its own question in this round before it.
+            val firstWeb = calls.indexOfFirst { it.first in WEB_ACCESS_TOOL_NAMES && it.first in enabledNames }
+            val firstAsk = calls.indexOfFirst { it.first == "ask_user" }
+            val webBlock: String? = if (firstWeb < 0 || (firstAsk in 0 until firstWeb)) null else {
+                when (val answer = askForWeb(calls[firstWeb].first, calls[firstWeb].second)) {
+                    null -> null
+                    WEB_NO -> "Not run: the user does not want the web used for this message. Answer without it, " +
+                        "from your own knowledge, and do not call web tools again."
+                    else -> "Not run: before any web access the user is asked first, and answered: \"$answer\". Act on " +
+                        "that answer; if it allows the web, call the tool again."
+                }
+            }
             suspend fun runOne(name: String, args: String): String {
+                if (webBlock != null && name in WEB_ACCESS_TOOL_NAMES) return webBlock
+                if (name == "ask_user") askedThisTurn = true
                 live.trySend(AgentEvent.ToolStarted(name, args))
                 return when {
                     name in enabledNames -> toolManager.executeToolCall(name, args, toolCtx)
@@ -432,7 +486,7 @@ class AgentController(
             // In AUTO mode, follow a successful/attempted web search with image results only when explicitly enabled.
             // Reuse the model's web query rather than spending another generation just to formulate an image query.
             if (settings.isWebSearchEnabled && settings.imageSearchEnabled && settings.autoImageSearchAfterWebSearch &&
-                calls.any { it.first == "web_search" } && calls.none { it.first == "image_search" } &&
+                webBlock == null && calls.any { it.first == "web_search" } && calls.none { it.first == "image_search" } &&
                 "image_search" in enabledNames && !stopRequested
             ) {
                 val webCall = calls.first { it.first == "web_search" }
@@ -533,6 +587,12 @@ ${request.prompt}""".trim()
         const val MAX_IDENTICAL_ROUNDS = 8
         const val MAX_CALLS_PER_ROUND = 16
         const val NOTE_STOPPED = "Stopped"
+
+        /** Tools that use the web: with ask_user on, the user is asked before the first of them runs in a message. */
+        val WEB_ACCESS_TOOL_NAMES = setOf("web_search", "image_search") + WEB_PAGE_TOOL_NAMES
+
+        /** askForWeb's answer when the user said no to the web (or dismissed the question). */
+        private const val WEB_NO = "\u0000no"
 
         /**
          * Non-null when the next round would not fit: [nPast] tokens already in the context, plus the tool result

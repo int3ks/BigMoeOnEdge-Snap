@@ -180,9 +180,10 @@ class ToolManager(
         }
         if (selected.any { it.name == "ask_user" }) {
             b.append(
-                " Call ask_user only when the request is ambiguous in a way that matters or you need a decision or fact " +
-                    "only the user has; do not ask about what you can decide, look up or work out yourself, and never ask " +
-                    "the same thing twice."
+                " ask_user comes before every other tool: when the request leaves open something that changes the result " +
+                    "(what exactly, which variant, how much, which style) or needs a decision or fact only the user has, " +
+                    "ask first with ask_user, before searching the web or starting the work. Do not ask about what you can " +
+                    "decide or work out yourself, and never ask the same thing twice."
             )
         }
         selected.firstOrNull { it.name == "run_shell" }?.let { shell ->

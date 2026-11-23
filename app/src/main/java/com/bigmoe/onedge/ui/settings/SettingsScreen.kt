@@ -783,7 +783,7 @@ private fun SettingsContent(
             if (settings.toolsWikiEnabled) WikiFolderInfo()
             SwitchRow(
                 "Ask user",
-                "Lets the model ask you a question in the middle of an answer when it needs your decision (which way, which file, which style): a card with 2 to 4 answer buttons and a field for your own answer. The answer waits for you; Dismiss lets the model go on without it. Also under the wrench button in the chat.",
+                "Lets the model ask you a question in the middle of an answer when it needs your decision (which way, which file, which style): a card with 2 to 4 answer buttons and a field for your own answer. The answer waits for you; Dismiss lets the model go on without it. While it is on, the web is never used for a message before you were asked at least once: if the model has not asked anything yet, the app asks whether it may search or open the page. Also under the wrench button in the chat.",
                 settings.toolsAskUserEnabled
             ) { viewModel.updateToolsAskUserEnabled(it) }
             SwitchRow(
