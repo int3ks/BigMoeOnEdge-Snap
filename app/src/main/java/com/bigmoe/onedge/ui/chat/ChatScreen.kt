@@ -79,6 +79,7 @@ import com.bigmoe.onedge.ui.home.ChatHistoryPanel
 import com.bigmoe.onedge.ui.models.ModelPickerButton
 import com.bigmoe.onedge.ui.models.ModelViewModel
 import com.bigmoe.onedge.ui.navigation.MainNavButtons
+import com.bigmoe.onedge.ui.navigation.NavMenuItem
 import com.bigmoe.onedge.ui.navigation.TopTab
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -156,6 +157,13 @@ fun ChatScreen(
     val chatsDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
     var showFilesSheet by remember { mutableStateOf(false) }
+    // The top bar's title and model line; a tap on them unfolds both in a panel below the bar.
+    var headerExpanded by remember { mutableStateOf(false) }
+    val chatTitle = uiState.currentSession?.title ?: "New chat"
+    // One model: the loaded one (it answers the next message), else the last one this chat used.
+    val headerModelLine = chatHeaderModelLine(
+        (uiState.engineState as? EngineState.Ready)?.info?.name ?: uiState.currentSession?.modelNames?.lastOrNull()
+    )
     // Editing a sent message happens in the input bar (not in a dialog: there the text field's copy/paste menu did not
     // show on some devices). The unsent draft stays untouched and comes back after the edit.
     var editingMessage by remember { mutableStateOf<ChatMessageUiModel?>(null) }
@@ -258,36 +266,17 @@ fun ChatScreen(
                     containerColor = if (AppTheme.visualStyle == AppVisualStyle.SOLID) MaterialTheme.colorScheme.surface else Color.Transparent
                 ),
                 title = {
-                    // A tap unfolds the title and the model line (long names are cut off otherwise); tap again to fold.
-                    var headerExpanded by remember { mutableStateOf(false) }
+                    // One line each in the bar (it has a fixed height); a tap shows both in full in a panel below it.
                     Column(Modifier.clickable { headerExpanded = !headerExpanded }) {
                         Text(
-                            uiState.currentSession?.title ?: "New chat",
-                            maxLines = if (headerExpanded) Int.MAX_VALUE else 1,
+                            chatTitle,
+                            maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
-                        // One model: the loaded one (it answers the next message), else the last one this chat used.
-                        val modelName = (uiState.engineState as? EngineState.Ready)?.info?.name
-                            ?: uiState.currentSession?.modelNames?.lastOrNull()
-                        // Free RAM next to the model name (sampled every 2 s): the figure to watch when a big model
-                        // and its cache leave the tablet little room.
-                        val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
-                        val aliases by com.bigmoe.onedge.core.ModelAliases.map.collectAsState()
-                        val cacheNow by com.bigmoe.onedge.core.CacheGrow.cache.collectAsState()
-                        val thermal by com.bigmoe.onedge.core.AutoCores.reading.collectAsState()
-                        if (modelName != null) {
+                        if (headerModelLine != null) {
                             Text(
-                                text = (aliases[modelName] ?: modelName) + (memoryNow?.let { m ->
-                                    " \u2022 ${m.freeMb} MiB free" +
-                                        (cacheNow?.let { c -> " \u2022 ${c.first} MiB cache (${c.second} used)" } ?: "") +
-                                        (if (m.swapMb >= 0) " \u2022 ${m.swapMb} MiB in zram" else "") +
-                                        (if (m.faultsPerSec >= 0) " \u2022 ${m.faultsPerSec} faults/s" else "")
-                                } ?: "") +
-                                    (thermal.skinC?.let { " \u2022 " + String.format(java.util.Locale.US, "%.1f", it) + " \u00b0C" } ?: "") +
-                                    (thermal.cores?.let { n ->
-                                        " \u2022 $n cores" + (thermal.busy?.let { b -> " (" + String.format(java.util.Locale.US, "%.1f", b) + " busy)" } ?: "")
-                                    } ?: ""),
-                                maxLines = if (headerExpanded) Int.MAX_VALUE else 1,
+                                text = headerModelLine,
+                                maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.secondary
@@ -310,13 +299,6 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    // Forget this chat's saved KV (snapshots and the held context): the next message prefills anew.
-                    IconButton(
-                        onClick = { viewModel.forgetChatKv() },
-                        enabled = uiState.currentSession != null && !uiState.isGenerating
-                    ) {
-                        Icon(imageVector = Icons.Default.DeleteSweep, contentDescription = "Forget saved KV of this chat")
-                    }
                     IconButton(onClick = { showFilesSheet = true }) {
                         Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "Chat files")
                     }
@@ -328,7 +310,14 @@ fun ChatScreen(
                             isGenerating = uiState.isGenerating,
                             onManageModels = onNavigateToModels
                         )
-                    })
+                    }, menuItems = listOf(
+                        // Forget this chat's saved KV (snapshots and the held context): the next message prefills anew.
+                        NavMenuItem(
+                            com.bigmoe.onedge.core.t("Forget this chat's saved KV"),
+                            Icons.Default.DeleteSweep,
+                            enabled = uiState.currentSession != null && !uiState.isGenerating
+                        ) { viewModel.forgetChatKv() }
+                    ))
                 }
             )
         },
@@ -342,6 +331,24 @@ fun ChatScreen(
                 .consumeWindowInsets(innerPadding)
                 .imePadding()
         ) {
+            if (headerExpanded) {
+                // The full chat title and model line (the bar cuts them to one line each); a tap folds it again.
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth().clickable { headerExpanded = false }
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(chatTitle, style = MaterialTheme.typography.titleSmall)
+                        if (headerModelLine != null) {
+                            Text(
+                                headerModelLine,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                }
+            }
             EngineBanner(state = uiState.engineState, onOpenModels = onNavigateToModels)
             val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
             val goneOnOneDrive by remember { (appContext as com.bigmoe.onedge.OnEdgeApplication).container.chatSync.remoteDeleted }.collectAsState()
@@ -893,4 +900,28 @@ internal fun formatToolTelemetry(elapsedMs: Long, limitMs: Long?, quietMs: Long)
 internal fun formatToolElapsed(ms: Long): String {
     val s = ms / 1000
     return if (s < 60) "$s s" else "${s / 60} min ${(s % 60).toString().padStart(2, '0')} s"
+}
+
+/**
+ * The chat header's model line: the model's name (or alias) with free RAM, the expert cache, zram and faults (sampled
+ * every 2 s, the figures to watch when a big model and its cache leave the device little room), temperature and cores.
+ * Null without a model.
+ */
+@Composable
+private fun chatHeaderModelLine(modelName: String?): String? {
+    val memoryNow by com.bigmoe.onedge.core.MemoryWatch.now.collectAsState()
+    val aliases by com.bigmoe.onedge.core.ModelAliases.map.collectAsState()
+    val cacheNow by com.bigmoe.onedge.core.CacheGrow.cache.collectAsState()
+    val thermal by com.bigmoe.onedge.core.AutoCores.reading.collectAsState()
+    if (modelName == null) return null
+    return (aliases[modelName] ?: modelName) + (memoryNow?.let { m ->
+        " • ${m.freeMb} MiB free" +
+            (cacheNow?.let { c -> " • ${c.first} MiB cache (${c.second} used)" } ?: "") +
+            (if (m.swapMb >= 0) " • ${m.swapMb} MiB in zram" else "") +
+            (if (m.faultsPerSec >= 0) " • ${m.faultsPerSec} faults/s" else "")
+    } ?: "") +
+        (thermal.skinC?.let { " • " + String.format(java.util.Locale.US, "%.1f", it) + " °C" } ?: "") +
+        (thermal.cores?.let { n ->
+            " • $n cores" + (thermal.busy?.let { b -> " (" + String.format(java.util.Locale.US, "%.1f", b) + " busy)" } ?: "")
+        } ?: "")
 }
