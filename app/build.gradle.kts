@@ -26,9 +26,9 @@ val bmoeCiCmakeArguments: List<String> = if (
 // A build made with a feature the phone lacks crashes on load (SIGILL), so the default stays the safe baseline.
 val bmoeArmArch: String? = providers.gradleProperty("bmoeArmArch").orNull?.trim()?.takeIf { it.isNotEmpty() }
 
-// android:appCategory written into the manifest (see AndroidManifest.xml). "game" matches the reference app;
-// pass -PbmoeAppCategory=undefined to build without the hint (the behaviour before this property existed).
-val bmoeAppCategory: String = (providers.gradleProperty("bmoeAppCategory").orNull ?: "game").trim().lowercase().also {
+// android:appCategory written into the manifest (see AndroidManifest.xml). Default "undefined" (no hint): as a "game"
+// the app got its decode clocks pinned to ~2 GHz by Samsung after a few seconds. -PbmoeAppCategory=game to compare.
+val bmoeAppCategory: String = (providers.gradleProperty("bmoeAppCategory").orNull ?: "undefined").trim().lowercase().also {
     val allowed = setOf("accessibility", "audio", "game", "image", "maps", "news", "productivity", "social", "video", "undefined")
     require(it in allowed) { "bmoeAppCategory must be one of $allowed, got '$it'" }
 }
