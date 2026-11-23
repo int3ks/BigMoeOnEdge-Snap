@@ -27,9 +27,9 @@ import org.json.JSONObject
  * PowerManager.getThermalHeadroom(0), where 1.0 means the device reaches SEVERE throttling, and
  * PowerManager.currentThermalStatus (0 NONE, 1 LIGHT, 2 MODERATE, ...).
  *
- * A core is added (the fastest one not in use) while the headroom is below [ADD_BELOW], the status is NONE, Honor's
- * step is calm and the last answer of the current set gave a usable decode speed. From [TAKE_AWAY_AT] or status LIGHT
- * an added core goes again. The next usable answer then decides
+ * A core is added (the fastest one not in use) while the headroom is below [ADD_BELOW], the status is at most LIGHT, Honor's
+ * step is calm and the last answer of the current set gave a usable decode speed. Status LIGHT does not count as heat:
+ * the Honor reports it permanently even with a fan. From [TAKE_AWAY_AT] an added core goes again. The next usable answer then decides
  * whether the core stays: slower than [KEEP_RATIO] of the speed before the add, it is taken back and no core is added
  * for [BLOCK_AFTER_SLOWER_MS]. ("cores_busy" is no criterion: threads spinning at a barrier count as busy, so a busy
  * set is often a slow one.) Thread count and mask change between two answers (EngineController.tuneLive).
@@ -133,7 +133,8 @@ object AutoCores {
         val level = th.honorLevel
         // Real throttling: Android's status MODERATE or worse, or Honor's own step 3 and up.
         val throttling = th.status >= STATUS_MODERATE || level >= HONOR_THROTTLING
-        val warm = th.status >= STATUS_LIGHT || (headroom != null && headroom >= TAKE_AWAY_AT)
+        // Status LIGHT is no heat signal of its own (the Honor shows it permanently, fan or not): only the headroom.
+        val warm = headroom != null && headroom >= TAKE_AWAY_AT
         val now = SystemClock.elapsedRealtime()
         // The last answer ran with the current set (changes happen only here, before an answer).
         val json = engine.lastRunJson()
@@ -191,7 +192,7 @@ object AutoCores {
                 next = next or missing
                 pendingAdd = null
             }
-            headroom != null && headroom < ADD_BELOW && th.status == 0 && level < 2 && now >= blockAddUntil &&
+            headroom != null && headroom < ADD_BELOW && th.status <= STATUS_LIGHT && level < 2 && now >= blockAddUntil &&
                 now - lastChange >= ADD_PAUSE_MS && pendingAdd == null && lastTps != null -> {
                 val add = CpuTopology.fastestFirst(engine.allowedCpus()).firstOrNull { (current shr it) and 1L == 0L }
                 if (add != null) {
