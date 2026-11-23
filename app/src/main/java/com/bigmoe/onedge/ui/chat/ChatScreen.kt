@@ -932,6 +932,7 @@ private fun chatHeaderModelLine(modelName: String?): String? {
     } ?: "") +
         (thermal.headroom?.let { " • heat ${(it * 100).toInt()} %" } ?: "") +
         (if (thermal.status > 0) " (throttle ${thermal.status})" else "") +
+        (if (thermal.honorLevel > 0) " (Honor ${thermal.honorLevel})" else "") +
         (thermal.cores?.let { n ->
             " • $n cores" + (thermal.busy?.let { b -> " (" + String.format(java.util.Locale.US, "%.1f", b) + " busy)" } ?: "")
         } ?: "")

@@ -21,7 +21,8 @@ import org.json.JSONObject
  * Settings are the MINIMUM: a model opens with them, Auto adds cores on top while the device has thermal headroom and
  * takes the added ones away again when it gets close to throttling. Only real throttling (Android thermal status
  * MODERATE or worse, or Honor's own step, Settings.System "ThermalTempLevel" 3 and up) takes cores below the chosen
- * ones (never below [MIN_CORES]); they come back as soon as it stops.
+ * ones (never below [MIN_CORES]); they come back as soon as it stops. With added cores in use, the first throttling
+ * answer only takes those away (and blocks adding for [BLOCK_AFTER_SLOWER_MS]); the next one goes below the chosen.
  *
  * Signals, the same on every device (no temperatures: the old skin °C was a conversion calibrated on the Honor):
  * PowerManager.getThermalHeadroom(0), where 1.0 means the device reaches SEVERE throttling, and
@@ -35,8 +36,9 @@ import org.json.JSONObject
  * set is often a slow one.) Thread count and mask change between two answers (EngineController.tuneLive).
  */
 object AutoCores {
-    private const val ADD_BELOW = 0.70f
-    private const val TAKE_AWAY_AT = 0.85f
+    // The MagicPad 3 Pro sits at about 80 % headroom with status LIGHT under load (fan or not); MODERATE is the limit.
+    private const val ADD_BELOW = 0.90f
+    private const val TAKE_AWAY_AT = 0.95f
     private const val STATUS_LIGHT = 1
     private const val STATUS_MODERATE = 2
     private const val POLL_MS = 2000L
@@ -172,8 +174,14 @@ object AutoCores {
         val missing = baseMask and current.inv() // chosen cores throttling took away
         var next = current
         when {
+            throttling && extra != 0L -> {
+                // Throttling with added cores: back to the chosen ones first, and no new try for a while
+                next = next and extra.inv()
+                blockAddUntil = now + BLOCK_AFTER_SLOWER_MS
+                pendingAdd = null
+            }
             throttling && threads > MIN_CORES -> {
-                // The device is throttling: shed two cores at once, added ones first, below the chosen ones if need be
+                // Still throttling without added cores: shed two at once, below the chosen ones (never below MIN_CORES)
                 repeat(minOf(2, threads - MIN_CORES)) {
                     val pool = if (next and baseMask.inv() != 0L) next and baseMask.inv() else next
                     next = next and (1L shl slowestFirst(pool).first()).inv()
