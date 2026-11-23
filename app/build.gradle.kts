@@ -198,6 +198,12 @@ android {
         }
     }
 
+    lint {
+        // The debug APK is built non-debuggable, so AGP ran lintVital on every build (about 60 s in CI).
+        // Lint runs only when asked for (./gradlew lint).
+        checkReleaseBuilds = false
+    }
+
     testOptions {
         unitTests {
             isReturnDefaultValues = true

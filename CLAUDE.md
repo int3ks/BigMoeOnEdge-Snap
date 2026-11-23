@@ -41,6 +41,9 @@ from flash. Fork of BigMoeOnEdge+ (hamodexd217/BigMoeOnEdge-plus 0.6.0), engine 
 * **Release**: `release.yml` via REST (GraphQL/`gh workflow run` is blocked in the sandbox):
   `gh api -X POST repos/int3ks/BigMoeOnEdge-Snap/actions/workflows/release.yml/dispatches -f ref=main -f 'inputs[run_id]=<green npu run id>'`
   → tag `v7.NN`, asset `BigMoeOnEdge-Snap-NPU-7.NN-<sha>.apk`. Sandbox cannot edit/delete releases or branches.
+* CI builds only for pushes to main (not work branches). Lint is off in the APK build (`checkReleaseBuilds = false`).
+  Kotlin unit tests (`unit-tests.yml`) never run on push: dispatch them only after a substantial change
+  (engine bridge, AutoCores/EngineController logic, parsers, DB): `gh api -X POST .../actions/workflows/unit-tests.yml/dispatches -f ref=main`.
 * If the apk job fails with an SDK `InstallFailedException`, it is a runner flake: `gh api -X POST .../runs/<id>/rerun-failed-jobs`.
 * Upstream repos are read via anonymous git clone (into the scratchpad, not the home dir — the stop hook complains
   about uncommitted clones).

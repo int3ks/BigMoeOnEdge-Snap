@@ -6,6 +6,8 @@ name: Android NPU APK
 on:
   workflow_dispatch:
   push:
+    # main only: a push to a work branch (later merged into main) would build the same commit twice.
+    branches: [main]
     paths:
       - 'app/**'
       - 'gradle/**'
