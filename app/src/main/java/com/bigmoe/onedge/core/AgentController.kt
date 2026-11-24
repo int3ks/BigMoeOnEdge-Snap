@@ -196,6 +196,11 @@ class AgentController(
         var toolRounds = 0
         var lastCallSignature: String? = null
         var identicalRounds = 0
+        // Web budget of this user message: a small context fills fast with page text, and a model that re-reads the
+        // same page never learns anything new. Repeats are answered with a short note instead of the page again.
+        val webSeen = HashSet<String>()
+        var webSearches = 0
+        var pageReads = 0
         var engineRound = 0
         var generatedTotal = 0
 
@@ -449,6 +454,43 @@ class AgentController(
                         "that answer; if it allows the web, call the tool again."
                 }
             }
+            // Decided in call order before anything runs (the reads below may run side by side): repeats and calls
+            // over the web budget get a short note; page reads are capped to a share of the free context.
+            val freeTokens = (engineController.loadedModel()?.nCtx ?: 0) - fin.stats.nPast
+            val preset = arrayOfNulls<String>(calls.size)
+            for (i in calls.indices) {
+                val (name, args) = calls[i]
+                if (name !in enabledNames || (webBlock != null && name in WEB_ACCESS_TOOL_NAMES)) continue
+                val o = runCatching { org.json.JSONObject(args) }.getOrNull() ?: continue
+                when (name) {
+                    "web_search" -> {
+                        val key = "s:" + o.optString("query").trim().lowercase()
+                        preset[i] = when {
+                            key in webSeen -> NOTE_WEB_REPEAT
+                            webSearches >= MAX_WEB_SEARCHES_PER_MESSAGE -> NOTE_WEB_BUDGET
+                            else -> { webSeen.add(key); webSearches++; null }
+                        }
+                    }
+                    in WEB_PAGE_TOOL_NAMES -> {
+                        val url = normalizeUrl(o.optString("url"))
+                        val key = if (name == "extract_webpage") "e:$url\u0000${o.optString("query").trim().lowercase()}" else "r:$url"
+                        preset[i] = when {
+                            key in webSeen || (name == "read_webpage" && "r:$url" in webSeen) -> NOTE_WEB_REPEAT
+                            pageReads >= MAX_PAGE_READS_PER_MESSAGE -> NOTE_WEB_BUDGET
+                            else -> {
+                                webSeen.add(key); pageReads++
+                                if (name == "read_webpage" && freeTokens > 0) {
+                                    // ~3 characters per token; at most a fifth of the free context per page.
+                                    val cap = (freeTokens * 3 / 5).coerceIn(500, 6000)
+                                    val asked = o.optInt("max_chars", 2500)
+                                    if (asked > cap) calls[i] = name to o.put("max_chars", cap).toString()
+                                }
+                                null
+                            }
+                        }
+                    }
+                }
+            }
             suspend fun runOne(name: String, args: String): String {
                 if (webBlock != null && name in WEB_ACCESS_TOOL_NAMES) return webBlock
                 if (name == "ask_user") askedThisTurn = true
@@ -464,9 +506,9 @@ class AgentController(
             val outputs: List<String> = coroutineScope {
                 val work = async {
                     if (calls.size > 1 && calls.all { it.first in enabledNames && toolManager.isParallelSafe(it.first) }) {
-                        coroutineScope { calls.map { c -> async { runOne(c.first, c.second) } }.awaitAll() }
+                        coroutineScope { calls.mapIndexed { i, c -> async { preset[i] ?: runOne(c.first, c.second) } }.awaitAll() }
                     } else {
-                        calls.map { c -> runOne(c.first, c.second) }
+                        calls.mapIndexed { i, c -> preset[i] ?: runOne(c.first, c.second) }
                     }
                 }
                 while (true) {
@@ -585,6 +627,19 @@ ${request.prompt}""".trim()
     companion object {
         /** Identical consecutive tool rounds after which the model is considered stuck. */
         const val MAX_IDENTICAL_ROUNDS = 8
+        const val MAX_WEB_SEARCHES_PER_MESSAGE = 2
+        const val MAX_PAGE_READS_PER_MESSAGE = 3
+        const val NOTE_WEB_REPEAT = "Not run: already done above in this message, the result is unchanged. Use it; do not repeat this call."
+        const val NOTE_WEB_BUDGET = "Not run: the web budget of this message is used up. Answer now with what you have."
+
+        /** Same page however the model spells it: no fragment, no trailing slash, lower-case scheme and host. */
+        fun normalizeUrl(url: String): String {
+            val u = url.trim().substringBefore('#').trimEnd('/')
+            val i = u.indexOf("://")
+            if (i < 0) return u.lowercase()
+            val hostEnd = u.indexOf('/', i + 3).let { if (it < 0) u.length else it }
+            return u.substring(0, hostEnd).lowercase() + u.substring(hostEnd)
+        }
         const val MAX_CALLS_PER_ROUND = 16
         const val NOTE_STOPPED = "Stopped"
 

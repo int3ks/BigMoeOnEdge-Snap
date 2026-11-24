@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +24,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.FolderOpen
@@ -71,6 +75,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.bigmoe.onedge.core.t
 import com.bigmoe.onedge.core.EngineState
 import kotlinx.coroutines.flow.first
 import com.bigmoe.onedge.core.GenerationPhase
@@ -177,6 +182,8 @@ fun ChatScreen(
 
     // Build web-source associations once per message-list update. Doing indexOfFirst/subList
     // inside each lazy row made source discovery quadratic and repeated it during recomposition.
+    // Tool rounds (calls without answer text and their results) fold into one line per run of actions.
+    val displayItems = remember(uiState.messages) { groupActions(uiState.messages) }
     val sourcesByAssistantId = remember(uiState.messages) {
         val result = HashMap<String, List<String>>()
         var currentTurnSources = linkedSetOf<String>()
@@ -364,7 +371,8 @@ fun ChatScreen(
                     EmptyChatView(onSuggestionSelected = { prompt -> viewModel.sendMessage(prompt) })
                 } else {
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize().nestedScroll(stopFollowing)) {
-                        items(items = uiState.messages, key = { it.id }) { message ->
+                        items(items = displayItems, key = { it.key }) { item ->
+                            val renderMessage: @Composable (ChatMessageUiModel) -> Unit = { message ->
                             if (message.role == MessageRole.TOOL) {
                                 if (ImageSearchResultParser.parse(message.text) != null) {
                                     ImageSearchResultsCard(body = message.text)
@@ -444,6 +452,11 @@ fun ChatScreen(
                                         onShow = { slot -> viewModel.showVariant(v, slot) }
                                     )
                                 }
+                            }
+                            }
+                            when (item) {
+                                is ChatDisplayItem.Single -> renderMessage(item.message)
+                                is ChatDisplayItem.Actions -> ActionGroupRow(item.messages, renderMessage)
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                         }
@@ -936,4 +949,69 @@ private fun chatHeaderModelLine(modelName: String?): String? {
         (thermal.cores?.let { n ->
             " • $n cores" + (thermal.busy?.let { b -> " (" + String.format(java.util.Locale.US, "%.1f", b) + " busy)" } ?: "")
         } ?: "")
+}
+
+/** One row of the chat list: a normal message, or a run of agent actions shown as one foldable line. */
+sealed interface ChatDisplayItem {
+    val key: String
+    data class Single(val message: ChatMessageUiModel) : ChatDisplayItem { override val key get() = message.id }
+    data class Actions(val messages: List<ChatMessageUiModel>) : ChatDisplayItem { override val key get() = "actions_" + messages.first().id }
+}
+
+/** A tool call round without answer text, or a tool result (image results stay visible as cards). */
+private fun isAction(m: ChatMessageUiModel): Boolean = when (m.role) {
+    MessageRole.TOOL -> ImageSearchResultParser.parse(m.text) == null
+    MessageRole.ASSISTANT -> m.text.isBlank() && m.toolCalls.isNotEmpty() && m.variant == null
+    else -> false
+}
+
+internal fun groupActions(messages: List<ChatMessageUiModel>): List<ChatDisplayItem> {
+    val out = ArrayList<ChatDisplayItem>()
+    var run = ArrayList<ChatMessageUiModel>()
+    fun flush() { if (run.isNotEmpty()) { out.add(ChatDisplayItem.Actions(run)); run = ArrayList() } }
+    for (m in messages) {
+        if (isAction(m)) run.add(m) else { flush(); out.add(ChatDisplayItem.Single(m)) }
+    }
+    flush()
+    return out
+}
+
+/** Folded: the latest action and how many there were; a tap shows every call and result as before. */
+@Composable
+private fun ActionGroupRow(messages: List<ChatMessageUiModel>, renderMessage: @Composable (ChatMessageUiModel) -> Unit) {
+    var expanded by remember(messages.first().id) { mutableStateOf(false) }
+    val steps = messages.count { it.role == MessageRole.ASSISTANT }.coerceAtLeast(1)
+    val latest = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.toolCalls?.lastOrNull()
+        ?: toolResultTitle(messages.last().text)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Build,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = if (steps > 1) "$latest · " + t("{0} steps", steps) else latest,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.secondary,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            contentDescription = if (expanded) "Collapse" else "Expand",
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(16.dp)
+        )
+    }
+    if (expanded) Column { messages.forEach { renderMessage(it) } }
 }
