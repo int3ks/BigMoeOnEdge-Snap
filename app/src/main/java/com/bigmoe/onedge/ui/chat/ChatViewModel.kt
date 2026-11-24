@@ -106,6 +106,8 @@ data class ChatUiState(
     val choiceOptions: String = "",
     /** A visible problem or hint (no model, malformed tool call, engine error). */
     val notice: String? = null,
+    /** A plain hint (not an error), shown as a quiet line like the load banner. */
+    val info: String? = null,
     val selectedArtifact: ArtifactModel? = null,
     /** Files / pictures / videos picked but not sent yet. */
     val pendingAttachments: List<PendingAttachment> = emptyList(),
@@ -428,7 +430,7 @@ class ChatViewModel(
     fun applySuggestedSettings(changes: List<com.bigmoe.onedge.core.SettingsAdvice.Change>) {
         viewModelScope.launch {
             com.bigmoe.onedge.core.SettingsAdvice.apply(settingsDataStore, changes)
-            _uiState.update { it.copy(notice = "Applied ${changes.size} setting(s). They take effect at the next model load.") }
+            _uiState.update { it.copy(info = "Applied ${changes.size} setting(s). They take effect at the next model load.") }
         }
     }
 
@@ -466,7 +468,7 @@ class ChatViewModel(
             _uiState.update {
                 it.copy(
                     inputDraft = "", pendingAttachments = emptyList(), pendingLinks = emptyList(),
-                    notice = if (count == 1) "Message queued. It will be sent automatically when the model finishes loading." else "$count messages queued. They will be sent in order when the model finishes loading."
+                    info = if (count == 1) "Message queued. It will be sent automatically when the model finishes loading." else "$count messages queued. They will be sent in order when the model finishes loading."
                 )
             }
             viewModelScope.launch { composerStore.clearSession(composerKey) }
@@ -595,6 +597,8 @@ class ChatViewModel(
                     if (_uiState.value.engineState !is EngineState.Ready) {
                         _uiState.first { it.engineState is EngineState.Ready }
                     }
+                    // The model is there: the "message queued" hint has done its job.
+                    if (synchronized(queueLock) { queuedInputs.isEmpty() }) _uiState.update { it.copy(info = null) }
                     if (generationManager.state.value.active) {
                         generationManager.state.first { !it.active }
                     }
@@ -754,7 +758,7 @@ class ChatViewModel(
             val media = files.filter { it.second != AttachmentKind.FILE }
             if (media.isNotEmpty()) {
                 if (_uiState.value.engineState !is EngineState.Ready) {
-                    _uiState.update { it.copy(notice = "The shared pictures are attached when the model has loaded.") }
+                    _uiState.update { it.copy(info = "The shared pictures are attached when the model has loaded.") }
                 }
                 val ready = kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
                     _uiState.first { it.engineState is EngineState.Ready }
@@ -1125,6 +1129,10 @@ class ChatViewModel(
 
     fun dismissNotice() {
         _uiState.update { it.copy(notice = null) }
+    }
+
+    fun dismissInfo() {
+        _uiState.update { it.copy(info = null) }
     }
 
     /** The globe button in the input bar. */

@@ -539,6 +539,7 @@ fun ChatScreen(
                 }
             }
 
+            uiState.info?.let { InfoBar(text = it, onDismiss = { viewModel.dismissInfo() }) }
             uiState.notice?.let { NoticeBar(text = it, onDismiss = { viewModel.dismissNotice() }) }
 
             val editing = editingMessage
@@ -753,6 +754,30 @@ private fun BannerRow(
                 modifier = Modifier.weight(1f)
             )
             if (action != null) TextButton(onClick = onAction) { Text(action) }
+        }
+    }
+}
+
+/** A plain hint (message queued, settings applied): quiet colors, errors keep the red [NoticeBar]. */
+@Composable
+private fun InfoBar(text: String, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
