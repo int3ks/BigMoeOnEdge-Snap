@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.OpenInNew
@@ -276,13 +279,13 @@ internal fun LinkedInlineText(
             overflow = overflow,
             onTextLayout = { layout = it },
             modifier = modifier.pointerInput(annotated) {
-                androidx.compose.foundation.gestures.awaitEachGesture {
-                    val down = androidx.compose.foundation.gestures.awaitFirstDown(requireUnconsumed = false)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
                     val l = layout ?: return@awaitEachGesture
                     val offset = l.getOffsetForPosition(down.position)
                     val target = annotated.getStringAnnotations(URL_ANNOTATION, offset, offset).firstOrNull()?.item
                         ?: return@awaitEachGesture
-                    val up = androidx.compose.foundation.gestures.waitForUpOrCancellation() ?: return@awaitEachGesture
+                    val up = waitForUpOrCancellation() ?: return@awaitEachGesture
                     if (up.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) return@awaitEachGesture
                     up.consume()
                     val safe = target.trim().trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}')
