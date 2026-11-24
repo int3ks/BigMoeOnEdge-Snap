@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.OpenInNew
@@ -265,19 +265,30 @@ internal fun LinkedInlineText(
             overflow = overflow
         )
     } else {
+        // Only a short tap on a link is taken; everything else (long-press menu of the bubble, selection, scrolling)
+        // reaches the parents. ClickableText consumed every gesture, so messages with a URL lost their long-press menu.
         val uriHandler = LocalUriHandler.current
-        ClickableText(
+        var layout by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+        androidx.compose.foundation.text.BasicText(
             text = annotated,
             style = style,
-            modifier = modifier,
             maxLines = maxLines,
             overflow = overflow,
-            onClick = { offset ->
-                val target = annotated.getStringAnnotations(URL_ANNOTATION, offset, offset).firstOrNull()?.item
-                    ?: return@ClickableText
-                val safe = target.trim().trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}')
-                if (safe.startsWith("https://", true) || safe.startsWith("http://", true)) {
-                    runCatching { uriHandler.openUri(safe) }
+            onTextLayout = { layout = it },
+            modifier = modifier.pointerInput(annotated) {
+                androidx.compose.foundation.gestures.awaitEachGesture {
+                    val down = androidx.compose.foundation.gestures.awaitFirstDown(requireUnconsumed = false)
+                    val l = layout ?: return@awaitEachGesture
+                    val offset = l.getOffsetForPosition(down.position)
+                    val target = annotated.getStringAnnotations(URL_ANNOTATION, offset, offset).firstOrNull()?.item
+                        ?: return@awaitEachGesture
+                    val up = androidx.compose.foundation.gestures.waitForUpOrCancellation() ?: return@awaitEachGesture
+                    if (up.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) return@awaitEachGesture
+                    up.consume()
+                    val safe = target.trim().trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}')
+                    if (safe.startsWith("https://", true) || safe.startsWith("http://", true)) {
+                        runCatching { uriHandler.openUri(safe) }
+                    }
                 }
             }
         )
