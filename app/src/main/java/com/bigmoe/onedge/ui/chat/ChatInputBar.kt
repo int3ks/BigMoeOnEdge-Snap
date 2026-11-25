@@ -380,50 +380,62 @@ fun ChatInputBar(
                             description = "Tool access",
                             onClick = { toolsMenu = true }
                         )
-                        DropdownMenu(expanded = toolsMenu, onDismissRequest = { toolsMenu = false }) {
-                            Text("Tool access", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
+                        DropdownMenu(
+                            expanded = toolsMenu, onDismissRequest = { toolsMenu = false },
+                            modifier = Modifier.widthIn(min = 300.dp)
+                        ) {
+                            Text(com.bigmoe.onedge.core.t("Tool access"), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
                             ToolToggleRow(
-                                label = "Files",
+                                label = com.bigmoe.onedge.core.t("Files"),
+                                hint = com.bigmoe.onedge.core.t("Read, write and edit files in the workspace"),
                                 checked = toolsFilesEnabled,
                                 onCheckedChange = onToggleToolFiles
                             )
                             ToolToggleRow(
-                                label = "Code",
+                                label = com.bigmoe.onedge.core.t("Code"),
+                                hint = com.bigmoe.onedge.core.t("Search and analyze code, run JavaScript"),
                                 checked = toolsCodeEnabled,
                                 onCheckedChange = onToggleToolCode
                             )
                             ToolToggleRow(
-                                label = "Utilities",
+                                label = com.bigmoe.onedge.core.t("Utilities"),
+                                hint = com.bigmoe.onedge.core.t("Date and time, calculator, units, random, device info"),
                                 checked = toolsUtilitiesEnabled,
                                 onCheckedChange = onToggleToolUtilities
                             )
                             ToolToggleRow(
-                                label = "Help",
+                                label = com.bigmoe.onedge.core.t("Help"),
+                                hint = com.bigmoe.onedge.core.t("Answers about this app from its help"),
                                 checked = toolsHelpEnabled,
                                 onCheckedChange = onToggleToolHelp
                             )
                             ToolToggleRow(
-                                label = "Wiki",
+                                label = com.bigmoe.onedge.core.t("Wiki"),
+                                hint = com.bigmoe.onedge.core.t("Search your own notes in the wiki folder"),
                                 checked = toolsWikiEnabled,
                                 onCheckedChange = onToggleToolWiki
                             )
                             ToolToggleRow(
                                 label = com.bigmoe.onedge.core.t("Ask user"),
+                                hint = com.bigmoe.onedge.core.t("The model may ask you questions"),
                                 checked = toolsAskUserEnabled,
                                 onCheckedChange = onToggleToolAskUser
                             )
                             ToolToggleRow(
-                                label = "Termux",
+                                label = com.bigmoe.onedge.core.t("Termux"),
+                                hint = com.bigmoe.onedge.core.t("Run shell commands in Termux"),
                                 checked = toolsTermuxEnabled,
                                 onCheckedChange = onToggleToolTermux
                             )
                             ToolToggleRow(
-                                label = "External",
+                                label = com.bigmoe.onedge.core.t("External"),
+                                hint = com.bigmoe.onedge.core.t("Your HTTP tools and MCP servers"),
                                 checked = toolsExternalEnabled,
                                 onCheckedChange = onToggleToolExternal
                             )
                             ToolToggleRow(
-                                label = "Native UI",
+                                label = com.bigmoe.onedge.core.t("Native UI"),
+                                hint = com.bigmoe.onedge.core.t("Answers with cards, tables and charts"),
                                 checked = nativeUiEnabled,
                                 onCheckedChange = onToggleNativeUi
                             )
@@ -471,16 +483,22 @@ fun ChatInputBar(
 private fun ToolToggleRow(
     label: String,
     checked: Boolean,
-    onCheckedChange: () -> Unit
+    onCheckedChange: () -> Unit,
+    hint: String? = null
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onCheckedChange)
-            .padding(start = 8.dp, end = 8.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            if (hint != null) {
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            }
+        }
         Checkbox(checked = checked, onCheckedChange = { onCheckedChange() })
     }
 }
