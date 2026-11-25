@@ -112,6 +112,15 @@ class AgentController(
     private var stopRequested = false
 
     /**
+     * Chat in which the user already allowed the web (ask_user on): no further permission question there until the
+     * user leaves the chat ([resetWebPermission]). A "no" or an own answer counts only for its message.
+     */
+    @Volatile private var webAllowedSessionId: String? = null
+
+    /** The user left the chat (other chat, new chat, another screen): the next web access asks again. */
+    fun resetWebPermission() { webAllowedSessionId = null }
+
+    /**
      * Stop button. Interrupts a running generation (the engine then rolls the turn back and the loop
      * ends with a cancelled result) and also ends the tool loop when pressed while a tool is running,
      * where the engine has nothing to cancel.
@@ -169,21 +178,28 @@ class AgentController(
         val askBeforeWeb = "ask_user" in enabledNames
         var askedThisTurn = false
         var webDenied = false
-        /** null = the web may be used; [WEB_NO] = the user said no (or dismissed); else the user's own answer. */
-        suspend fun askForWeb(name: String, args: String): String? {
+        /**
+         * null = the web may be used; [WEB_NO] = the user said no (or dismissed); else the user's own answer.
+         * [args] null = asked before the search query exists (always-search mode): a question about the message.
+         */
+        suspend fun askForWeb(name: String, args: String?): String? {
             if (!askBeforeWeb) return null
             if (webDenied) return WEB_NO
+            if (webAllowedSessionId == request.sessionId) return null
             if (askedThisTurn) return null
             val handler = toolManager.questionHandler ?: return null
             askedThisTurn = true
-            val o = runCatching { org.json.JSONObject(args) }.getOrNull()
+            val o = args?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
             val target = (o?.optString("query")?.ifBlank { null } ?: o?.optString("url").orEmpty()).take(200)
-            val question = if (name == "web_search" || name == "image_search") t("May I search the web for \"{0}\"?", target)
-            else t("May I open this web page? {0}", target)
+            val question = when {
+                args == null -> t("May I search the web for this message?")
+                name == "web_search" || name == "image_search" -> t("May I search the web for \"{0}\"?", target)
+                else -> t("May I open this web page? {0}", target)
+            }
             val yes = t("Yes, use the web")
             val no = t("No, answer without the web")
             return when (val answer = handler.ask(com.bigmoe.onedge.tools.UserQuestion(question, listOf(yes, no)))) {
-                yes -> null
+                yes -> { webAllowedSessionId = request.sessionId; null }
                 null, no -> { webDenied = true; WEB_NO }
                 else -> answer
             }
@@ -208,22 +224,30 @@ class AgentController(
             // Ask the loaded model to formulate a search query instead of sending the user's raw message
             // directly to the search provider. This is a separate, hidden short generation; the main answer
             // generation replays the real conversation and the search results as usual.
-            val generatedQuery = generateSearchQuery(request, turns)
-            val query = searchQueryFrom(generatedQuery).ifBlank { searchQueryFrom(request.prompt) }
+            // Ask first (before the hidden query generation, which costs a prefill): a "no" then costs nothing, and
+            // Stop during the question ends the run at once.
+            val webAnswer = askForWeb("web_search", null)
+            var query = ""
+            if (webAnswer == null && !stopRequested) {
+                emit(AgentEvent.ToolWriting(t("Writing the search query…")))
+                val generatedQuery = generateSearchQuery(request, turns)
+                query = searchQueryFrom(generatedQuery).ifBlank { searchQueryFrom(request.prompt) }
+            }
             val args = org.json.JSONObject().put("query", query).toString()
-            val webAnswer = askForWeb("web_search", args)
-            if (webAnswer != null) {
+            if (stopRequested) {
+                // Stop pressed while asking or while writing the query: no search, no answer.
+            } else if (webAnswer != null) {
                 // Not allowed: no search; the model learns why and what the user said instead.
                 val note = if (webAnswer == WEB_NO) "The user was asked and does not want a web search for this message: " +
                     "answer from your own knowledge, without web results."
-                else "Before the web search the user was asked whether to search for \"$query\" and answered: \"$webAnswer\". " +
-                    "No search was run; act on that answer."
+                else "Before a web search the user was asked whether the web may be used for this message and answered: " +
+                    "\"$webAnswer\". No search was run; act on that answer."
                 val wrapped = ToolProtocol.wrapResult("ask_user", note)
                 val id = sink.save(NewMessage(MessageRole.TOOL, wrapped))
                 emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
                 prompt = prompt + "\n\n" + wrapped
             }
-            if (webAnswer == null) {
+            if (webAnswer == null && !stopRequested) {
                 val searchStarted = System.currentTimeMillis()
                 emit(AgentEvent.ToolStarted("web_search", args))
                 val result = toolManager.executeToolCall("web_search", args)
@@ -590,7 +614,9 @@ ${request.prompt}""".trim()
             engineController.generate(
                 GenerationRequest(
                     system = "You are a search-query writer. Output only one useful search query.",
-                    history = turns.toList(),
+                    // Only the last exchange: the whole chat would be a full prefill (other system prompt, no cache
+                    // hit) before every answer; it is only needed to resolve what the user means.
+                    history = turns.takeLast(SEARCH_QUERY_HISTORY_TURNS).map { it.copy(content = it.content.take(1500)) },
                     prompt = prompt,
                     expectedKey = "${request.sessionId}:search-query:${System.nanoTime()}",
                     maxTokens = 48,
@@ -627,6 +653,8 @@ ${request.prompt}""".trim()
     companion object {
         /** Identical consecutive tool rounds after which the model is considered stuck. */
         const val MAX_IDENTICAL_ROUNDS = 8
+        /** Turns of the chat the hidden search-query generation sees (the last user/assistant exchange). */
+        const val SEARCH_QUERY_HISTORY_TURNS = 2
         const val MAX_WEB_SEARCHES_PER_MESSAGE = 2
         const val MAX_PAGE_READS_PER_MESSAGE = 3
         const val NOTE_WEB_REPEAT = "Not run: already done above in this message, the result is unchanged. Use it; do not repeat this call."

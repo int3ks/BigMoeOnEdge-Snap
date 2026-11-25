@@ -313,6 +313,7 @@ class ChatViewModel(
     /** Opens a saved chat (History). No-op when it is already the open chat. */
     fun loadSession(sessionId: String) {
         if (_uiState.value.currentSession?.id == sessionId) return
+        generationManager.resetWebPermission()
         composerSwitchJob?.cancel()
         openingComposerKey = sessionId
         composerSwitchJob = viewModelScope.launch {
@@ -324,6 +325,7 @@ class ChatViewModel(
 
     /** Starts an empty chat; the session row is created lazily on the first message. */
     fun newChat() {
+        generationManager.resetWebPermission()
         openingComposerKey = ChatDraftState.NEW_CHAT_KEY
         composerSwitchJob?.cancel()
         composerSwitchJob = viewModelScope.launch {
@@ -986,6 +988,9 @@ class ChatViewModel(
             AgentEvent.Done -> Unit
         }
     }
+
+    /** The chat screen left the composition (another screen of the app): web permission is asked again. */
+    fun onChatScreenLeft() = generationManager.resetWebPermission()
 
     fun stopGeneration() {
         generationManager.stop() // Also refuses any tool approval currently waiting.

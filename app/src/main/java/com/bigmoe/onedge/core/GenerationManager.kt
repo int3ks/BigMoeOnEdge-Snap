@@ -331,6 +331,9 @@ class GenerationManager(
         withTokens(generatedTokens).copy(contextUsed = contextUsed ?: this.contextUsed)
     }
 
+    /** The user left the chat: the next web access there asks for permission again (ask_user on). */
+    fun resetWebPermission() = agentController.resetWebPermission()
+
     fun resolveConfirmation(approved: Boolean) { confirmation?.complete(approved) }
     /** Answer of the ask_user card: the chosen option or the user's own text; null = dismissed. */
     fun resolveQuestion(answer: String?) { question?.complete(answer) }

@@ -113,6 +113,8 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    // Leaving the chat screen (settings, models, ...) withdraws the web permission given with ask_user.
+    DisposableEffect(Unit) { onDispose { viewModel.onChatScreenLeft() } }
     // Send or Regenerate with no model loaded: ask which model, load it, then send / answer again.
     // The value is the message to regenerate, or "" for sending the message box.
     var regenAsk by remember { mutableStateOf<String?>(null) }
@@ -514,14 +516,6 @@ fun ChatScreen(
                                         LiveStatusLine(uiState.liveTiming.copy(decodeTokensPerSecond = 0.0))
                                     }
                                 }
-                                // ask_user: the model waits for the answer to its question.
-                                uiState.pendingQuestion?.let { q ->
-                                    AskUserCard(
-                                        question = q,
-                                        onAnswer = { viewModel.resolveQuestion(it) },
-                                        onDismiss = { viewModel.resolveQuestion(null) }
-                                    )
-                                }
                               }
                             }
                         }
@@ -541,6 +535,15 @@ fun ChatScreen(
 
             uiState.info?.let { InfoBar(text = it, onDismiss = { viewModel.dismissInfo() }) }
             uiState.notice?.let { NoticeBar(text = it, onDismiss = { viewModel.dismissNotice() }) }
+
+            // ask_user: pinned above the input bar (not in the list), so it stays visible above the keyboard.
+            uiState.pendingQuestion?.let { q ->
+                AskUserCard(
+                    question = q,
+                    onAnswer = { viewModel.resolveQuestion(it) },
+                    onDismiss = { viewModel.resolveQuestion(null) }
+                )
+            }
 
             val editing = editingMessage
             if (editing != null) {
