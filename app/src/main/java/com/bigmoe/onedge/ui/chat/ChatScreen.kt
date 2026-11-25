@@ -119,6 +119,17 @@ fun ChatScreen(
     // The value is the message to regenerate, or "" for sending the message box.
     var regenAsk by remember { mutableStateOf<String?>(null) }
     var regenPending by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // No model loaded in a chat that has been used: load the model of its last answer (or the one it was started with)
+    // and send / answer again once it loads; only without such a model (new chat, file gone) ask which one.
+    fun loadChatModelOrAsk(messageId: String) {
+        val last = uiState.messages.lastOrNull { !it.runInfo?.path.isNullOrBlank() }?.runInfo?.path
+            ?: uiState.currentSession?.modelPath
+        val known = last?.takeIf { p -> modelViewModel.uiState.value.models.any { it.path == p } }
+        if (known != null) {
+            modelViewModel.requestLoad(known)
+            regenPending = messageId to known
+        } else regenAsk = messageId
+    }
     regenAsk?.let { messageId ->
         val modelsUi by modelViewModel.uiState.collectAsState()
         com.bigmoe.onedge.ui.share.ModelPickerDialog(
@@ -420,7 +431,7 @@ fun ChatScreen(
                                             follow = true
                                             val e = uiState.engineState
                                             if (e is EngineState.Ready || e is EngineState.Loading) viewModel.regenerate(message.id)
-                                            else regenAsk = message.id
+                                            else loadChatModelOrAsk(message.id)
                                         }
                                     } else null,
                                     // The complete message exactly as stored: no telemetry, labels or renderer fences.
@@ -581,7 +592,7 @@ fun ChatScreen(
                         follow = true
                         val e = uiState.engineState
                         if (e is EngineState.Ready || e is EngineState.Loading) viewModel.sendMessage(uiState.inputDraft)
-                        else regenAsk = ""
+                        else loadChatModelOrAsk("")
                     }
                 },
                 onStopClicked = { viewModel.stopGeneration() },

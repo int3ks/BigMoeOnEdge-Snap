@@ -2,6 +2,7 @@
 
 ## Snap fork
 
+- **Sending in a used chat loads its model.** With no model loaded, Send (and Regenerate) in a chat now loads the model of the chat's last answer (`RunInfo.path`, else the model the chat was started with) and sends once it loads, as after picking it. The picker only comes when there is no such model (new chat, file no longer in the model list). `ui/chat/ChatScreen.kt` (`loadChatModelOrAsk`).
 - **Language files get new texts on their own.** When a language is loaded, every text of `english.json` its file lacks is appended (existing entries untouched): with the translation from the bundled seed `assets/language/seed/<lang>.json` if there is one, else in English, so the file shows what is left to translate. `core/I18n.kt` (`addMissing`). German seed with the texts of 7.49–7.51 (web question, tools menu).
 - **Tools menu in the chat: wider, with a short line per tool** saying what it does (Files: read, write and edit files in the workspace; Code; Utilities; Help; Wiki; Ask user; Termux; External; Native UI). Labels now go through `t()`. `ui/chat/ChatInputBar.kt` (`ToolToggleRow(hint)`).
 - **An own answer to the web question is used as the search result.** The model got it as an answer to "may I search?" ("act on that answer; if it allows the web, call the tool again") and often ignored it. Now, in "always" and "auto" mode alike, the web call's result says the user answered it directly instead of the web, that this first-hand information takes precedence and that it must not search for it again.
