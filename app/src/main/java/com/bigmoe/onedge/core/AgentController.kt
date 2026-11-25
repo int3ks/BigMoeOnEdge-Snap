@@ -112,8 +112,8 @@ class AgentController(
     private var stopRequested = false
 
     /**
-     * Chat in which the user already allowed the web (ask_user on): no further permission question there until the
-     * user leaves the chat ([resetWebPermission]). A "no" or an own answer counts only for its message.
+     * Chat in which the user chose "Yes, always in this chat" (ask_user on): no further permission question there until
+     * the user leaves the chat ([resetWebPermission]). A plain yes, a no or an own answer count only for their message.
      */
     @Volatile private var webAllowedSessionId: String? = null
 
@@ -178,28 +178,25 @@ class AgentController(
         val askBeforeWeb = "ask_user" in enabledNames
         var askedThisTurn = false
         var webDenied = false
-        /**
-         * null = the web may be used; [WEB_NO] = the user said no (or dismissed); else the user's own answer.
-         * [args] null = asked before the search query exists (always-search mode): a question about the message.
-         */
-        suspend fun askForWeb(name: String, args: String?): String? {
+        /** null = the web may be used; [WEB_NO] = the user said no (or dismissed); else the user's own answer. */
+        suspend fun askForWeb(name: String, args: String): String? {
             if (!askBeforeWeb) return null
             if (webDenied) return WEB_NO
             if (webAllowedSessionId == request.sessionId) return null
             if (askedThisTurn) return null
             val handler = toolManager.questionHandler ?: return null
             askedThisTurn = true
-            val o = args?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+            val o = runCatching { org.json.JSONObject(args) }.getOrNull()
             val target = (o?.optString("query")?.ifBlank { null } ?: o?.optString("url").orEmpty()).take(200)
-            val question = when {
-                args == null -> t("May I search the web for this message?")
-                name == "web_search" || name == "image_search" -> t("May I search the web for \"{0}\"?", target)
-                else -> t("May I open this web page? {0}", target)
-            }
+            // The exact query / page is shown, so the user can answer it directly instead of the web.
+            val question = if (name == "web_search" || name == "image_search") t("May I search the web for \"{0}\"?", target)
+            else t("May I open this web page? {0}", target)
             val yes = t("Yes, use the web")
+            val always = t("Yes, always in this chat")
             val no = t("No, answer without the web")
-            return when (val answer = handler.ask(com.bigmoe.onedge.tools.UserQuestion(question, listOf(yes, no)))) {
-                yes -> { webAllowedSessionId = request.sessionId; null }
+            return when (val answer = handler.ask(com.bigmoe.onedge.tools.UserQuestion(question, listOf(yes, always, no)))) {
+                yes -> null
+                always -> { webAllowedSessionId = request.sessionId; null }
                 null, no -> { webDenied = true; WEB_NO }
                 else -> answer
             }
@@ -224,24 +221,21 @@ class AgentController(
             // Ask the loaded model to formulate a search query instead of sending the user's raw message
             // directly to the search provider. This is a separate, hidden short generation; the main answer
             // generation replays the real conversation and the search results as usual.
-            // Ask first (before the hidden query generation, which costs a prefill): a "no" then costs nothing, and
-            // Stop during the question ends the run at once.
-            val webAnswer = askForWeb("web_search", null)
-            var query = ""
-            if (webAnswer == null && !stopRequested) {
-                emit(AgentEvent.ToolWriting(t("Writing the search query…")))
-                val generatedQuery = generateSearchQuery(request, turns)
-                query = searchQueryFrom(generatedQuery).ifBlank { searchQueryFrom(request.prompt) }
-            }
+            // The query is written first (from the last exchange only, so it is quick), then the user sees it in the
+            // permission question and can answer it directly instead of the web. Stop in either step ends the run.
+            emit(AgentEvent.ToolWriting(t("Writing the search query…")))
+            val generatedQuery = generateSearchQuery(request, turns)
+            val query = searchQueryFrom(generatedQuery).ifBlank { searchQueryFrom(request.prompt) }
             val args = org.json.JSONObject().put("query", query).toString()
+            val webAnswer = if (stopRequested) WEB_NO else askForWeb("web_search", args)
             if (stopRequested) {
                 // Stop pressed while asking or while writing the query: no search, no answer.
             } else if (webAnswer != null) {
                 // Not allowed: no search; the model learns why and what the user said instead.
                 val note = if (webAnswer == WEB_NO) "The user was asked and does not want a web search for this message: " +
                     "answer from your own knowledge, without web results."
-                else "Before a web search the user was asked whether the web may be used for this message and answered: " +
-                    "\"$webAnswer\". No search was run; act on that answer."
+                else "Before the web search the user was asked whether to search for \"$query\" and answered: \"$webAnswer\". " +
+                    "No search was run; act on that answer."
                 val wrapped = ToolProtocol.wrapResult("ask_user", note)
                 val id = sink.save(NewMessage(MessageRole.TOOL, wrapped))
                 emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
