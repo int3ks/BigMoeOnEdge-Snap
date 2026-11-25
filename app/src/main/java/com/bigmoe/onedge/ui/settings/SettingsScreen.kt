@@ -855,6 +855,12 @@ private fun SettingsContent(
                 selected = settings.webSearchMode
             ) { viewModel.updateWebSearchMode(it) }
             Hint("Web search itself is switched on and off with the globe button in the chat.")
+            ChoiceSetting(
+                "Results per search",
+                listOf(1 to "1", 3 to "3", 5 to "5", 10 to "10"),
+                selected = settings.webSearchResults
+            ) { viewModel.updateWebSearchResults(it) }
+            Hint("Fewer results save context tokens (about 60–120 per result); more give the model more to choose from.")
             SwitchRow(
                 "Allow image search",
                 "Lets the model use image_search while web search is enabled. Turn off to keep image-search calls out of the model's available tools.",

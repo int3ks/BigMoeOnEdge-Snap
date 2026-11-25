@@ -155,6 +155,7 @@ class AgentController(
         (toolManager.getTool("web_search") as? WebSearchTool)?.let {
             it.braveApiKey = settings.braveApiKey
             it.searxngInstanceUrl = settings.searxngUrl
+            it.maxResults = settings.webSearchResults
         }
         // Image search shares the configured search credentials/instance and otherwise uses its keyless backend.
         (toolManager.getTool("image_search") as? ImageSearchTool)?.let {

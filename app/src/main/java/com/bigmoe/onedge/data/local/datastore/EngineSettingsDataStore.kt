@@ -204,6 +204,8 @@ data class EngineSettings(
     val defaultSystemPromptId: String = "",
     val isWebSearchEnabled: Boolean = false,
     val webSearchMode: WebSearchMode = WebSearchMode.ALWAYS,
+    /** Results per web search given to the model (1, 3, 5 or 10). */
+    val webSearchResults: Int = 3,
     /** Allow compact, structured native UI blocks when explicitly requested; off keeps ordinary replies lean. */
     val interactiveUiEnabled: Boolean = false,
     /** Permit image_search alongside web search. */
@@ -431,6 +433,7 @@ class EngineSettingsDataStore(private val context: Context) {
         val LOG_TO_FILE = booleanPreferencesKey("log_to_file")
         val WEB_SEARCH = booleanPreferencesKey("is_web_search_enabled")
         val WEB_SEARCH_MODE = stringPreferencesKey("web_search_mode")
+        val WEB_SEARCH_RESULTS = intPreferencesKey("web_search_results")
         val INTERACTIVE_UI = booleanPreferencesKey("interactive_ui_enabled")
         val IMAGE_SEARCH_ENABLED = booleanPreferencesKey("image_search_enabled")
         val AUTO_IMAGE_SEARCH = booleanPreferencesKey("auto_image_search_after_web_search")
@@ -540,6 +543,7 @@ class EngineSettingsDataStore(private val context: Context) {
             defaultSystemPromptId = p[Keys.DEFAULT_SYSTEM_PROMPT_ID] ?: "",
             isWebSearchEnabled = p[Keys.WEB_SEARCH] ?: d.isWebSearchEnabled,
             webSearchMode = enumOrDefault(p[Keys.WEB_SEARCH_MODE], d.webSearchMode),
+            webSearchResults = p[Keys.WEB_SEARCH_RESULTS] ?: d.webSearchResults,
             interactiveUiEnabled = p[Keys.INTERACTIVE_UI] ?: d.interactiveUiEnabled,
             imageSearchEnabled = p[Keys.IMAGE_SEARCH_ENABLED] ?: d.imageSearchEnabled,
             autoImageSearchAfterWebSearch = p[Keys.AUTO_IMAGE_SEARCH] ?: d.autoImageSearchAfterWebSearch,
@@ -734,6 +738,7 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateLogToFile(v: Boolean) = set(Keys.LOG_TO_FILE, v)
     suspend fun updateWebSearchEnabled(v: Boolean) = set(Keys.WEB_SEARCH, v)
     suspend fun updateWebSearchMode(v: WebSearchMode) = set(Keys.WEB_SEARCH_MODE, v.name)
+    suspend fun updateWebSearchResults(v: Int) = set(Keys.WEB_SEARCH_RESULTS, v)
     suspend fun updateInteractiveUiEnabled(v: Boolean) = set(Keys.INTERACTIVE_UI, v)
     suspend fun updateImageSearchEnabled(v: Boolean) = set(Keys.IMAGE_SEARCH_ENABLED, v)
     suspend fun updateAutoImageSearchAfterWebSearch(v: Boolean) = set(Keys.AUTO_IMAGE_SEARCH, v)

@@ -14,6 +14,8 @@ import java.net.URLEncoder
 class WebSearchTool(
     var braveApiKey: String? = null,
     var searxngInstanceUrl: String? = null,
+    /** Results handed to the model per search (Settings → Web search; 1, 3, 5 or 10). */
+    @Volatile var maxResults: Int = DEFAULT_MAX_RESULTS,
     // Overridable so tests can point the tool at a local fake server.
     private val braveEndpoint: String = "https://api.search.brave.com/res/v1/web/search",
     private val timeoutMs: Int = 8000,
@@ -74,7 +76,7 @@ class WebSearchTool(
             val results = parseDuckDuckGoHtml(
                 httpGet("$duckDuckGoEndpoint?q=${URLEncoder.encode(query, "UTF-8")}", accept = "text/html", timeout = minOf(timeoutMs, 6000))
             )
-            if (results.isNotEmpty()) return formatResults(results)
+            if (results.isNotEmpty()) return formatResults(results, n())
             problems.add("DuckDuckGo returned no results")
         } catch (e: Exception) {
             problems.add("DuckDuckGo failed: ${e.message}")
@@ -86,9 +88,9 @@ class WebSearchTool(
         try {
             val lang = if (query.any { it in '\u0600'..'\u06FF' }) "ar" else "en"
             val url = String.format(wikipediaEndpoint, lang) +
-                "?action=query&list=search&format=json&utf8=1&srlimit=5&srsearch=${URLEncoder.encode(query, "UTF-8")}"
+                "?action=query&list=search&format=json&utf8=1&srlimit=${n()}&srsearch=${URLEncoder.encode(query, "UTF-8")}"
             val results = parseWikipediaJson(httpGet(url, accept = "application/json", timeout = minOf(timeoutMs, leftMs)), lang)
-            if (results.isNotEmpty()) return formatResults(results)
+            if (results.isNotEmpty()) return formatResults(results, n())
             problems.add("Wikipedia returned no results")
         } catch (e: Exception) {
             problems.add("Wikipedia failed: ${e.message}")
@@ -116,7 +118,7 @@ class WebSearchTool(
     private fun executeBraveSearch(query: String, apiKey: String): String {
         return try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = URL("$braveEndpoint?q=$encodedQuery&count=5")
+            val url = URL("$braveEndpoint?q=$encodedQuery&count=${n()}")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
@@ -140,11 +142,11 @@ class WebSearchTool(
         val json = JSONObject(jsonText)
         val webResults = json.optJSONObject("web")?.optJSONArray("results") ?: return "No results found."
         val out = ArrayList<SearchResult>()
-        for (i in 0 until minOf(webResults.length(), 5)) {
+        for (i in 0 until minOf(webResults.length(), n())) {
             val item = webResults.getJSONObject(i)
             out.add(SearchResult(item.optString("title"), item.optString("description"), item.optString("url")))
         }
-        return formatResults(out)
+        return formatResults(out, n())
     }
 
     private fun executeSearxngSearch(query: String, baseUrl: String): String {
@@ -178,20 +180,25 @@ class WebSearchTool(
         val json = JSONObject(jsonText)
         val results = json.optJSONArray("results") ?: return "No results found."
         val out = ArrayList<SearchResult>()
-        for (i in 0 until minOf(results.length(), 5)) {
+        for (i in 0 until minOf(results.length(), n())) {
             val item = results.getJSONObject(i)
             out.add(SearchResult(item.optString("title"), item.optString("content"), item.optString("url")))
         }
-        return formatResults(out)
+        return formatResults(out, n())
     }
+
+    private fun n() = maxResults.coerceIn(1, MAX_RESULTS_LIMIT)
 
     data class SearchResult(val title: String, val snippet: String, val url: String)
 
     companion object {
-        fun formatResults(results: List<SearchResult>): String {
+        const val DEFAULT_MAX_RESULTS = 3
+        const val MAX_RESULTS_LIMIT = 10
+
+        fun formatResults(results: List<SearchResult>, max: Int = MAX_RESULTS_LIMIT): String {
             if (results.isEmpty()) return "No results found."
             val b = StringBuilder()
-            results.take(5).forEachIndexed { i, r ->
+            results.take(max).forEachIndexed { i, r ->
                 b.append("[${i + 1}] ${r.title}\n${r.snippet}\nURL: ${r.url}\n\n")
             }
             return b.toString().trim()
@@ -244,8 +251,8 @@ class WebSearchTool(
                 if (bodyEnd < 0) break
                 val body = stripHtml(html.substring(bodyStart, bodyEnd))
                 if (tag.contains("result__a")) {
-                    // A sixth title ends the scan. (Breaking right after the fifth one dropped the fifth result's snippet.)
-                    if (out.size >= 5) break
+                    // One title past the limit ends the scan. (Breaking right after the last one dropped its snippet.)
+                    if (out.size >= MAX_RESULTS_LIMIT) break
                     val href = HREF.find(tag)?.groupValues?.get(1) ?: continue
                     val url = unwrapDuckDuckGoUrl(href)
                     if (body.isNotEmpty() && url.startsWith("http")) out.add(SearchResult(body, "", url))
@@ -259,7 +266,7 @@ class WebSearchTool(
         fun parseWikipediaJson(jsonText: String, lang: String): List<SearchResult> {
             val arr = JSONObject(jsonText).optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
             val out = ArrayList<SearchResult>()
-            for (i in 0 until minOf(arr.length(), 5)) {
+            for (i in 0 until minOf(arr.length(), MAX_RESULTS_LIMIT)) {
                 val item = arr.getJSONObject(i)
                 out.add(
                     SearchResult(

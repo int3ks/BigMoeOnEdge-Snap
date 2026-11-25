@@ -89,6 +89,7 @@ class SettingsViewModel(
     fun updateThinkingEnabled(v: Boolean) = launch { dataStore.updateThinkingEnabled(v) }
     fun updateWebSearchEnabled(v: Boolean) = launch { dataStore.updateWebSearchEnabled(v) }
     fun updateWebSearchMode(v: WebSearchMode) = launch { dataStore.updateWebSearchMode(v) }
+    fun updateWebSearchResults(v: Int) = launch { dataStore.updateWebSearchResults(v) }
     fun updateInteractiveUiEnabled(v: Boolean) = launch { dataStore.updateInteractiveUiEnabled(v) }
     fun updateImageSearchEnabled(v: Boolean) = launch { dataStore.updateImageSearchEnabled(v) }
     fun updateAutoImageSearchAfterWebSearch(v: Boolean) = launch { dataStore.updateAutoImageSearchAfterWebSearch(v) }
