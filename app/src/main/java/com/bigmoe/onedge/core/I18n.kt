@@ -104,9 +104,37 @@ object I18n {
             val sys = Locale.getDefault().language
             if (sys == "en") null else langs.firstOrNull { it.lang.equals(sys, ignoreCase = true) }
         } else langs.firstOrNull { it.file.name == c }
+        pick?.let { addMissing(context, it) }
         strings.value = pick?.let { load(it.file) } ?: emptyMap()
         activeFile = pick?.file
         translateMode.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("translate_mode", false)
+    }
+
+    /**
+     * New app texts reach an existing language file: every key of english.json the file lacks is appended, with the
+     * value from the bundled seed for its language (assets/language/seed/<lang>.json) or else the English text, so the
+     * file shows what is left to translate. Existing entries are never touched; nothing missing = no write.
+     */
+    private fun addMissing(context: Context, lang: Language) {
+        runCatching {
+            val en = JSONObject(context.assets.open("language/english.json").bufferedReader().use { it.readText() })
+                .optJSONObject("strings") ?: return
+            val seed = lang.lang.takeIf { it.isNotBlank() }?.let { code ->
+                runCatching {
+                    JSONObject(context.assets.open("language/seed/${code.lowercase()}.json").bufferedReader().use { it.readText() })
+                        .optJSONObject("strings")
+                }.getOrNull()
+            }
+            val o = JSONObject(lang.file.readText())
+            val st = o.optJSONObject("strings") ?: JSONObject().also { o.put("strings", it) }
+            var added = 0
+            for (k in en.keys()) {
+                if (st.has(k)) continue
+                st.put(k, seed?.optString(k)?.takeIf { it.isNotBlank() } ?: en.optString(k, k))
+                added++
+            }
+            if (added > 0) lang.file.writeText(o.toString(2))
+        }
     }
 
     private fun load(f: File): Map<String, String> = runCatching {

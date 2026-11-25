@@ -1,0 +1,19 @@
+{
+  "lang": "de",
+  "strings": {
+    "Answers about this app from its help": "Antworten zur App aus ihrer Hilfe",
+    "Answers with cards, tables and charts": "Antworten mit Karten, Tabellen und Diagrammen",
+    "Date and time, calculator, units, random, device info": "Datum und Uhrzeit, Rechner, Einheiten, Zufall, Geräteinfo",
+    "External": "Extern",
+    "Native UI": "Native UI",
+    "Read, write and edit files in the workspace": "Dateien im Arbeitsordner lesen, schreiben und bearbeiten",
+    "Run shell commands in Termux": "Shell-Befehle in Termux ausführen",
+    "Search and analyze code, run JavaScript": "Code durchsuchen und analysieren, JavaScript ausführen",
+    "Search your own notes in the wiki folder": "Eigene Notizen im Wiki-Ordner durchsuchen",
+    "The model may ask you questions": "Das Modell darf dir Fragen stellen",
+    "Tool access": "Tool-Zugriff",
+    "Writing the search query…": "Schreibe den Suchbegriff…",
+    "Yes, always in this chat": "Ja, in diesem Chat immer",
+    "Your HTTP tools and MCP servers": "Deine HTTP-Tools und MCP-Server"
+  }
+}
