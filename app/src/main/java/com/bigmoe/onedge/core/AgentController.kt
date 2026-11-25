@@ -234,8 +234,9 @@ class AgentController(
                 // Not allowed: no search; the model learns why and what the user said instead.
                 val note = if (webAnswer == WEB_NO) "The user was asked and does not want a web search for this message: " +
                     "answer from your own knowledge, without web results."
-                else "Before the web search the user was asked whether to search for \"$query\" and answered: \"$webAnswer\". " +
-                    "No search was run; act on that answer."
+                else "Web search for \"$query\": not run. The user answered this question directly instead of the web: " +
+                    "\"$webAnswer\". Use this as the result of the search; it is first-hand information from the user and " +
+                    "takes precedence. Do not search for it again."
                 val wrapped = ToolProtocol.wrapResult("ask_user", note)
                 val id = sink.save(NewMessage(MessageRole.TOOL, wrapped))
                 emit(AgentEvent.MessageSaved(id, MessageRole.TOOL))
@@ -468,8 +469,9 @@ class AgentController(
                     null -> null
                     WEB_NO -> "Not run: the user does not want the web used for this message. Answer without it, " +
                         "from your own knowledge, and do not call web tools again."
-                    else -> "Not run: before any web access the user is asked first, and answered: \"$answer\". Act on " +
-                        "that answer; if it allows the web, call the tool again."
+                    else -> "Not run. The user answered this directly instead of the web: \"$answer\". Use this as the " +
+                        "result; it is first-hand information from the user and takes precedence. Do not call web tools " +
+                        "for it again."
                 }
             }
             // Decided in call order before anything runs (the reads below may run side by side): repeats and calls
