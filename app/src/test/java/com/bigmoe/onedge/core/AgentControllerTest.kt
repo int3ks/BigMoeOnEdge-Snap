@@ -54,7 +54,7 @@ class AgentControllerTest {
 
     private suspend fun env(scope: TestScope, reply: String = "RESULT-TEXT"): Env {
         val e = Env(scope, reply)
-        e.engine.loadModel(File.createTempFile("m", ".gguf").apply { deleteOnExit() }.path, cfg)
+        e.engine.loadModel(File.createTempFile("model", ".gguf").apply { deleteOnExit() }.path, cfg)
         return e
     }
 

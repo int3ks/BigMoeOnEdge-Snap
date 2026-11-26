@@ -14,7 +14,7 @@ import org.json.JSONObject
  *
  *  { format, version, id, title, createdAt, changedAt, modelPath, modelNames[], messages[] }
  *
- * messages[]: id, role (USER/ASSISTANT/SYSTEM/TOOL/CONTEXT), content, timestamp and, when present, reasoning,
+ * messages[]: id, role (USER/ASSISTANT/SYSTEM/TOOL/CONTEXT/SUMMARY), content, timestamp and, when present, reasoning,
  * runInfo (object), variants (Regenerate's earlier answers, array/object) and the turn's telemetry.
  * [changedAt] decides a conflict: the newer copy wins. Readers must keep fields they do not know.
  */

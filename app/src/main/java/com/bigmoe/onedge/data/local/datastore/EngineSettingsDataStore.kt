@@ -176,6 +176,10 @@ data class EngineSettings(
     // interactive decode path lean unless the user explicitly enables Metrics CSV.
     /** KV snapshots on disk: a chat switch, a reload or an app restart continues without a new prefill. */
     val kvSnapshots: Boolean = true,
+    /** Fold the oldest messages into a summary when a chat nears the context size (see core/Compaction.kt). */
+    val autoCompactEnabled: Boolean = true,
+    /** Share of the context, in percent, at which that happens. */
+    val autoCompactThresholdPct: Int = com.bigmoe.onedge.core.Compaction.DEFAULT_THRESHOLD_PCT,
     /** Enable optional Hexagon/NPU prefill; off by default so CPU-only APKs remain normal. */
     val npuPrefill: Boolean = false,
     val npuLoaders: Int = 8,
@@ -415,6 +419,8 @@ class EngineSettingsDataStore(private val context: Context) {
         val MTP_P_MIN_PCT = intPreferencesKey("mtp_p_min_pct")
         val SEPARATE_MTP_DRAFT_ENABLED = booleanPreferencesKey("separate_mtp_draft_enabled")
         val KV_SNAPSHOTS = booleanPreferencesKey("kv_snapshots")
+        val AUTO_COMPACT = booleanPreferencesKey("auto_compact_enabled")
+        val AUTO_COMPACT_PCT = intPreferencesKey("auto_compact_threshold_pct")
         val NPU_PREFILL = booleanPreferencesKey("npu_prefill")
         val NPU_LOADERS = intPreferencesKey("npu_loaders")
         val NPU_MIN_TOKENS = intPreferencesKey("npu_min_tokens")
@@ -524,6 +530,10 @@ class EngineSettingsDataStore(private val context: Context) {
             mtpPMinPct = p[Keys.MTP_P_MIN_PCT] ?: d.mtpPMinPct,
             separateMtpDraftEnabled = p[Keys.SEPARATE_MTP_DRAFT_ENABLED] ?: d.separateMtpDraftEnabled,
             kvSnapshots = p[Keys.KV_SNAPSHOTS] ?: d.kvSnapshots,
+            autoCompactEnabled = p[Keys.AUTO_COMPACT] ?: d.autoCompactEnabled,
+            autoCompactThresholdPct = (p[Keys.AUTO_COMPACT_PCT] ?: d.autoCompactThresholdPct).coerceIn(
+                com.bigmoe.onedge.core.Compaction.MIN_THRESHOLD_PCT, com.bigmoe.onedge.core.Compaction.MAX_THRESHOLD_PCT
+            ),
             npuPrefill = p[Keys.NPU_PREFILL] ?: d.npuPrefill,
             npuLoaders = p[Keys.NPU_LOADERS] ?: d.npuLoaders,
             npuMinTokens = p[Keys.NPU_MIN_TOKENS] ?: d.npuMinTokens,
@@ -702,6 +712,11 @@ class EngineSettingsDataStore(private val context: Context) {
     suspend fun updateMtpPMinPct(v: Int) = set(Keys.MTP_P_MIN_PCT, v.coerceIn(0, 100))
     suspend fun updateSeparateMtpDraftEnabled(v: Boolean) = set(Keys.SEPARATE_MTP_DRAFT_ENABLED, v)
     suspend fun updateKvSnapshots(v: Boolean) = set(Keys.KV_SNAPSHOTS, v)
+    suspend fun updateAutoCompactEnabled(v: Boolean) = set(Keys.AUTO_COMPACT, v)
+    suspend fun updateAutoCompactThresholdPct(v: Int) = set(
+        Keys.AUTO_COMPACT_PCT,
+        v.coerceIn(com.bigmoe.onedge.core.Compaction.MIN_THRESHOLD_PCT, com.bigmoe.onedge.core.Compaction.MAX_THRESHOLD_PCT)
+    )
     suspend fun updateNpuPrefill(v: Boolean) = set(Keys.NPU_PREFILL, v)
     suspend fun updateNpuLoaders(v: Int) = set(Keys.NPU_LOADERS, v.coerceIn(1, 16))
     suspend fun updateNpuMinTokens(v: Int) = set(Keys.NPU_MIN_TOKENS, v.coerceIn(2, 2048))

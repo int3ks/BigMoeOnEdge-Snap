@@ -205,7 +205,7 @@ fun ChatScreen(
                 MessageRole.USER -> currentTurnSources = linkedSetOf()
                 MessageRole.TOOL -> currentTurnSources.addAll(extractWebSources(item.text).map { it.first })
                 MessageRole.ASSISTANT -> result[item.id] = currentTurnSources.toList()
-                MessageRole.SYSTEM, MessageRole.CONTEXT -> Unit
+                MessageRole.SYSTEM, MessageRole.CONTEXT, MessageRole.SUMMARY -> Unit
             }
         }
         result
@@ -386,7 +386,9 @@ fun ChatScreen(
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize().nestedScroll(stopFollowing)) {
                         items(items = displayItems, key = { it.key }) { item ->
                             val renderMessage: @Composable (ChatMessageUiModel) -> Unit = { message ->
-                            if (message.role == MessageRole.TOOL) {
+                            if (message.role == MessageRole.SUMMARY) {
+                                CompactionCard(summary = message.text)
+                            } else if (message.role == MessageRole.TOOL) {
                                 if (ImageSearchResultParser.parse(message.text) != null) {
                                     ImageSearchResultsCard(body = message.text)
                                 } else {

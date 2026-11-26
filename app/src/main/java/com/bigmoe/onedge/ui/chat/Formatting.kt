@@ -74,6 +74,7 @@ fun formatLiveStatus(t: LiveTiming, nowMs: Long): String {
         GenerationPhase.PROMPT -> parts.add("Reading prompt ${formatDuration(inPhase)}")
         GenerationPhase.THINKING -> parts.add("Thinking ${formatDuration(inPhase)}")
         GenerationPhase.ANSWERING -> parts.add("Answering")
+        GenerationPhase.COMPACTING -> parts.add("Summarizing earlier messages ${formatDuration(inPhase)}")
         GenerationPhase.TOOL -> parts.add("Using ${t.toolNames.take(3).joinToString(", ").ifBlank { "a tool" }} ${formatDuration(inPhase)}")
     }
     if (t.phase != GenerationPhase.THINKING && t.thinkingMs != null && t.thinkingMs > 0L) parts.add("Thought for ${formatDuration(t.thinkingMs)}")

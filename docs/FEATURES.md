@@ -6,6 +6,11 @@ Moved out of CLAUDE.md to save tokens. CHANGELOG.md "Snap fork" section has the 
   Termux RUN_COMMAND, wrapper with pid/rc files, history in `<workspace>/.bigmoe/history`, output tail 1000 chars,
   environment probe in the prompt, approval inline in the status row (atomic `GenerationManager.update`), Cancel ends
   one call (model gets an error and decides), Stop ends the run; invented `<tool_response>` is cut.
+* **Auto-compaction of long chats** (`core/Compaction.kt`, `AgentController.compactIfNeeded`/`summarize`,
+  `ui/chat/CompactionCard.kt`, docs/auto-compaction.md): ported from BigMoeOnEdge+ 0.7.0. Before every round, over
+  40–70 % of the context, the oldest stored messages are folded into a `MessageRole.SUMMARY` message; the summary goes
+  at the end of the system prompt. Our change: when the engine still holds the chat (`EngineController.holdsState`),
+  the summary request is appended to the running chat (KV reuse, no second prefill of the old part).
 * **Grammar-checked tool calls** (lazy GBNF, `core/src/engine/tool_grammar.cpp`), greedy after `<tool_call>`.
 * **ask_user** (`tools/AskUserTool.kt`, `ui/chat/AskUserCard.kt`): the model asks a question with 2–4 option buttons
   plus free text; `ToolManager.questionHandler` → `GenerationManager.pendingQuestion`, the run waits for

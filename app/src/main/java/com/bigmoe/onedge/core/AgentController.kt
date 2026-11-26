@@ -35,14 +35,22 @@ data class HistoryMessage(val id: String, val role: MessageRole, val content: St
 
 data class AgentRequest(
     val sessionId: String,
-    /** Messages BEFORE [prompt], oldest first. The prompt's own user message must not be in here. */
+    /**
+     * Messages BEFORE [prompt], oldest first, exactly as stored: the agent applies the newest compaction summary
+     * itself (see [Compaction.resolve]). The prompt's own user message must not be in here.
+     */
     val history: List<HistoryMessage>,
     val prompt: String,
     val settings: EngineSettings,
     /** Hidden text appended to the prompt: the attached files' contents (already saved as a CONTEXT message). */
     val contextText: String = "",
     /** Pictures (or video frames) for the first engine round of this turn. */
-    val images: List<ImageData> = emptyList()
+    val images: List<ImageData> = emptyList(),
+    /**
+     * Tokens the chat's context held at the end of its last turn (0 = unknown). Only used to decide whether to compact
+     * before the first round; it is a measured figure, where the text-length estimate overshoots by about a third.
+     */
+    val contextUsedHint: Int = 0
 )
 
 /** A message the agent wants persisted. */
@@ -93,6 +101,10 @@ sealed interface AgentEvent {
     data class Notice(val text: String) : AgentEvent
     /** The live buffers of the message that was just persisted can be cleared. */
     data class MessageSaved(val id: String, val role: MessageRole) : AgentEvent
+    /** Automatic compaction started: the model summarizes the oldest messages (hidden generation). */
+    data object Compacting : AgentEvent
+    /** Compaction ended. [messages] turns were folded into a summary of about [summaryTokens] tokens; 0 = nothing was done. */
+    data class Compacted(val messages: Int, val summaryTokens: Int) : AgentEvent
     data object Done : AgentEvent
 }
 
@@ -170,9 +182,11 @@ class AgentController(
         val toolGrammar = if (settings.toolCallGrammar && toolsEnabled) {
             com.bigmoe.onedge.parser.ToolGrammar.build(enabledNames, MAX_CALLS_PER_ROUND)
         } else ""
-        val system = buildSystemPrompt(
-            settings, toolsEnabled, toolManager.getToolsDescriptionPrompt(enabledNames), alwaysSearch
-        )
+        val toolPrompt = toolManager.getToolsDescriptionPrompt(enabledNames)
+        // Automatic compaction: an earlier summary replaces the messages it covers (they stay in the database).
+        val resolved = Compaction.resolve(request.history)
+        var summary = resolved.summary
+        var system = buildSystemPrompt(settings, toolsEnabled, toolPrompt, alwaysSearch, summary)
 
         // With ask_user on, the user is always asked at least once before the web is used for this message: if the
         // model has not asked anything yet, the app asks whether it may (the user can also write an own answer).
@@ -203,7 +217,15 @@ class AgentController(
             }
         }
 
-        val turns = historyToTurns(request.history).toMutableList()
+        val effective = resolved.history
+        val turns = historyToTurns(effective).toMutableList()
+        // Stored role and id of each turn that came from history, in step with the first turns of [turns]: what a
+        // compaction may fold, and the message its summary has to name. Turns added while this one runs have none.
+        val historyTurnMessages = effective.filter { it.role != MessageRole.SYSTEM }
+        val historyRoles = historyTurnMessages.mapTo(ArrayList<MessageRole>()) { it.role }
+        val historyIds = historyTurnMessages.mapTo(ArrayList<String>()) { it.id }
+        // The state key names the last stored message (a SUMMARY one included): the engine holds what was replayed
+        // or generated up to it. A summary saved in the last turn changes the system prompt, so a replay follows anyway.
         var lastEngineMsgId: String? = request.history.lastOrNull()?.id
         var prompt = request.prompt
         if (request.contextText.isNotBlank()) prompt += "\n\n" + request.contextText
@@ -217,6 +239,45 @@ class AgentController(
         var pageReads = 0
         var engineRound = 0
         var generatedTotal = 0
+        // Tokens the engine held after the previous round (0 = unknown); the chat's last figure until a round finishes.
+        var knownPast = request.contextUsedHint
+        var compactionFailed = false
+
+        /**
+         * Folds the oldest stored messages into a summary when the next round would pass the configured share of the
+         * context. One hidden generation by the loaded model; the summary is saved as a SUMMARY message. A failure
+         * (no usable answer) is not an error: this turn goes on and the old behaviour applies. True = compacted.
+         */
+        suspend fun compactIfNeeded(): Boolean {
+            if (!settings.autoCompactEnabled || compactionFailed || stopRequested) return false
+            val nCtx = engineController.loadedModel()?.nCtx ?: return false
+            val used = if (knownPast > 0) knownPast + ContextPlanner.estimateTokens(prompt) + 16
+            else Compaction.promptTokens(system, turns, prompt)
+            if (!Compaction.needed(used, nCtx, settings.autoCompactThresholdPct)) return false
+            val cut = Compaction.splitIndex(turns, historyRoles, nCtx)
+            if (!Compaction.worthFolding(turns, cut)) return false
+            emit(AgentEvent.Compacting)
+            val text = summarize(
+                turns = turns.toList(), cut = cut, previous = summary, system = system,
+                stateKey = ContextPlanner.stateKey(request.sessionId, lastEngineMsgId, system),
+                nCtx = nCtx, sessionId = request.sessionId, sampling = sampling
+            )
+            if (text == null) {
+                compactionFailed = true
+                emit(AgentEvent.Compacted(0, 0))
+                return false
+            }
+            val id = sink.save(NewMessage(MessageRole.SUMMARY, Compaction.encode(historyIds[cut - 1], text)))
+            emit(AgentEvent.MessageSaved(id, MessageRole.SUMMARY))
+            turns.subList(0, cut).clear()
+            historyRoles.subList(0, cut).clear()
+            historyIds.subList(0, cut).clear()
+            summary = text
+            system = buildSystemPrompt(settings, toolsEnabled, toolPrompt, alwaysSearch, summary)
+            knownPast = 0 // the engine will read the shortened conversation again; its old figure no longer applies
+            emit(AgentEvent.Compacted(cut, ContextPlanner.estimateTokens(text)))
+            return true
+        }
 
         if (alwaysSearch) {
             // Ask the loaded model to formulate a search query instead of sending the user's raw message
@@ -276,6 +337,22 @@ class AgentController(
         }
 
         while (true) {
+            // Every round, the first included (a search or tool result may just have grown the prompt).
+            val compacted = compactIfNeeded()
+            if (stopRequested) {
+                emit(AgentEvent.Notice(NOTE_STOPPED))
+                emit(AgentEvent.Done)
+                return@flow
+            }
+            // A long agent chain fills the context. Without a compaction, stop with a clear message before the engine
+            // would fail on this round (the tool result is saved, so "continue" after raising Context size works).
+            if (!compacted && engineRound > 0) {
+                contextFullNotice(knownPast, prompt, engineController.loadedModel()?.nCtx ?: 0)?.let { text ->
+                    emit(AgentEvent.Notice(text))
+                    emit(AgentEvent.Done)
+                    return@flow
+                }
+            }
             val expectedKey = ContextPlanner.stateKey(request.sessionId, lastEngineMsgId, system)
             val parser = StreamOutputParser()
             val callWatch = ToolCallWatcher()
@@ -366,6 +443,7 @@ class AgentController(
                     )
                 )
                 generatedTotal += fin.stats.nGenerated
+                if (fin.stats.nPast > 0) knownPast = fin.stats.nPast
                 emit(AgentEvent.GenerationProgress(generatedTotal, fin.stats.nPast.takeIf { it > 0 })) // 0 = unknown: never overwrite a good value
             }
             if (fin == null || !fin.ok) {
@@ -580,18 +658,64 @@ class AgentController(
                 emit(AgentEvent.Done)
                 return@flow
             }
-            // A long agent chain fills the context. Stop with a clear message before the engine would fail on the
-            // next round (the tool result is saved, so "continue" in a new chat or after raising Context size works).
-            contextFullNotice(fin.stats.nPast, prompt, engineController.loadedModel()?.nCtx ?: 0)?.let { text ->
-                emit(AgentEvent.Notice(text))
-                emit(AgentEvent.Done)
-                return@flow
-            }
-            // Loop: `prompt` (the tool response) is sent as the next user turn. lastEngineMsgId stays the
+            // Loop (compaction and the context-full check run at its top):`prompt` (the tool response) is sent as the next user turn. lastEngineMsgId stays the
             // assistant message, which is what the engine holds.
         }
     }
 
+    /**
+     * Asks the loaded model for a summary of the oldest turns (`turns[0 until cut]`), folding in [previous], the
+     * summary of even older messages. Null when it produced nothing usable, was stopped, or failed.
+     *
+     * When the engine still holds this chat ([stateKey], same system prompt), the request is appended to it: the
+     * engine reuses its KV cache and only reads the short request, so the cost is the summary's own tokens. Otherwise
+     * (another chat or a helper call ran in between, pictures in the context, a server model) the old turns are sent
+     * as their own short conversation with [Compaction.SUMMARIZER_SYSTEM], which is a full prefill of that part.
+     */
+    private suspend fun summarize(
+        turns: List<ChatTurn>,
+        cut: Int,
+        previous: String,
+        system: String,
+        stateKey: String,
+        nCtx: Int,
+        sessionId: String,
+        sampling: SamplingOverride?
+    ): String? {
+        val maxTokens = Compaction.summaryTokens(nCtx)
+        val maxWords = maxTokens * 3 / 5
+        val request = if (engineController.holdsState(stateKey)) {
+            GenerationRequest(
+                system = system,
+                history = turns,
+                prompt = Compaction.inContextPrompt(previous, maxWords, turns.getOrNull(cut)?.content),
+                expectedKey = stateKey,
+                maxTokens = maxTokens,
+                think = false,
+                sampling = sampling
+            )
+        } else {
+            GenerationRequest(
+                system = Compaction.SUMMARIZER_SYSTEM,
+                history = turns.subList(0, cut).map { it.copy(content = Compaction.clip(it.content)) },
+                prompt = Compaction.summaryPrompt(previous, maxWords),
+                expectedKey = "$sessionId:compact:${System.nanoTime()}",
+                maxTokens = maxTokens,
+                think = false,
+                sampling = sampling
+            )
+        }
+        var finished: EngineEvent.Finished? = null
+        return try {
+            engineController.generate(request).collect { event -> if (event is EngineEvent.Finished) finished = event }
+            val result = finished
+            if (result != null && result.ok && !result.cancelled) Compaction.cleanSummary(result.answer, nCtx) else null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /**
      * Uses the current model to turn the user's intent into a concise web-search query.
@@ -693,7 +817,9 @@ ${request.prompt}""".trim()
             settings: EngineSettings,
             toolsEnabled: Boolean,
             toolPrompt: String = "",
-            alwaysSearch: Boolean = false
+            alwaysSearch: Boolean = false,
+            /** Summary of the oldest messages after an automatic compaction; empty = none. Goes last. */
+            summary: String = ""
         ): String {
             val base = settings.systemPrompt.trim()
             val extras = buildList {
@@ -702,6 +828,7 @@ ${request.prompt}""".trim()
                     alwaysSearch -> add(ALWAYS_SEARCH_HINT)
                 }
                 if (settings.interactiveUiEnabled) add(INTERACTIVE_UI_HINT)
+                if (summary.isNotBlank()) add(Compaction.systemBlock(summary))
             }
             return (listOf(base).filter { it.isNotBlank() } + extras).joinToString("\n\n").trim()
         }
@@ -772,7 +899,7 @@ ${request.prompt}""".trim()
             when (it.role) {
                 MessageRole.USER, MessageRole.TOOL, MessageRole.CONTEXT -> ChatTurn(ChatTurn.USER, it.content)
                 MessageRole.ASSISTANT -> ChatTurn(ChatTurn.ASSISTANT, it.content)
-                MessageRole.SYSTEM -> null
+                MessageRole.SYSTEM, MessageRole.SUMMARY -> null
             }
         }
     }

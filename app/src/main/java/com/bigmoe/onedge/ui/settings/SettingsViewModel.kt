@@ -200,6 +200,8 @@ class SettingsViewModel(
     fun updateMtpPMinPct(v: Int) = launch { dataStore.updateMtpPMinPct(v) }
     fun updateSeparateMtpDraftEnabled(v: Boolean) = launch { dataStore.updateSeparateMtpDraftEnabled(v) }
     fun updateKvSnapshots(v: Boolean) = launch { dataStore.updateKvSnapshots(v) }
+    fun updateAutoCompactEnabled(v: Boolean) = launch { dataStore.updateAutoCompactEnabled(v) }
+    fun updateAutoCompactThresholdPct(v: Int) = launch { dataStore.updateAutoCompactThresholdPct(v) }
     fun updateNpuPrefill(v: Boolean) = launch { dataStore.updateNpuPrefill(v) }
     fun updateNpuLoaders(v: Int) = launch { dataStore.updateNpuLoaders(v) }
     fun updateNpuMinTokens(v: Int) = launch { dataStore.updateNpuMinTokens(v) }

@@ -33,6 +33,9 @@ server) and the BigMoeOnEdge streaming engine, which reads the experts of a Mixt
 generation, so models larger than the phone's RAM become practical. On top of that it brings a newer llama.cpp, a
 reworked model page and the changes listed below.
 
+Without hamodexd217's BigMoeOnEdge+ and Helldez's BigMoeOnEdge engine this project would not exist – see
+[Credits](#credits).
+
 It installs **next to** BigMoeOnEdge+: its own application id (`com.bigmoe.onedge.snap`), its own name and a blue icon.
 
 > **Disclosure:** like BigMoeOnEdge+, this fork was developed with heavy help from AI tools.
@@ -476,12 +479,18 @@ Full details, every curl command, and what was and was not verified: [`docs/API_
 
 ## Credits
 
-Many thanks to the two projects this fork stands on:
+**BigMoeOnEdge² would not exist without these two projects and their authors. Thank you!**
 
-* **[BigMoeOnEdge](https://github.com/Helldez/BigMoeOnEdge)** by Helldez: the streaming MoE engine, the expert-ready
-  hook fork of llama.cpp, NPU prefill and MTP. BigMoeOnEdge² follows its llama.cpp revision.
-* **[BigMoeOnEdge+](https://github.com/hamodexd217/BigMoeOnEdge-plus)** by hamodexd217: the complete Android chat app
-  this fork is built from.
+* **[BigMoeOnEdge+](https://github.com/hamodexd217/BigMoeOnEdge-plus)** by **hamodexd217**: the complete Android chat
+  app this fork is built from – conversations, tools, web search, attachments, artifacts, workspace, API server and
+  the engine integration. Everything in this fork started from that work. A special thank-you for the kind words in
+  the BigMoeOnEdge+ 0.7.0 release and for pointing its users here.
+* **[BigMoeOnEdge](https://github.com/Helldez/BigMoeOnEdge)** by **Helldez**: the engine that makes all of this
+  possible – streaming the experts of a Mixture-of-Experts model from flash, so models far larger than the device's
+  RAM run on a tablet – plus the expert-ready-hook fork of llama.cpp, NPU prefill and MTP. BigMoeOnEdge² follows its
+  llama.cpp revision.
+
+If you like this app, please also give both projects a star.
 
 Also built on [llama.cpp](https://github.com/ggml-org/llama.cpp), Jetpack Compose, Room, DataStore and the Android
 ecosystem. The native engine and vendored components keep their own licenses and notices.

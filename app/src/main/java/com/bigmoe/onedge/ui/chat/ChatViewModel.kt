@@ -2,7 +2,9 @@ package com.bigmoe.onedge.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bigmoe.onedge.core.Compaction
 import com.bigmoe.onedge.core.ConversationEdit
+import com.bigmoe.onedge.core.t
 import com.bigmoe.onedge.core.AgentEvent
 import com.bigmoe.onedge.core.AgentRequest
 import com.bigmoe.onedge.core.DecisionRequest
@@ -547,7 +549,7 @@ class ChatViewModel(
                 // flag until that state is active so the composer cannot accidentally enable a second send.
                 val started = generationManager.start(
                     session,
-                    AgentRequest(sessionId, history, userText, settings, contextText, images),
+                    AgentRequest(sessionId, history, userText, settings, contextText, images, contextUsedHint = session.contextUsed),
                     sink
                 )
                 if (!started) sink.stop()
@@ -980,6 +982,8 @@ class ChatViewModel(
             is AgentEvent.ToolProgress -> _uiState.update { it.copy(liveStatus = ev.text.substringBefore('\n')) }
             is AgentEvent.ToolWriting -> _uiState.update { it.copy(liveStatus = ev.label) }
             is AgentEvent.ToolOutput -> Unit
+            AgentEvent.Compacting -> _uiState.update { it.copy(liveStatus = t("Summarizing earlier messages…")) }
+            is AgentEvent.Compacted -> _uiState.update { it.copy(liveStatus = null) }
             AgentEvent.GenerationStarted, is AgentEvent.GenerationProgress -> Unit
             is AgentEvent.ToolsFinished, is AgentEvent.RoundStats -> Unit // timings live in GenerationManager.State
             // The saved message is now in the list below; start a clean live bubble for the next round.
@@ -1116,7 +1120,7 @@ class ChatViewModel(
                 val sink = RunSink(session.id, settings, clean.length)
                 started = generationManager.start(
                     session,
-                    AgentRequest(session.id, plan.history, clean, settings, prepared.contextText, prepared.images),
+                    AgentRequest(session.id, plan.history, clean, settings, prepared.contextText, prepared.images, contextUsedHint = 0),
                     sink
                 )
                 if (!started) sink.stop()
@@ -1301,6 +1305,7 @@ class ChatViewModel(
             text = when (role) {
                 MessageRole.ASSISTANT -> MessageContent.displayText(content)
                 MessageRole.TOOL -> MessageContent.toolResultBody(content)
+                MessageRole.SUMMARY -> Compaction.displayText(content)
                 else -> content
             },
             reasoning = reasoning,

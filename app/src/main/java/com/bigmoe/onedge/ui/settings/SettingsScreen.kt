@@ -454,6 +454,18 @@ private fun SettingsContent(
                 "Saves a chat's context when you switch to another chat, reload or unload the model, or leave the app, and loads it back when you return: the conversation continues without prefilling it again. Stored in the app's own storage, oldest removed first above 6 GB. Tied to the model file, KV type, LoRA and draft setup.",
                 settings.kvSnapshots
             ) { viewModel.updateKvSnapshots(it) }
+            SwitchRow(
+                "Auto-compact long chats",
+                "When a chat nears the context size, the model summarizes its oldest messages and continues from the summary plus the newest messages, instead of silently forgetting the oldest ones. Your messages stay on screen; only what the model reads changes. The summary is written in the running chat, so the model does not read the old messages again: the cost is about the summary's own tokens, plus reading the shortened chat once afterwards.",
+                settings.autoCompactEnabled
+            ) { viewModel.updateAutoCompactEnabled(it) }
+            ChoiceSetting(
+                "Compact at",
+                listOf(40, 50, 60, 70).map { it to "$it %" },
+                selected = settings.autoCompactThresholdPct,
+                enabled = settings.autoCompactEnabled
+            ) { viewModel.updateAutoCompactThresholdPct(it) }
+            Hint("Share of the context. Lower starts sooner and leaves more room for the reply; higher keeps more of the chat word for word. Contexts smaller than 1,536 tokens are never compacted. Applies to the next message, no reload needed.")
             } // CPU · NPU group
             Spacer(Modifier.height(10.dp))
 

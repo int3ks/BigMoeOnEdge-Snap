@@ -533,6 +533,9 @@ class EngineController(
         engineStateKey = key
     }
 
+    /** True when the engine holds exactly the state [key] names: a turn with that key continues without a replay. */
+    fun holdsState(key: String): Boolean = engineStateKey == key && !isRemoteLoaded()
+
     /** Forget what the engine holds; the next turn will reset and replay. */
     fun invalidateState() {
         engineStateKey = null
